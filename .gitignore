@@ -1,0 +1,9 @@
+.worktrees/
+build/
+build-*/
+*.coda
+*.wav
+*.key
+*.pub
+*.cose
+compile_commands.json

@@ -2,7 +2,7 @@
 
 ## Channel-Oriented Decomposition, Extraction, and Capture
 
-CODEC is a proposed C++20 engine and API that:
+CODEC is a C++20 engine, API, and staged implementation specification that:
 
 - aggregates multiple authorized internet audio feeds;
 - preserves captured source bytes and decoded audio in one self-contained lossless archive;
@@ -19,18 +19,77 @@ This README is the normative implementation specification. It defines guarantees
 
 ## Status
 
-| Item | Decision |
+| Item | Current repository state |
 |---|---|
-| Specification | Implementation-ready draft |
-| Implementation | Not yet built |
+| Specification | Normative staged product specification |
+| Implementation | v0.1.0 executable preservation and signed-watermark MVP |
 | Language | C++20 |
-| Build | CMake |
-| Initial platform | Linux |
-| Media layer | FFmpeg libraries behind private adapters |
-| Inference | ONNX Runtime |
-| Archive mode | Dual preservation by default |
-| Neural mode | Offline first; bounded live inference later |
-| Watermark mode | W0 signed statement + W1 sub-20 kHz + optional W2 above 24 kHz |
+| Build | CMake 3.20+; GCC and Clang CI |
+| Initial platform | Linux, with a portable public API |
+| Media layer | File/stdin/HTTP(S) S0 capture and PCM16 WAV; FFmpeg adapters are a later phase |
+| Inference | Backend interface shipped; no neural weights or ONNX runtime bundled yet |
+| Archive mode | Source-exact S0 development profile implemented; S1 FLAC and full self-contained profile planned |
+| Neural mode | Explicitly unavailable until a compatible ModelBundle is installed |
+| Watermark mode | Ed25519 COSE W0 + reference sub-20 kHz W1 + sample-rate-gated reference W2 |
+
+### v0.1.0 implemented product surface
+
+The repository now builds a library and `codec` executable. The implemented slice is intentionally honest about what it can prove:
+
+| Surface | v0.1.0 behavior |
+|---|---|
+| CODA | Append-only development profile with fixed header, ordered records, SHA-256 payload/chain evidence, commit trailers, final index, verification, exact S0 extraction, and non-mutating repair |
+| Capture | Bounded file, stdin, HTTP, and HTTPS entity-body capture; sanitized descriptors; local descriptors are secured before archive creation; resolved addresses must be globally routable; implicit proxies and redirects are refused under the default private-network policy |
+| Audio | Sample-exact integer PCM16 RIFF/WAVE read and write |
+| W0 | Canonical-CBOR COSE_Sign1 statements signed and verified with Ed25519; validity windows and key identifiers enforced |
+| W1 | Low-amplitude reference binary-FSK carrier below 20 kHz with CRC, preamble, repeated frames, and Goertzel correlation detection |
+| W2 | Reference carrier above 24 kHz; automatically rejected below 96 kHz or without the configured Nyquist guard |
+| Identity event | JSON Lines candidates; three matching hops plus a valid W0 produce `signature_bound_candidate`, never authoritative `verified_feed` in the stateless reference detector |
+| APIs | C++20 archive/engine/audio/watermark interfaces and a size/version-checked C ABI |
+| Neural separation | Stable backend boundary that returns `model_incompatible`; no fabricated stems or identity claims |
+
+The W1 carrier is a measurable reference implementation, not a claim of perceptual transparency. W2 passing the digital sample-rate gate is not hardware path qualification. Replay-safe authoritative `verified_feed` requires the later stateful fusion layer. The later delivery phases remain normative requirements for the full engine.
+
+### Quick start
+
+Install CMake, a C++20 compiler, OpenSSL 3 development files, and libcurl development files, then build and test:
+
+~~~bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure
+./build/codec capabilities
+~~~
+
+Output paths must be new. v0.1.0 uses exclusive, no-follow creation and refuses to replace any existing file, symlink, hard-link name, archive, input, or key. Local capture files are opened without following symlinks and their descriptors are retained before the archive is created, closing pathname races and self-capture aliases. With the default private-network policy, HTTP(S) capture also disables environment proxies, rejects non-globally-routable resolved addresses, and refuses redirects.
+
+Capture any authorized local file or HTTP(S) response body into one source-exact archive, verify it, and recover the feed bytes:
+
+~~~bash
+./build/codec record --archive session.coda \
+  --feed news=https://example.net/authorized-feed \
+  --feed backup=/srv/audio/backup-stream.bin
+./build/codec verify session.coda --level full
+./build/codec list feeds session.coda
+./build/codec extract session.coda --feed news --fidelity source-exact \
+  --output news-source.bin
+~~~
+
+Issue and detect a signed W1 derivative while leaving the input WAV unchanged:
+
+~~~bash
+issued_at=$(date +%s)
+expires_at=$((issued_at + 3600))
+./build/codec watermark keygen --private issuer.key --public issuer.pub
+./build/codec watermark issue input.wav --output marked.wav \
+  --statement feed.cose --private-key issuer.key \
+  --feed-uuid 7c2b2f74-7e31-4a1d-b469-d88d63fc8fcb \
+  --code 0x4a31 --issuer station-7 --key-id station-7-2026 \
+  --issued-at "$issued_at" --not-before "$issued_at" \
+  --expires-at "$expires_at" --w1
+./build/codec watermark detect marked.wav --statement feed.cose \
+  --public-key issuer.pub --format jsonl
+~~~
 
 ## Capability boundary
 
@@ -724,6 +783,8 @@ Use FFmpeg public libraries, not parsed CLI subprocess output. See [libavformat]
 
 ## C++ API
 
+The installed v0.1.0 interface is the set of headers under `include/codec`; `examples/capture.cpp` is a compiled minimal example. The richer session, enrollment, query, async-analysis, and derived-stem examples in this section define the target API for the later delivery phases.
+
 ### Core types
 
 The codec namespace exposes nanosecond time, strongly typed 128-bit StreamId/TrackId/IdentityId values, FidelityClass, ArchiveMode, InferenceMode, WatermarkState, calibrated Confidence, and an owned C++20-compatible Result<T> value-or-error type.
@@ -866,9 +927,13 @@ Categories: invalid_argument, unauthorized_source, network, protocol, decode, ar
 
 ## C ABI
 
-The narrow C ABI exposes opaque engine/archive/session handles and versioned create, open, query_identity, query_watermark, set_feed_identity_callback, extract, cancel, and destroy functions. Callbacks receive immutable codec_feed_identity_event_t values plus user data. Every struct carries size and ABI version; every function returns an integer status and optional codec_error_t; exceptions never cross the boundary.
+The v0.1.0 C ABI exposes opaque engine and archive handles plus versioned create, record_file, open, verify, extract_feed, and destroy functions. Every struct carries size and ABI version; every function returns an integer status and optional codec_error_t; exceptions never cross the boundary.
+
+The full target ABI additionally includes opaque session handles, query_identity, query_watermark, feed-identity callbacks, cancellation, and asynchronous extraction.
 
 ## CLI usage
+
+The quick-start commands and `codec --help` are implemented in v0.1.0. The broader examples below define the target CLI contract for later delivery phases; commands involving gateway publication, FFmpeg/HLS decoding, S1 FLAC, analysis, ModelBundles, enrollment, neural queries, anonymous tracks, or benchmarks are not reported as runtime capabilities yet.
 
 ### Build
 
@@ -881,7 +946,7 @@ ctest --test-dir build --output-on-failure
 ### Record
 
 ~~~bash
-codec record --archive session.coda --mode dual --self-contained --feed news=https://example.net/live/news.m3u8 --feed radio=https://radio.example.org/stream --model-bundle models/default --inference bounded-live --detect-watermarks --live-identity-report identity.jsonl
+codec record --archive session.coda --feed news=https://example.net/live/audio --feed radio=https://radio.example.org/stream
 ~~~
 
 ### Issue a signed watermarked derivative
@@ -1354,4 +1419,4 @@ Each closes through benchmark, threat review, or compatibility test.
 
 ## License
 
-No software license has been granted. Add LICENSE before accepting contributions or distributing an implementation. Model, dataset, codec, and provider licenses remain independently binding and are stored in each ModelBundle.
+The software is licensed under the [Apache License 2.0](LICENSE). Model, dataset, codec, and provider licenses remain independently binding and are stored in each ModelBundle.

@@ -1,0 +1,14 @@
+# Changelog
+
+All notable changes use semantic versioning.
+
+## 0.1.0 — 2026-08-17
+
+- Add a distinctly versioned provisional CODA development profile with an append-only archive, SHA-256 record chain, committed-record trailers, exact S0 extraction, verification, and non-mutating repair. It is not the frozen normative CODA v1 schema.
+- Add bounded file, stdin, HTTP, and HTTPS capture through the C++ engine, with pre-opened no-follow local descriptors and proxy-free globally-routable HTTP enforcement under the default private-network policy.
+- Add integer PCM16 WAV support and reference W1/W2 binary-FSK embedding and Goertzel detection.
+- Add canonical-CBOR W0 feed statements in COSE_Sign1 with Ed25519 signing and verification, including canonical UTF-8 validation before signing.
+- Add a deterministic internal SHA-256 implementation so integrity digests cannot silently degrade when a crypto provider is unavailable.
+- Add live-style JSON Lines candidates; three matching hops plus a current valid W0 produce a non-authoritative `signature_bound_candidate`. Replay-safe `verified_feed` remains gated on stateful fusion.
+- Add C++20, versioned C, and CLI interfaces; examples; CMake install packages; tests; and CI.
+- Add an explicit unavailable neural separation backend instead of claiming inference without compatible model weights.

@@ -8,6 +8,7 @@ CODEC is a proposed C++20 engine and API that:
 - preserves captured source bytes and decoded audio in one self-contained lossless archive;
 - separates mixed audio into the greatest defensible number of source tracks;
 - tracks anonymous sources over time;
+- detects signed dual-band feed watermarks and reports verified feed identity live;
 - matches tracks to enrolled identities with calibrated confidence;
 - extracts an identity, source, time range, or neural stem on request; and
 - evaluates CPU, GPU, latency, fidelity, energy, and neural-quality trade-offs.
@@ -29,6 +30,7 @@ This README is the normative implementation specification. It defines guarantees
 | Inference | ONNX Runtime |
 | Archive mode | Dual preservation by default |
 | Neural mode | Offline first; bounded live inference later |
+| Watermark mode | W0 signed statement + W1 sub-20 kHz + optional W2 above 24 kHz |
 
 ## Capability boundary
 
@@ -43,6 +45,9 @@ CODEC must not turn probabilistic inference into a false identity guarantee.
 | Source separation | Probabilistic | Estimated stems include residual, quality scores, and model provenance |
 | Anonymous continuity | Probabilistic | Stable clusters depend on acoustic and temporal evidence |
 | Named identity | Probabilistic and enrollment-dependent | A name requires an authorized identity profile |
+| Signed feed-watermark statement | Cryptographically verifiable | A decoded code resolves to a valid signed feed statement or it does not |
+| Acoustic watermark survival | Probabilistic | Survival depends on codec, filtering, mixing, gain, noise, resampling, and hardware |
+| Live watermark detection | Probabilistic until signature validation | Neural or correlation peaks are candidates until a signed statement validates |
 | Wideband identity evidence | Experimental | Usable only when the capture actually contains validated bands |
 | Recovery of absent information | Impossible | Lossy encoding, filtering, gaps, and missing bands cannot be reversed exactly |
 
@@ -67,6 +72,9 @@ Calling a CODA archive lossless means S0 and/or S1 records are preserved without
 5. Preserve capture under overload even if inference must defer or stop.
 6. Keep GPU inference optional and benchmark it against an equivalent CPU path.
 7. Provide stable C++20, C ABI, and CLI surfaces.
+8. Detect signed feed watermarks live and emit low-latency identity events with provenance.
+9. Preserve original audio separately from any watermark inserted by CODEC.
+10. Use watermark identity to condition separation without calling a neural stem lossless.
 
 ## Non-goals
 
@@ -78,6 +86,9 @@ Calling a CODA archive lossless means S0 and/or S1 records are preserved without
 - Kernel-space codecs, neural models, identity logic, or DSP graphs.
 - Requiring GPU peer DMA for the first implementation.
 - Mutating neural weights during live capture by default.
+- Claiming an acoustic watermark survives every transform or is permanent outside CODA.
+- Calling a sub-20 kHz carrier outside human hearing; it remains in the nominal audible band even when masked.
+- Emitting audible spikes, unsafe ultrasonic energy, or covert active beacons.
 
 ## Architecture
 
@@ -85,16 +96,20 @@ Calling a CODA archive lossless means S0 and/or S1 records are preserved without
 flowchart TD
     A["Authorized feeds"] --> B["Ingest adapters"]
     B --> C["Exact source capture"]
-    B --> D["Decode and timeline"]
-    C --> E["CODA append writer"]
-    D --> E
-    D --> F["Bounded analysis queue"]
-    F --> G["Separation and diarization"]
-    G --> H["Tracking and identity"]
-    G --> E
-    H --> E
-    E --> I["Self-contained .coda"]
-    I --> J["Query and extraction API"]
+    B --> D["Signed byte watermark"]
+    B --> E["Decode and timeline"]
+    D --> F["Watermark fusion"]
+    E --> G["Audio watermark detector"]
+    G --> F
+    E --> H["Analysis queue"]
+    F --> I["Live feed identity"]
+    H --> J["Conditioned separation"]
+    I --> J
+    C --> K["CODA append writer"]
+    I --> K
+    J --> K
+    K --> L["Self-contained .coda"]
+    L --> M["Query and extraction API"]
 ~~~
 
 The engine has two planes:
@@ -120,6 +135,21 @@ Preservation has priority. Inference MUST NOT block or corrupt capture.
 12. Checkpoint indexes keep a growing file recoverable and queryable.
 13. Clean close appends a final index and hash-root footer with an optional signature.
 14. A user with only the archive can verify, analyze, query, and extract offline.
+
+### Watermark-aware byte-to-audio path
+
+    IP packet, HTTP body, or media segment
+      → exact S0 append
+      → signed metadata watermark parse
+      → demuxed encoded frame
+      → native-rate S1 PCM decode
+      → sub-20 kHz and optional above-24 kHz detection
+      → evidence and signature fusion
+      → live feed-identity event
+      → identity-conditioned separator
+      → D-class stems, residual, and claim trace
+
+The neural network does not reinterpret encoded bytes as lossless audio. Bytes are preserved first, then decoded deterministically, and only then analyzed. Neural output remains D class even when feed identity is cryptographically verified.
 
 ## Internet feed aggregation
 
@@ -150,6 +180,8 @@ HLS is an unbounded segmented protocol. Playlist sequence, alternate rendition, 
 | headers | No | Request headers with mandatory provenance redaction |
 | preserve_source | Yes | Enable S0 records |
 | preserve_pcm | Yes | Enable S1 records |
+| watermark_policy | No | detect, require_verified, or ignore |
+| trusted_issuers | No | Public-key trust-set reference for W0 validation |
 
 ### Network behavior
 
@@ -175,6 +207,161 @@ Every observation stores:
 - discontinuity, loss, duplicate, and concealment flags.
 
 S1 audio retains its native sample rate and clock. Resampling is D class. Cross-feed alignment uses source timestamps and optional content correlation, recording method and confidence.
+
+## Live watermark and feed identity
+
+### Frequency interpretation
+
+This specification interprets “24000k” as **24,000 Hz (24 kHz)**. A value of 24,000 kHz is 24 MHz and is not an audio-band requirement.
+
+The requested watermark uses two acoustic bands, but only the second is outside the nominal human hearing range:
+
+- **W1, sub-20 kHz:** a perceptually masked, low-energy carrier distributed below 20 kHz. It is designed to be unobtrusive, not guaranteed inaudible.
+- **W2, above 24 kHz:** an optional ultrasonic carrier beginning above 24 kHz. It requires a source rate above 48 kHz and is enabled by default only for validated 96 kHz or higher paths.
+
+### Three-layer identity design
+
+| Layer | Location | Purpose | Permanence |
+|---|---|---|---|
+| W0 signed statement | IP metadata and CODA records | Cryptographic feed UUID, issuer, epoch, sequence, and policy | Permanent when preserved in CODA |
+| W1 robust acoustic code | Below 20 kHz | Survive common codec, gain, resampling, noise, and mixing transforms | Measured, never absolute |
+| W2 ultrasonic code | Above 24 kHz | Redundant high-band detection in qualified wideband paths | Fragile and optional |
+
+W0 is the authoritative identity statement. W1 and W2 carry a compact rotating code that resolves to W0. This avoids trying to fit a large signature into every audio frame.
+
+### Source-side issuance
+
+The preferred design inserts W0, W1, and W2 at an authorized upstream encoder or trusted gateway before distribution:
+
+    feed UUID + epoch + sequence + policy
+      → canonical CBOR payload
+      → COSE_Sign1 signature
+      → W0 signed statement
+      → short rotating acoustic code
+      → W1 embedder
+      → optional W2 embedder
+      → IP encoder and stream
+
+The signed payload uses COSE_Sign1 structures defined by [RFC 9052](https://datatracker.ietf.org/doc/rfc9052/). Private issuer keys remain outside the archive; public verification keys and key identifiers MAY be embedded.
+
+If CODEC inserts a watermark after ingest, it MUST:
+
+1. preserve the original S0 and S1 tracks;
+2. create a separate D-class watermarked track;
+3. record the issuer, key identifier, model, codebook, gain, frequency bands, and transformation;
+4. never label the modified track source_exact or sample_exact relative to the input; and
+5. require explicit authorization for issuance.
+
+CODEC cannot retroactively make an unwatermarked upstream source permanently watermarked.
+
+### Signed feed statement
+
+W0 signs the protocol version, issuer and feed UUIDs, stream epoch, sequence, validity interval, rotating short_code, codebook ID, use policy, optional source digest, and public-key identifier. The short code rotates every 5 seconds by default to limit replay and cross-context tracking while the signed mapping retains a stable feed UUID.
+
+### Acoustic carrier rules
+
+| Carrier | Required behavior |
+|---|---|
+| W1 | Adaptively spread from 300 Hz–19 kHz under a psychoacoustic mask; use gain/peak/band limits, error correction, interleaving, repetition, and keyed codes; reduce or suspend in exposed low-mask intervals; validate every supported codec profile with blinded listening |
+| W2 | Use 24–40 kHz at 96 kHz only when below guarded Nyquist and preserved by codec/hardware; disable at ≤48 kHz or on an unqualified path; pass alias/intermodulation tests; never replace W0/W1 or establish identity alone |
+
+### Multi-feed codebook
+
+Simultaneous feeds receive issuer-, revision-, and epoch-scoped low-cross-correlation codes. The issuer prevents active collisions; the detector reports top candidates and margin. Capacity is measured, and insufficient margin produces ambiguous rather than an identity.
+
+### Detection pipeline
+
+~~~mermaid
+flowchart TD
+    A["Exact IP bytes"] --> B["W0 parser and signature"]
+    A --> C["Decode native PCM"]
+    C --> D["W1 neural detector"]
+    C --> E["W2 detector when valid"]
+    B --> F["Evidence fusion"]
+    D --> F
+    E --> F
+    F --> G["Hysteresis and replay checks"]
+    G --> H["Live identity event"]
+    H --> I["Conditioned separator"]
+~~~
+
+The detector MAY combine a neural localized-watermark posterior with a keyed matched-filter or correlation score. Neural audio watermark systems such as [AudioSeal](https://arxiv.org/abs/2401.17264) demonstrate localized, efficient detection, while [WavMark](https://arxiv.org/abs/2308.12770) demonstrates short payload recovery. CODEC treats these as model families to evaluate, not universal guarantees.
+
+### Detection “spikes”
+
+A spike is a detection-statistic peak, not a waveform amplitude spike.
+
+For each hop, the engine records:
+
+- W1 posterior and correlation;
+- W2 posterior and correlation when enabled;
+- decoded short-code candidates and bit confidence;
+- noise-floor and masking context;
+- signature state and key identifier;
+- replay, collision, and continuity checks;
+- top candidate margin;
+- model hash and calibration ID.
+
+Default live timing:
+
+| Setting | Default |
+|---|---:|
+| Analysis window | 1.0 s |
+| Hop | 250 ms |
+| Start confirmation | 3 qualifying hops |
+| End confirmation | 5 failing hops |
+| Target verified-event latency | At most 2.0 s |
+| Target identity-conditioned stem latency | At most 2.5 s for a supported live bundle |
+| Code rotation | 5 s |
+
+Thresholds use hysteresis. A single peak cannot produce verified_feed.
+
+### Fusion states
+
+| State | Requirements | Meaning |
+|---|---|---|
+| absent | No qualified evidence | No watermark detected |
+| candidate | W1 or W2 peak | Acoustic candidate only |
+| detected_unverified | Stable code but no valid W0 signature | Do not assign authoritative feed identity |
+| verified_feed | Stable code plus valid, current W0 signature | Cryptographically bound feed identity |
+| ambiguous | Multiple codes or insufficient margin | No automatic assignment |
+| replay_suspected | Valid old/repeated code outside policy | Quarantine identity result |
+| signature_invalid | Code resolves to invalid W0 | Security event |
+| degraded | Band/path unavailable or detector outside calibration | Report capability loss |
+
+### Live report
+
+Each event contains state, archive time, feed/issuer UUIDs, short code, sequence, confidence, W1/W2 bands and scores, signature/key status, model hash, calibration ID, candidate margin, and report latency. Events are appended to CODA and MAY also use callbacks, JSON Lines, a local socket, or an authenticated service stream.
+
+### Identity-conditioned live separation
+
+When a mixed PCM interval contains one or more qualified watermark codes:
+
+1. The detector produces code-specific conditioning embeddings.
+2. The separator estimates a stem for each qualified code plus unknown stems and residual.
+3. The tracker aligns stems with code continuity and acoustic embeddings.
+4. The engine verifies that removing a claimed stem reduces the corresponding watermark score while retaining mixture consistency.
+5. The identity resolver reports verified_feed only when the signed mapping remains valid.
+6. Every separated stem remains D class.
+
+Watermarks anchor feed association; they do not make blind separation lossless. The original mixture remains preserved as S0/S1.
+
+### Permanence definition
+
+- **Permanent provenance:** W0 and detection events remain verifiable in the CODA archive as long as the file and cryptographic algorithms remain supported.
+- **Permanent acoustic presence in archived source:** if W1/W2 arrived in exact S0/S1 records, those samples remain preserved.
+- **Not guaranteed permanent through external transforms:** transcoding, filtering, resynthesis, editing, and analog paths may damage or remove W1/W2.
+- **Neural interpretation is never lossless:** the engine archives the input losslessly and stores interpretations as D records.
+
+### Watermark safety and privacy
+
+- Issuance and detection are policy-controlled and audited.
+- Issuer private keys are never embedded.
+- Public keys may be revoked with signed archive events.
+- Rotating codes minimize persistent third-party tracking.
+- Detection without an authorized codebook may report watermark_present but not feed identity.
+- Audible-band quality and ultrasonic intermodulation must pass separate safety gates.
+- The system does not attempt device fingerprinting from an unauthorized ultrasonic beacon.
 
 ## CODA archive format
 
@@ -250,6 +437,11 @@ The trailer is written last. Records without a valid trailer are ignored as torn
 | PCM_CHUNK | S1 | Native integer PCM compressed with FLAC |
 | GAP_EVENT | Metadata | Missing, duplicate, late, corrupt, or concealed interval |
 | MODEL_BUNDLE | Metadata | ONNX bytes, manifest, calibration, license, hashes |
+| WATERMARK_ISSUER | Metadata | Issuer UUID, public keys, codebook policy, revocation state |
+| WATERMARK_STATEMENT | Metadata/S0 | W0 COSE-signed feed statement and exact carrier metadata |
+| WATERMARKED_CHUNK | D | CODEC-generated watermarked derivative; never replaces S1 |
+| WATERMARK_OBSERVATION | D | Frame scores, decoded code candidates, bands, detector provenance |
+| FEED_IDENTITY_EVENT | D | Fused live state, verified feed UUID, latency, and evidence |
 | ANALYSIS_AUDIO | D | Optional normalized model input |
 | SEPARATED_CHUNK | D | Estimated source stem |
 | RESIDUAL_CHUNK | D | Unassigned mixture residual |
@@ -281,6 +473,9 @@ Indexes map:
 - UTC observation to archive time;
 - identity UUID and label to claim intervals;
 - anonymous cluster to intervals;
+- short watermark code and feed UUID to statement and observation intervals;
+- issuer key identifier to validity and revocation intervals;
+- live feed-identity state transitions;
 - model hash to inference intervals;
 - payload hash to record location;
 - gaps, discontinuities, damage, and audit events.
@@ -300,6 +495,8 @@ When self_contained is true, the archive embeds:
 - normalization and feature parameters;
 - provider compatibility metadata;
 - calibration and thresholds;
+- watermark generators, detectors, codebooks, and psychoacoustic configuration;
+- issuer public keys, signed statements, and revocation records;
 - label maps and identity profiles needed for named queries;
 - model and dataset license notices;
 - engine configuration and schema descriptors;
@@ -311,33 +508,37 @@ Compiled GPU caches MAY be embedded, but portable model bytes remain authoritati
 
 ### Distinct tasks
 
-1. **Separation:** estimate waveforms from a mixture.
-2. **Activity:** estimate when each source is active.
-3. **Diarization:** determine which anonymous source is active when.
-4. **Tracking:** keep a cluster stable between chunks.
-5. **Identification:** compare a track with an enrolled identity.
+1. **Watermark detection:** localize W1/W2 codes and validate W0 identity statements.
+2. **Separation:** estimate waveforms from a mixture, optionally conditioned on watermark codes.
+3. **Activity:** estimate when each source is active.
+4. **Diarization:** determine which anonymous source is active when.
+5. **Tracking:** keep a cluster stable between chunks.
+6. **Identification:** compare a track with an enrolled identity or verified feed statement.
 
-No single score substitutes for all five.
+No single score substitutes for all six.
 
 ~~~mermaid
 flowchart TD
-    A["Analysis PCM"] --> B["Activity and scene analysis"]
-    B --> C["K-source separator"]
-    C --> D["Residual and consistency"]
-    C --> E["Embedding extractors"]
-    E --> F["Online clustering"]
-    F --> G["Permutation tracker"]
-    G --> H["Identity evidence fusion"]
-    D --> I["Quality gate"]
-    H --> J["Claims and indexes"]
-    I --> J
+    A["Analysis PCM"] --> B["W1/W2 detector"]
+    A --> C["Activity and scene analysis"]
+    B --> D["Watermark condition"]
+    C --> E["K-source separator"]
+    D --> E
+    E --> F["Residual and consistency"]
+    E --> G["Embedding extractors"]
+    G --> H["Online clustering"]
+    H --> I["Permutation tracker"]
+    I --> J["Identity evidence fusion"]
+    F --> K["Quality gate"]
+    J --> L["Claims and indexes"]
+    K --> L
 ~~~
 
 ### ModelBundle contract
 
 | Property | Required value |
 |---|---|
-| task | separation, activity, diarization, embedding, classification, quality |
+| task | watermark_generator, watermark_detector, separation, activity, diarization, embedding, classification, quality |
 | model_format | ONNX for portable version 1 |
 | model_hash | SHA-256 |
 | input_sample_rate | Exact |
@@ -351,6 +552,9 @@ flowchart TD
 | normalization | Gain, centering, pre-emphasis, channel policy |
 | output_semantics | Waveforms, masks, embeddings, probabilities, residual |
 | calibration | Dataset, score transform, operating points |
+| frequency_contract | Permitted bands, sample-rate minimum, Nyquist guard, filtering assumptions |
+| watermark_contract | Payload bits, codebook, error correction, detection state, robustness corpus |
+| perceptual_contract | Masking method, gain limits, loudness/peak tolerance, listening-test evidence |
 | license | Redistribution and use terms |
 | quality_domain | Speech, music, broadcast, general, or declared subset |
 
@@ -387,6 +591,7 @@ Output slots are stabilized using:
 - activity continuity;
 - spatial and channel features;
 - content fingerprints;
+- verified or candidate watermark-code continuity;
 - source-count transitions;
 - feed metadata;
 - costed split, merge, birth, and death events.
@@ -395,7 +600,7 @@ Every reassignment creates TRACK_EVENT; history is never silently rewritten.
 
 ### Live “feel”
 
-The requested “feel for the feed” is a stateful, auditable belief model, not intuition. Live state may update cluster centroids, uncertainty, temporal probabilities, feed noise and codec profiles, and clock alignment. Base neural weights do not mutate during capture. Offline fine-tuning produces a new versioned ModelBundle.
+The requested “feel for the feed” is a stateful, auditable belief model, not intuition. Live state may update cluster centroids, watermark continuity, replay windows, uncertainty, temporal probabilities, feed noise and codec profiles, and clock alignment. Base neural weights do not mutate during capture. Offline fine-tuning produces a new versioned ModelBundle.
 
 ## Identity
 
@@ -429,6 +634,9 @@ Claims may combine:
 
 - acoustic embedding similarity;
 - cluster continuity;
+- W0 signature validity and statement interval;
+- W1/W2 short-code posterior, correlation, continuity, and collision margin;
+- watermark replay and revocation state;
 - known-feed association;
 - content fingerprint;
 - spatial/channel continuity;
@@ -441,16 +649,7 @@ Each contribution stores its model hash, calibration, score, interval, frequency
 
 ### Outside-hearing-range evidence
 
-- A signal contains nothing at or above its Nyquist limit.
-- 44.1 kHz input cannot represent 22.05 kHz or above; 48 kHz cannot represent 24 kHz or above.
-- Internet codecs and upstream processing often remove high-frequency energy.
-- The actual format, spectrum, and path are inspected before wideband features are enabled.
-- Missing bands remain missing; generated frequencies cannot support identity.
-- Wideband evidence is D class, experimental, and disabled by default.
-- It requires cross-device and cross-codec calibration.
-- No named claim may rely solely on wideband evidence.
-- Every claim states the exact bands used.
-- CODEC emits no ultrasonic probe and performs no active covert sensing.
+A signal contains nothing at or above Nyquist: 44.1 kHz stops below 22.05 kHz and 48 kHz below 24 kHz. Wideband evidence follows the W2 qualification rules, remains experimental D data, states every band used, never fills missing frequencies, never establishes a name alone, and never emits an active probe.
 
 ### Default claim levels
 
@@ -466,7 +665,7 @@ These are defaults, not universal constants. Uncalibrated models return scores, 
 
 ### Claim trace
 
-Every claim records identity, anonymous track, intervals, score or probability, threshold, evidence, frequency bands, model and source hashes, separation quality, alternatives, enrollment revision, creation time, and revocation/supersession link.
+Every claim records identity, anonymous track, intervals, score or probability, threshold, evidence, frequency bands, watermark state, issuer and key identifier, model and source hashes, separation quality, alternatives, enrollment revision, creation time, and revocation/supersession link.
 
 ## C++ components
 
@@ -478,6 +677,11 @@ Every claim records identity, anonymous track, intervals, score or probability, 
 | MediaDecoder | FFmpeg decode | Decoder pool |
 | Timeline | Clock and gap model | Lock-bounded |
 | PcmArchiver | FLAC S1 chunks | Compression pool |
+| WatermarkStatementParser | Parse W0 and validate COSE signatures | Network/control pool |
+| WatermarkEmbedder | Authorized W1/W2 derived-track issuance | Inference pool |
+| WatermarkDetector | Frame-local W1/W2 codes, scores, and bands | Bounded live inference |
+| WatermarkFusion | W0/W1/W2 state, replay, collision, hysteresis | Stateful single owner |
+| FeedIdentityReporter | Callback, JSON Lines, socket, and archive events | Nonblocking event loop |
 | CodaWriter | Ordered append and checkpoints | Dedicated writer |
 | AnalysisScheduler | Bounded work and degradation | Nonblocking producer |
 | ModelRuntime | ONNX sessions/providers | Inference pool |
@@ -500,38 +704,7 @@ Every claim records identity, anonymous track, intervals, score or probability, 
 
 ### Repository layout
 
-~~~text
-CMakeLists.txt
-cmake/
-include/codec/
-  archive.hpp
-  engine.hpp
-  error.hpp
-  feed.hpp
-  identity.hpp
-  model.hpp
-  query.hpp
-  types.hpp
-src/
-  archive/
-  capture/
-  cli/
-  core/
-  decode/
-  identity/
-  inference/
-  query/
-  timeline/
-models/manifests/
-schemas/
-tests/
-  corpus/
-  fuzz/
-  integration/
-  unit/
-benchmarks/
-docs/
-~~~
+Use CMakeLists.txt and cmake/ at root; public headers under include/codec; isolated archive, capture, CLI, core, decode, identity, inference, query, timeline, and watermark modules under src; plus models/manifests, schemas, tests/{unit,integration,fuzz,corpus}, benchmarks, and docs.
 
 ### Dependencies
 
@@ -542,6 +715,7 @@ docs/
 | FLAC | S1 compression |
 | ONNX Runtime | Portable inference |
 | OpenSSL or audited equivalent | SHA-256 and signatures |
+| Canonical CBOR and COSE implementation | W0 signed feed statements |
 | fmt-compatible formatting layer | Internal formatting |
 | Structured logging sink | Diagnostics |
 | GoogleTest or Catch2 | Development tests |
@@ -552,32 +726,7 @@ Use FFmpeg public libraries, not parsed CLI subprocess output. See [libavformat]
 
 ### Core types
 
-~~~cpp
-namespace codec {
-
-using TimeNs = std::int64_t;
-
-struct StreamId { std::array<std::byte, 16> value; };
-struct TrackId { std::array<std::byte, 16> value; };
-struct IdentityId { std::array<std::byte, 16> value; };
-
-enum class FidelityClass { source_exact, sample_exact, derived };
-enum class ArchiveMode { source_only, pcm_lossless, dual };
-enum class InferenceMode { disabled, offline, bounded_live };
-
-struct Confidence {
-  double score;
-  bool calibrated;
-  std::string calibration_id;
-};
-
-template<class T>
-class Result;
-
-}
-~~~
-
-Result is a C++20-compatible value-or-error type owned by CODEC. Its storage implementation is private and may adopt std::expected when the compiler baseline advances.
+The codec namespace exposes nanosecond time, strongly typed 128-bit StreamId/TrackId/IdentityId values, FidelityClass, ArchiveMode, InferenceMode, WatermarkState, calibrated Confidence, and an owned C++20-compatible Result<T> value-or-error type.
 
 ### Configure
 
@@ -597,6 +746,16 @@ config.inference.on_overload = codec::OverloadPolicy::defer_to_offline;
 config.identity.minimum_claim_probability = 0.90;
 config.identity.require_calibrated_scores = true;
 config.identity.allow_wideband_features = false;
+
+config.watermark.detect = true;
+config.watermark.w1_enabled = true;
+config.watermark.w1_max_hz = 19000;
+config.watermark.w2_policy = codec::W2Policy::qualified_paths_only;
+config.watermark.w2_min_hz = 24000;
+config.watermark.minimum_w2_sample_rate = 96000;
+config.watermark.confirmation_hops = 3;
+config.watermark.max_verified_event_latency = std::chrono::seconds{2};
+config.watermark.require_valid_signature_for_feed_identity = true;
 ~~~
 
 ### Record feeds
@@ -626,38 +785,44 @@ int main() {
 }
 ~~~
 
-### Open and verify
+### Receive live feed-identity events
 
 ~~~cpp
-auto archive = codec::Archive::open(
-    "session.coda",
-    {.verification = codec::VerificationLevel::full});
-
-if (!archive) {
-  report(archive.error());
-  return;
-}
-
-print(archive->verification_report());
+session->on_feed_identity(
+    [](const codec::FeedIdentityEvent& event) {
+      if (event.state == codec::WatermarkState::verified_feed) {
+        print(event.feed, event.confidence, event.report_latency);
+      } else {
+        print(event.state, event.top_candidates);
+      }
+    });
 ~~~
+
+The callback is nonblocking. Slow consumers receive events through a bounded queue and an explicit dropped-event counter; CODA remains the durable event record.
+
+### Issue an authorized watermarked derivative
+
+~~~cpp
+codec::WatermarkIssueRequest request;
+request.feed = codec::StreamSelector::label("news");
+request.issuer_key = codec::KeyReference{"key://broadcast-issuer-7"};
+request.code_rotation = std::chrono::seconds{5};
+request.w1 = codec::CarrierPolicy::perceptually_masked;
+request.w2 = codec::CarrierPolicy::if_path_qualified;
+request.preserve_original = true;
+
+auto watermarked_track = archive->issue_watermark(request);
+~~~
+
+The issuer key is resolved through the configured key provider and never written to the archive. This operation creates a D track while preserving original S0/S1.
+
+### Open and verify
+
+Open with codec::Archive::open("session.coda", {.verification = VerificationLevel::full}) and inspect verification_report() before trusting queries.
 
 ### Enroll from archive intervals
 
-~~~cpp
-codec::EnrollmentRequest request;
-request.label = "speaker-alice";
-request.type = codec::IdentityType::person;
-request.references = {
-    {.stream = codec::StreamSelector::label("news"),
-     .start = codec::seconds(120),
-     .end = codec::seconds(180)}
-};
-request.consent_reference = "local-policy-record-42";
-
-auto identity = archive->enroll(request);
-~~~
-
-Enrollment requires writable mode and appends IDENTITY_PROFILE plus AUDIT_EVENT.
+Pass EnrollmentRequest{label, type, reference intervals, consent reference} to archive.enroll(). Writable enrollment appends IDENTITY_PROFILE plus AUDIT_EVENT.
 
 ### Query and extract
 
@@ -687,71 +852,21 @@ Neural exports are D class. Exact S1 extracts are labeled sample_exact only when
 
 ### Anonymous sources
 
-~~~cpp
-auto clusters = archive->anonymous_tracks({
-    .minimum_active_time = codec::seconds(10),
-    .minimum_track_confidence = 0.80
-});
-
-for (const auto& cluster : *clusters) {
-  print(cluster.id, cluster.active_time, cluster.best_candidate);
-}
-~~~
+archive.anonymous_tracks() accepts minimum active time and track confidence and returns stable anonymous IDs, intervals, activity, and best authorized candidate.
 
 ### Async analysis
 
-~~~cpp
-codec::StopSource stop;
-
-auto task = archive->analyze_async(
-    {.mode = codec::AnalysisMode::full_offline},
-    stop.token(),
-    [](const codec::Progress& p) {
-      print(p.stage, p.completed, p.total);
-    });
-
-auto result = task.get();
-~~~
+Long operations return cancellable tasks and accept a progress callback containing stage, completed units, total units, archive interval, and provider.
 
 ### Errors
 
 Errors contain stable code, category, message, retryability, stream/track/record/model/time context, safe underlying code, and redacted diagnostics.
 
-Categories: invalid_argument, unauthorized_source, network, protocol, decode, archive_io, archive_corrupt, model_incompatible, inference, identity_not_enrolled, identity_uncalibrated, cancelled, resource_exhausted, internal.
+Categories: invalid_argument, unauthorized_source, network, protocol, decode, archive_io, archive_corrupt, model_incompatible, inference, watermark_model_missing, watermark_code_ambiguous, watermark_signature_invalid, watermark_replay_suspected, watermark_path_unqualified, identity_not_enrolled, identity_uncalibrated, cancelled, resource_exhausted, internal.
 
 ## C ABI
 
-~~~c
-typedef struct codec_engine codec_engine_t;
-typedef struct codec_archive codec_archive_t;
-typedef struct codec_error codec_error_t;
-
-int codec_engine_create(
-    const codec_engine_config_t* config,
-    codec_engine_t** out,
-    codec_error_t** error);
-
-int codec_archive_open(
-    codec_engine_t* engine,
-    const char* path,
-    const codec_open_options_t* options,
-    codec_archive_t** out,
-    codec_error_t** error);
-
-int codec_archive_query_identity(
-    codec_archive_t* archive,
-    const codec_identity_query_t* query,
-    codec_match_list_t** out,
-    codec_error_t** error);
-
-int codec_archive_extract(
-    codec_archive_t* archive,
-    const codec_match_list_t* matches,
-    const codec_extract_options_t* options,
-    codec_error_t** error);
-~~~
-
-Handles have explicit destroy functions. Structs carry size and ABI version fields.
+The narrow C ABI exposes opaque engine/archive/session handles and versioned create, open, query_identity, query_watermark, set_feed_identity_callback, extract, cancel, and destroy functions. Callbacks receive immutable codec_feed_identity_event_t values plus user data. Every struct carries size and ABI version; every function returns an integer status and optional codec_error_t; exceptions never cross the boundary.
 
 ## CLI usage
 
@@ -766,7 +881,23 @@ ctest --test-dir build --output-on-failure
 ### Record
 
 ~~~bash
-codec record --archive session.coda --mode dual --self-contained --feed news=https://example.net/live/news.m3u8 --feed radio=https://radio.example.org/stream --model-bundle models/default --inference bounded-live
+codec record --archive session.coda --mode dual --self-contained --feed news=https://example.net/live/news.m3u8 --feed radio=https://radio.example.org/stream --model-bundle models/default --inference bounded-live --detect-watermarks --live-identity-report identity.jsonl
+~~~
+
+### Issue a signed watermarked derivative
+
+~~~bash
+codec watermark issue session.coda --feed news --issuer-key key://broadcast-issuer-7 --code-rotation 5s --w1 perceptually-masked --w2 qualified-paths-only --preserve-original
+codec watermark gateway --input https://origin.example.net/news --publish icecast://authorized-publisher/news --feed-uuid 7c2b2f74-7e31-4a1d-b469-d88d63fc8fcb --issuer-key key://broadcast-issuer-7 --w1 perceptually-masked --w2 qualified-paths-only
+~~~
+
+The first command appends W0, a D-class watermarked track, issuer public metadata, and an audit event. The gateway form inserts W1/W2 before authorized IP publication while preserving an exact origin capture in its CODA session. Publishing credentials are external secret references.
+
+### Watch live feed identity
+
+~~~bash
+codec watermark watch session.coda --states candidate,verified_feed,ambiguous,replay_suspected --format jsonl
+codec watermark inspect session.coda --feed news --include-observations --include-signatures
 ~~~
 
 ### Inspect and verify
@@ -783,6 +914,7 @@ codec list gaps session.coda
 
 ~~~bash
 codec analyze session.coda --mode full-offline --provider CUDA,CPU --max-sources 8 --checkpoint-every 30s
+codec watermark analyze session.coda --detector-bundle models/watermark-default --rebuild-events
 ~~~
 
 Analysis appends versioned D records; it never deletes earlier model output.
@@ -853,6 +985,24 @@ minimum_claim_probability = 0.90
 require_calibrated_scores = true
 allow_wideband_features = false
 
+[watermark]
+detect = true
+require_signature_for_feed_identity = true
+w1_enabled = true
+w1_min_hz = 300
+w1_max_hz = 19000
+w2_policy = "qualified-paths-only"
+w2_min_hz = 24000
+w2_max_hz = 40000
+w2_minimum_sample_rate = 96000
+nyquist_guard_hz = 2000
+analysis_window_ms = 1000
+hop_ms = 250
+start_confirmation_hops = 3
+end_confirmation_hops = 5
+max_verified_event_latency_ms = 2000
+code_rotation_seconds = 5
+
 [privacy]
 archive_request_headers = false
 encrypt_identity_profiles = true
@@ -867,7 +1017,7 @@ CLI values override the file. Secrets are external references and never plaintex
 - Network I/O uses a bounded async pool.
 - Decode and FLAC use bounded worker pools.
 - One writer owns archive ordering.
-- Stateful trackers are single-owner.
+- Stateful trackers and watermark fusion are single-owner.
 - Inference has a scheduler per provider and bounded device memory.
 - Readers are concurrent and immutable.
 
@@ -875,7 +1025,9 @@ CLI values override the file. Secrets are external references and never plaintex
 |---|:---:|---|
 | Accepted bytes → S0 | No | Backpressure if safe; otherwise explicit gap/error |
 | PCM → S1 | No in PCM modes | Slow when possible; preserve S0 and report failure |
+| PCM → live watermark detector | Yes | Mark interval degraded and reprocess offline |
 | PCM → live inference | Yes | Defer to offline |
+| Live identity → callback | Yes | Increment dropped-callback count; durable CODA event remains |
 | Accepted derived result → writer | No | Bound producer or cancel analysis |
 | Debug metrics | Yes | Count and report dropped metrics |
 
@@ -888,7 +1040,7 @@ Version 1 path:
     feed → CPU network buffer → S0
          → CPU decode → native PCM/S1
          → pinned staging or runtime tensor
-         → GPU inference
+         → GPU watermark and separation inference
          → D records
          → CODA writer
 
@@ -903,7 +1055,7 @@ CPU and GPU runs use identical archive intervals, weights, window/hop/overlap, t
 | Throughput | Real-time factor, streams/device, samples/second |
 | Latency | Median, p95, p99, p99.9, maximum |
 | Deadlines | Misses, worst margin, queue depth |
-| Quality | SI-SDR improvement, residual, reconstruction, identity |
+| Quality | Watermark BER/FAR/miss rate, SI-SDR improvement, residual, reconstruction, identity |
 | Resources | CPU, GPU, VRAM, RAM, host/device bytes |
 | Energy | Wall energy per processed audio hour |
 | Stability | Resets, retries, skipped or corrupted intervals |
@@ -912,7 +1064,7 @@ GPU advances only with a measured throughput, CPU, latency, or energy benefit an
 
 ## Observability
 
-Structured events include archive/session/feed/track UUIDs, model hash, stage, queue, source/archive time, latency, bytes, samples, gaps, overload, calibration, and redacted error context.
+Structured events include archive/session/feed/track UUIDs, watermark issuer/code/state, signature status, model hash, frequency bands, correlation/posterior, collision margin, stage, queue, source/archive time, report latency, bytes, samples, gaps, overload, calibration, and redacted error context.
 
 JSON Lines logs are required; OpenTelemetry-compatible metrics are optional. Credentials, keys, reference audio, and sensitive query text are excluded from logs.
 
@@ -921,6 +1073,11 @@ JSON Lines logs are required; OpenTelemetry-compatible metrics are optional. Cre
 - Capture and identification require authorization and lawful basis.
 - Enrollment requires provenance and policy metadata.
 - Identity profiles SHOULD be encrypted.
+- Watermark issuer private keys remain in an external key provider.
+- Codebooks and public keys are access-controlled and revocable.
+- Acoustic codes rotate and are scoped to limit unintended persistent tracking.
+- Unverified detections cannot be promoted to authoritative feed identities.
+- Issuance requires explicit authorization and an audit event.
 - Keys are never stored beside ciphertext in plaintext.
 - Queries and exports are audited.
 - Service deployments SHOULD enforce role and purpose restrictions.
@@ -942,6 +1099,19 @@ JSON Lines logs are required; OpenTelemetry-compatible metrics are optional. Cre
 6. Unknown compatible records are skipped safely.
 7. Offsets and sequences work beyond 4 GiB and 32-bit limits.
 8. Duplicates, gaps, and discontinuities remain explicit.
+
+### Watermark
+
+| Test group | Required measurements |
+|---|---|
+| Detection | Bit error, ROC, precision/recall, false candidates/hour, misses, verified false attribution, localization, event latency |
+| Trust | Signature, expiry, revocation, replay, collision margin, simultaneous-code capacity |
+| Quality | Watermark/program ratio by band, loudness, peaks, spectrum, distortion, blinded audibility |
+| Separation | Conditioned quality, residual consistency, attribution after stem removal |
+| Robustness | Lossless and supported lossy codecs, tandem transcode, resampling, gain/EQ/dynamics/clipping, loss/concealment, noise/reverb/mixing, crop/shift/time-scale; neural resynthesis only when declared |
+| W2 qualification | End-to-end rate/passband, alias, intermodulation, audibility, and automatic W1/W0 degradation |
+
+“Permanent” is tested as archive retention and integrity, not as an unbounded promise that an acoustic code survives arbitrary editing.
 
 ### Separation
 
@@ -1012,6 +1182,21 @@ Targets: CODA header/envelope/index/trailer, schemas, identity graph, model mani
 - Separation always emits residual and consistency report.
 - Unknown-count output records max_sources, confidence, and stop reason.
 
+### Watermark MVP
+
+- W0 valid, invalid, expired, revoked, and replayed statements classify deterministically.
+- W1 reports verified_feed within 2 seconds under every declared live support condition.
+- A supported live separator emits the identity-conditioned stem within 2.5 seconds while preserving the original mixture continuously.
+- Validation produces zero verified-feed false attributions; candidate false alarms remain within the published per-hour budget.
+- W1 message BER and miss rate stay within the ModelBundle’s declared codec/transformation operating points.
+- W2 never enables below 96 kHz or without a qualified end-to-end passband.
+- W2 failure degrades to W1/W0 without changing feed identity history silently.
+- Blinded testing finds no statistically significant W1 detectability at the preregistered operating point.
+- W2 passes alias, intermodulation, and audibility gates on each qualified output path.
+- Multi-feed collision tests never promote ambiguous codes to verified_feed.
+- Issuance leaves original S0/S1 byte and sample hashes unchanged.
+- Watermark-conditioned separation does not violate mixture consistency and reports its delta versus unconditioned separation.
+
 ### Identity MVP
 
 - Anonymous tracks work without enrollment.
@@ -1057,29 +1242,39 @@ Targets: CODA header/envelope/index/trailer, schemas, identity graph, model mani
 - Discover and select GPU providers.
 - Add tensors, bounded queues, cancellation, and D records.
 
-### Phase 3 — Separation and tracking
+### Phase 3 — Signed live watermark
+
+- Implement canonical W0 payloads, COSE signing/verification, key rotation, expiry, revocation, and replay checks.
+- Implement W1 generator/detector adapters, codebooks, error correction, localized scores, and hysteresis.
+- Implement live FEED_IDENTITY_EVENT reporting and archive indexes.
+- Add W2 only behind sample-rate, passband, alias, intermodulation, and audibility gates.
+- Validate robustness, false alarms, collision limits, latency, and perceptual impact.
+- Keep issuer private keys outside CODA and preserve original S0/S1.
+
+### Phase 4 — Separation and tracking
 
 - Add activity, K-source separation, residual, and consistency.
+- Add watermark-conditioned target extraction and watermark-removal consistency checks.
 - Add embeddings, clustering, permutation tracking, and anonymous queries.
 - Validate offline before bounded live mode.
 
 Candidate families include [Conv-TasNet](https://arxiv.org/abs/1809.07454), [SepFormer](https://arxiv.org/abs/2010.13154), [EEND diarization](https://arxiv.org/abs/1909.06247), and [ECAPA-TDNN embeddings](https://www.isca-archive.org/interspeech_2020/desplanques20_interspeech.html). These are references, not fixed endorsements.
 
-### Phase 4 — Identity and extraction
+### Phase 5 — Identity and extraction
 
 - Add enrollment and revisions.
 - Add calibrated fusion and open-set rejection.
 - Add claim trace, revocation, queries, extraction, and provenance.
 - Keep wideband evidence disabled until independently validated.
 
-### Phase 5 — Live and GPU
+### Phase 6 — Live and GPU
 
 - Add bounded live inference and offline catch-up.
 - Reuse pinned memory and tensors.
 - Benchmark CPU, CUDA, TensorRT, OpenVINO, and MIGraphX where available.
 - Degrade inference without weakening preservation.
 
-### Phase 6 — Optional transport
+### Phase 7 — Optional transport
 
 - Evaluate DMA-BUF and zero-copy.
 - Evaluate a custom PCIe audio endpoint.
@@ -1092,6 +1287,11 @@ Candidate families include [Conv-TasNet](https://arxiv.org/abs/1809.07454), [Sep
 - Sample-exact output cannot be proven.
 - Model bundles are not portable or license-compliant.
 - Separation fails consistency thresholds.
+- W0 cannot bind a decoded acoustic code to a valid signed feed statement.
+- W1 exceeds perceptual, false-alarm, miss, or latency budgets.
+- W2 aliases, creates audible intermodulation, or cannot survive the declared path.
+- Multi-feed code collisions cause verified false attribution.
+- Any component calls an acoustic watermark permanent through arbitrary external transforms.
 - Open-set false matches exceed the risk budget.
 - Wideband identity fails cross-device/cross-codec validation.
 - GPU improves averages but harms tail stability.
@@ -1106,6 +1306,12 @@ Candidate families include [Conv-TasNet](https://arxiv.org/abs/1809.07454), [Sep
 | Hash | SHA-256 | Compatible accelerated provider |
 | Index | Immutable sorted blocks + bloom filters | B-tree pages |
 | Signature | Optional Ed25519 footer | Key-provider adapter |
+| W0 statement | Canonical CBOR + COSE_Sign1 | Another standardized signed binary envelope |
+| W1 method | Neural localized detector plus keyed correlation | Non-neural spread spectrum if it wins the same tests |
+| W1 band | Adaptive 300 Hz–19 kHz | Narrower domain-specific mask |
+| W2 band | 24–40 kHz at 96 kHz | Qualified band below guarded Nyquist |
+| Acoustic code rotation | 5 seconds | Risk- and latency-tested interval |
+| Detection confirmation | 3 hops / 2-second budget | Calibrated domain-specific hysteresis |
 | Encryption | Optional per-record AEAD | Whole-file envelope rejected for recovery |
 | Tests | GoogleTest | Catch2 |
 | Dependency lock | vcpkg manifest | Conan lockfile |
@@ -1120,6 +1326,11 @@ Each closes through benchmark, threat review, or compatibility test.
 - Unknown is valid.
 - Residual is mandatory.
 - Every identity has provenance and uncertainty.
+- A named watermark identity requires a valid signed statement.
+- A detection spike is statistical, never an audible impulse.
+- Sub-20 kHz means perceptually masked, not outside hearing.
+- Above-24 kHz is optional and path-qualified.
+- Acoustic robustness is measured; CODA provenance is permanent.
 - No band is used unless it exists in the capture.
 - GPU optimization cannot weaken correctness.
 - Repair never mutates the source.
@@ -1130,6 +1341,7 @@ Each closes through benchmark, threat review, or compatibility test.
 - [FFmpeg libavformat](https://ffmpeg.org/doxygen/trunk/group__libavf.html)
 - [FFmpeg protocols](https://ffmpeg.org/ffmpeg-protocols.html)
 - [HTTP Live Streaming, RFC 8216](https://datatracker.ietf.org/doc/html/rfc8216)
+- [CBOR Object Signing and Encryption, RFC 9052](https://datatracker.ietf.org/doc/rfc9052/)
 - [Xiph FLAC format](https://xiph.org/flac/format.html)
 - [ONNX Runtime C++](https://onnxruntime.ai/docs/get-started/with-cpp.html)
 - [ONNX Runtime execution providers](https://onnxruntime.ai/docs/execution-providers/)
@@ -1137,6 +1349,8 @@ Each closes through benchmark, threat review, or compatibility test.
 - [SepFormer](https://arxiv.org/abs/2010.13154)
 - [End-to-End Neural Speaker Diarization](https://arxiv.org/abs/1909.06247)
 - [ECAPA-TDNN](https://www.isca-archive.org/interspeech_2020/desplanques20_interspeech.html)
+- [AudioSeal: localized neural audio watermarking](https://arxiv.org/abs/2401.17264)
+- [WavMark: payload-carrying neural audio watermarking](https://arxiv.org/abs/2308.12770)
 
 ## License
 

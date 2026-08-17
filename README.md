@@ -1345,6 +1345,53 @@ Candidate families include [Conv-TasNet](https://arxiv.org/abs/1809.07454), [Sep
 - Evaluate a custom PCIe audio endpoint.
 - Advance only if measured value exceeds complexity, portability, synchronization, and power costs.
 
+## 26-week path to v1.0.0
+
+The release program runs from Monday, August 17, 2026 through Friday, February 12, 2027. It publishes one or two evidence-bearing updates per week and promotes a version only when its exit gate passes. Dates are planning targets, not permission to waive archive integrity, fidelity, identity, safety, security, or validation requirements.
+
+| Weeks | Target | Date | Required exit evidence |
+|---|---|---:|---|
+| 1–2 | v0.1.1 | August 28, 2026 | Close known security and integrity findings; establish parser/archive fuzz infrastructure; freeze compatibility and development-profile migration rules |
+| 3–7 | v0.2.0 | October 2, 2026 | Freeze CODA v1; add HLS and Icecast ingestion, private FFmpeg decoding, exact S0 plus sample-exact S1 FLAC, reconnect epochs, gaps, checkpoints, and a recoverable interrupted 24-hour run |
+| 8–11 | v0.3.0 | October 30, 2026 | Load versioned ModelBundles; run the ONNX CPU reference path; persist model provenance, tensors, cancellation state, and D records without allowing inference to starve preservation |
+| 12–15 | v0.4.0 | November 27, 2026 | Add stateful W0/W1 continuity, key rotation, expiry, revocation, replay windows, ambiguity handling, archive indexes, and qualified live `verified_feed` events; keep W2 behind complete path qualification |
+| 16–18 | v0.5.0 | December 18, 2026 | Add offline K-source separation, mandatory residual, mixture-consistency reports, watermark-conditioned extraction, embeddings, anonymous clustering, and permutation tracking |
+| 19–21 | Reliability and perceptual soak | January 8, 2027 | Complete extended capture, crash, corruption, codec-transform, collision, false-attribution, audibility, alias, intermodulation, and recovery campaigns; publish measured operating envelopes |
+| 22 | v0.6.0 | January 15, 2027 | Add enrollment revisions, calibrated open-set identity fusion, revocation, claim traces, provenance-preserving queries, and identity/time-range extraction |
+| 23–24 | v0.7.0 | January 29, 2027 | Add bounded live inference, offline catch-up, CPU/GPU equivalence reports, optional provider selection, tail-latency and energy benchmarks, and overload degradation that never weakens capture |
+| 25 | v0.8.0 beta | February 2, 2027 | Freeze public API, C ABI, CODA v1, ModelBundle, CLI, configuration, and error contracts; complete operator, integration, migration, security, and known-limit documentation |
+| 25 | v0.9.0 release candidate | February 5, 2027 | Produce installable release artifacts and pass the complete release matrix with no open critical or high-severity security, integrity, fidelity, or false-attribution defect |
+| 26 | v1.0.0 | February 12, 2027 | Reproduce the release candidate from a clean environment; pass every applicable acceptance criterion below; publish signed checksums, dependency/model licenses, provenance, release notes, and supported operating envelopes |
+
+Phase 7 transport experiments are not a v1.0.0 release dependency. They advance only after the portable path passes and measurements justify their cost.
+
+### Weekly update contract
+
+- Publish a Friday status update every week, including holiday and soak weeks.
+- Publish an additional Tuesday engineering update when a build, benchmark, format decision, model candidate, security result, or milestone candidate lands.
+- Identify every update by calendar week, branch, commit SHA, archive/model format revision, and available artifact or benchmark identifiers.
+- Report completed work against the prior commitment, exact validation evidence, fidelity and performance movement, open risks or decisions, the next exit gate, and schedule confidence as green, yellow, or red.
+- Link failures and negative results. An update is evidence, not a promotional summary.
+
+### Promotion and rebaselining rules
+
+1. A milestone promotes only after its scoped acceptance criteria, supported-platform CI, sanitizer, fuzz/corpus, security, documentation, and recovery gates pass.
+2. A failed gate blocks promotion. The next Friday update records the failure, affected dependency chain, corrective owner, new evidence required, and revised target date.
+3. A yellow schedule means a gate is threatened but the milestone date is still achievable. Red means the critical path has moved and dependent dates must be rebaselined within two published updates.
+4. Beta freezes compatibility. After v0.8.0, only release-blocking correctness, security, documentation, packaging, or portability changes may alter a frozen surface, and each change requires an explicit compatibility note.
+5. v1.0.0 requires no open critical or high-severity defect, no unresolved stop/redesign gate, clean installation from published instructions, and an independently recoverable archive produced by the release candidate.
+
+### Definition of v1.0.0 release readiness
+
+- Source-exact S0 and sample-exact S1 preservation, verification, recovery, and extraction meet the archive MVP over the 24-hour interrupted multi-feed corpus.
+- Portable ModelBundles run on the CPU reference path; every supported GPU path stays inside declared numeric, quality, latency, memory, and energy tolerances.
+- Watermark fusion never promotes ambiguous, replayed, expired, revoked, invalid, or unqualified evidence to an authoritative feed identity.
+- Every neural separation contains a residual, mixture-consistency report, uncertainty, model provenance, and an explicit D-class fidelity label.
+- Anonymous and enrolled identity queries expose calibrated confidence, alternatives, claim trace, consent/policy provenance, and revocation behavior.
+- Capture remains correct under inference overload, cancellation, reconnects, crashes, truncated writes, malformed inputs, and unsupported model/provider combinations.
+- The documented C++20 API, versioned C ABI, CLI, configuration, archive schema, ModelBundle schema, and upgrade path match the shipped artifacts.
+- GCC, Clang, sanitizers, supported provider tests, integration tests, fuzz/corpus tests, release packaging, license inventory, and clean-environment reproduction all pass for the final commit.
+
 ## Stop/redesign gates
 
 - One-file recovery cannot survive torn writes.

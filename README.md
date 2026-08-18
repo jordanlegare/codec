@@ -118,6 +118,49 @@ CODEC must not turn probabilistic inference into a false identity guarantee.
 
 Calling a CODA archive lossless means S0 and/or S1 records are preserved without mutation. A lossy internet feed does not become equivalent to its pre-encoding master.
 
+## Generalized CODA platform direction
+
+CODEC is implemented audio-first, but CODA is intended to evolve into a **general authenticated temporal container** for heterogeneous machine-observed streams. This direction is normative for future interface design; it does **not** claim that the generalized record model is implemented in v0.1.0.
+
+Audio remains the first specialization. Future CODA-compatible logical streams MAY include video, image/frame sequences, telemetry, sensor observations, navigation/position data, radar/lidar/sonar-derived payloads, documents and text, transcript segments, network/system events, model inputs and outputs, embeddings, identity evidence, recovery/FEC shards, audit/access events, authorization/policy records, and opaque provider payloads.
+
+A logical stream identity MUST be independent of transport port, process ID, worker assignment, file name, or physical carrier frequency. Stream identity SHOULD survive reconnects, worker migration, cloud-region changes, archive segmentation, transport changes, and offline re-analysis.
+
+The generalized conceptual record envelope is:
+
+~~~text
+RecordEnvelope {
+  stream_id
+  stream_type
+  source_id
+  monotonic_time
+  observed_utc
+  source_timestamp
+  sequence
+  format_epoch
+  connection_epoch
+  fidelity_class
+  payload_type
+  payload
+  payload_hash
+  previous_record_hash
+  provenance
+  policy_tags
+}
+~~~
+
+This is a semantic model, not a frozen binary layout. Any future archive-format implementation MUST follow CODA versioning and compatibility rules, preserve unknown compatible record types, and retain the existing source/derived truth boundary.
+
+The fidelity model extends conservatively:
+
+- **S0 remains source exact.** Original accepted bytes, packets, manifests, headers, sequencing, and transport observations remain immutable source truth.
+- **S1 remains exact only where an exact normalized representation is rigorously defined.** Audio S1 means sample-exact integer PCM. Non-audio S1-like state MUST NOT be claimed without a deterministic representation and round-trip test.
+- **D remains derived.** Inference, resampling, translation, summarization, enhancement, interpolation, reconstruction, separation, embeddings, classifications, and model-generated outputs MUST remain distinguishable from S0/S1.
+
+Every D-class result SHOULD be traceable to source stream IDs and intervals, model/runtime identity and hash, configuration, inference time, calibration where applicable, confidence/quality, transformation chain, and residual or uncertainty information where meaningful. New models MAY append new interpretations later without rewriting source history.
+
+Unknown stream types MUST remain preservable even when the current engine cannot interpret them. This property is required so CODA can evolve without forcing every reader to understand every vertical or future payload type.
+
 ## Requirements language
 
 **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, and **MAY** are normative.
@@ -1282,6 +1325,94 @@ Targets: CODA header/envelope/index/trailer, schemas, identity graph, model mani
 - Preservation remains independent of inference.
 - Live overload defers analysis without losing committed source.
 - CPU/GPU reports use equivalent inputs and include quality, tail latency, memory, and energy.
+
+## Future extension profiles
+
+The profiles below define architectural extension boundaries. They are **planned/future capabilities, not v0.1.0 runtime claims**, and none changes CODA source-truth semantics.
+
+### Transport and recovery profile
+
+Future CODEC transports MAY represent parity/recovery shards, erasure/FEC coding groups, shard sequence and block identity, reconstruction verification hashes, transport-loss observations, partial-recovery state, and codec enhancement/correction payloads.
+
+The core format MUST NOT require a particular recovery algorithm. PAR2-compatible concepts, Reed-Solomon, fountain/Raptor families, or other validated schemes may be used by a profile without becoming CODA-core dependencies.
+
+Recovery claims MUST distinguish:
+
+1. exact reconstruction of a damaged or missing **encoded bitstream** using sufficient recovery information; and
+2. exact reconstruction of a **pre-lossy source**, which requires a complete exactness/correction residual and cannot be implied by parity alone.
+
+### Multiplexed and distributed transport profile
+
+CODA semantics MUST NOT depend on one physical port, connection, frequency slot, or worker per logical feed. One endpoint MAY carry many logical streams, and one logical stream MAY migrate between endpoints or processing workers while retaining its immutable identity and provenance.
+
+Deployments therefore distinguish:
+
+- **physical transport** — file, pipe, shared memory, TCP, QUIC, UDP, provider protocol, radio/acoustic carrier, or another transport;
+- **logical stream** — stable CODEC/CODA identity represented inside the protocol and archive; and
+- **processing partition** — transient worker/shard ownership used to scale execution.
+
+The same logical record semantics MUST remain valid for one stream, thousands of streams, or tens of millions of registered stream identities. Simultaneous throughput is bounded by bandwidth, compute, memory, storage, and latency budgets rather than port-number or identifier-space limits.
+
+### Distributed/cloud profile
+
+A future distributed deployment MAY use a topology such as:
+
+~~~text
+global or regional ingress
+  -> stream-ID partitioning
+  -> preservation workers
+  -> optional recovery workers
+  -> optional inference workers
+  -> CODA writers/object archive
+  -> query/index services
+~~~
+
+Core APIs and archive semantics MUST remain vendor-neutral. Kubernetes, AWS, Azure, GCP, specific brokers, and specific object stores are deployment choices, not CODA format requirements.
+
+Distributed implementations SHOULD prefer stable stream-ID partitioning, explicit stream-state ownership, bounded queues, minimal data copies, independently scalable preservation/inference planes, and explicit hot/cold retention profiles.
+
+### Trust and selective-disclosure profile
+
+Future secure deployments MAY add encrypted payloads, envelope or threshold encryption, confidential-compute enclaves, scoped query-capability records, purpose/time/data-class restrictions, immutable disclosure/access logs, and selective exports of authorized records.
+
+CODEC core MUST remain neutral about the legal or organizational authority that grants access. CODEC may record, verify, and enforce declared authorization/policy inputs where a profile implements them; it MUST NOT manufacture legal authority or convert a machine inference into an adjudicative decision.
+
+### Vertical profiles
+
+Justice, public safety, defense, industrial, healthcare, transportation, scientific, enterprise, and other domain-specific schemas SHOULD be implemented above the stable CODA substrate. Vertical requirements MUST NOT silently redefine CODA fidelity, provenance, identity, or compatibility semantics.
+
+## ChatGPT/Codex implementation guidance
+
+This README and approved design documents are normative instructions for future agentic development. ChatGPT, Codex, or another automated implementation agent working on this repository MUST:
+
+1. Inspect current repository state, tests, public interfaces, and implementation-status tables before changing behavior.
+2. Never claim an unimplemented capability is complete, simulated output is real inference, or a future profile is a current runtime capability.
+3. Keep README status tables, CHANGELOG entries, capability reporting, and code synchronized with implementation reality.
+4. Preserve deterministic versus probabilistic capability boundaries and the S0/S1/D truth classes.
+5. Prefer narrow, independently testable primitives over speculative end-to-end stubs.
+6. Keep CODA core and public abstractions vendor-neutral; cloud, orchestration, transport, codec, and vertical choices belong behind extension interfaces.
+7. Implement archive, compatibility, provenance, and transport invariants before hyperscale deployment infrastructure.
+8. Add round-trip, compatibility, corruption, truncation, and unknown-record tests for every archive-format change.
+9. Ensure inference, watermark analysis, recovery, or downstream AI failure cannot corrupt committed preservation records.
+10. Record model and transformation provenance for every D-class artifact.
+11. Benchmark throughput, latency, tail latency, memory, CPU/GPU use, storage amplification, recovery overhead, and workload/hardware assumptions before making scale claims.
+12. Treat security, privacy, authorization, retention, and auditability as first-class interfaces when implementing profiles that require them.
+13. Preserve original source data separately from generated, enhanced, reconstructed, watermarked, translated, or otherwise derived representations.
+14. Rebaseline the roadmap when implementation evidence changes rather than forcing code to match obsolete dates or aspirational documentation.
+
+### Generalized delivery sequence
+
+The existing delivery plan and dated 26-week v1.0 schedule remain authoritative for the audio-first product. The following sequence constrains and extends later development without representing current implementation status:
+
+- **Stage A — preserve the v0.1 foundation:** maintain archive, secure capture, signed-watermark, API, CLI, and test guarantees.
+- **Stage B — generalized record semantics:** introduce extensible stream/payload typing, generic provenance envelopes, compatibility tests, and unknown-type preservation before public interfaces become difficult to evolve.
+- **Stage C — complete the audio 1.0 path:** deliver S1 FLAC/self-contained archival, production media adapters, stateful identity fusion, compatible neural runtime/model bundles, streaming inference, and offline re-inference according to the existing roadmap.
+- **Stage D — transport/recovery profile:** add generic recovery-shard semantics, validated FEC implementations, streaming repair, exact verification, and explicit correction-residual semantics where exact pre-lossy reconstruction is supported.
+- **Stage E — distributed processing profile:** add protocol multiplexing, stable stream partitioning, distributed workers, object-store backends, query indexes, retention controls, and measured operational benchmarks.
+- **Stage F — trust/selective-disclosure profile:** add encryption envelopes, policy/authorization records, scoped access, immutable access logs, selective export, and confidential-compute integration where required.
+- **Stage G — vertical profiles:** add domain-specific schemas, model bundles, policy adapters, and integrations without forking CODA truth semantics.
+
+The generalized record model, recovery profile, distributed/cloud profile, trust/selective-disclosure profile, and vertical profiles above are architectural requirements and planned extension points. They are not part of the current v0.1.0 implemented product surface unless and until the status table, tests, and runtime capability reporting are updated together.
 
 ## Delivery plan
 

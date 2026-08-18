@@ -1,40 +1,133 @@
-# Generalized CODA Platform Direction Design
+# Stream-First CODEC / Generalized CODA Direction Design
 
 Date: 2026-08-18
 Repository: `jordanlegare/codec`
-Status: Approved architectural direction; implementation pending
+Status: Approved corrected architectural direction; README implementation pending
 
 ## Purpose
 
-Evolve CODEC from an audio-first preservation and inference engine into a general authenticated temporal-stream substrate while preserving the current v0.1.0 guarantees and avoiding premature coupling to any specific cloud, transport, justice, surveillance, defense, or commercial deployment.
+Define CODEC as a general stream-aggregation, preservation, decomposition, extraction, identity, provenance, and inference substrate. CODA is the type-agnostic authenticated temporal archive produced and consumed by that substrate.
 
-The core principle is:
+Audio is the first implemented reference profile. Audio capabilities are important and remain supported, but audio does not define CODEC core, CODA core, the generic public model, or the long-term scaling architecture.
 
-> Audio remains the first specialization, while CODA becomes a general authenticated temporal container for heterogeneous machine-observed streams and all downstream derived intelligence remains distinguishable from immutable source truth.
+The governing principle is:
+
+> CODEC operates on heterogeneous logical streams. CODA preserves authenticated temporal records. Stream profiles specialize those generic semantics. Derived intelligence never silently replaces immutable source truth.
+
+When a generic core requirement and a profile-specific requirement conflict, the generic stream invariant governs CODEC/CODA core and the profile-specific requirement governs only that profile.
 
 ## Design goals
 
-1. Preserve all current v0.1.0 claims and implementation boundaries exactly.
-2. Generalize the CODA record model early, before v1.0 freezes public interfaces.
-3. Keep source-preserved data, sample-exact representations, and derived inference strictly separated.
-4. Permit logical multiplexing from one stream to hyperscale deployments without changing record semantics.
-5. Introduce future recovery/FEC, distributed transport, cloud storage, confidential-compute, and selective-disclosure capabilities as profiles/extensions rather than mandatory core dependencies.
-6. Make future ChatGPT/Codex implementation work staged, testable, evidence-driven, and prohibited from fabricating unimplemented capability.
-7. Keep the core engine portable and usable on-premises, embedded, edge, cloud, or offline.
+1. Preserve truthful v0.1.0 implementation claims while changing the architectural center of gravity from audio to heterogeneous streams.
+2. Make stream identity, temporal ordering, source preservation, provenance, extraction, multiplexing, and extensibility core concepts.
+3. Make CODA payload-type agnostic and capable of preserving unknown stream/payload types without interpretation.
+4. Define fidelity/truth classes that work for audio, video, telemetry, sensor, document/event, network, model, and future stream profiles.
+5. Keep preservation independent of inference and profile-specific decoding.
+6. Permit one logical stream or hyperscale multiplexed deployments without changing record semantics.
+7. Keep transport, recovery/FEC, cloud/distributed processing, inference, trust/selective disclosure, and vertical-domain behavior as profiles/extensions rather than hard dependencies.
+8. Keep CODEC portable across embedded, edge, on-premises, offline, and cloud environments.
+9. Direct ChatGPT/Codex to implement generic invariants before optimizing any one profile.
 
 ## Non-goals
 
-- Do not make Kubernetes, AWS, Azure, GCP, PAR2, Reed-Solomon, OFDM, QAM, AC-3, justice, surveillance, military, or any other deployment-specific technology a hard dependency of CODA core.
+- Do not make audio, PCM, FLAC, speech, music, W0/W1/W2, or neural source separation requirements of CODEC/CODA core.
+- Do not remove or weaken currently implemented audio functionality; classify it under the Audio Stream Profile.
+- Do not make Kubernetes, AWS, Azure, GCP, PAR2, Reed-Solomon, OFDM, QAM, AC-3, or another deployment technology a core dependency.
 - Do not redefine probabilistic inference as deterministic evidence.
-- Do not promise reconstruction of information absent from captured source material.
-- Do not weaken the current source-exact and sample-exact fidelity definitions.
-- Do not make CODEC itself a policy, adjudication, or autonomous enforcement authority.
+- Do not promise reconstruction of information absent from preserved evidence or sufficient correction data.
+- Do not make CODEC a policy, adjudication, surveillance, or autonomous-enforcement authority.
 
-## Core abstraction
+## Architectural hierarchy
 
-CODA should evolve toward a general record envelope with stable semantics independent of payload type.
+```text
+CODEC
+  -> generic Stream substrate
+       -> capture / ingest
+       -> temporal ordering and identity
+       -> preservation
+       -> provenance
+       -> extraction / decomposition interfaces
+       -> optional inference interfaces
+       -> CODA authenticated temporal archive
+            -> Audio Stream Profile
+            -> Video Stream Profile
+            -> Telemetry Stream Profile
+            -> Sensor Stream Profile
+            -> Document/Event Stream Profile
+            -> Network/System Stream Profile
+            -> Recovery Profile
+            -> Trust/Selective-Disclosure Profile
+            -> Distributed/Cloud Profile
+            -> future profiles
+```
 
-Conceptually:
+The generic substrate must not require an audio decoder, sample rate, channel layout, acoustic carrier, speaker model, or other media-specific concept.
+
+## Core stream abstraction
+
+The public conceptual vocabulary should converge on generic names such as:
+
+```text
+StreamId
+StreamType
+StreamSpec
+StreamDescriptor
+StreamClock
+StreamEpoch
+StreamRecord
+StreamProvenance
+StreamAdapter
+StreamProcessor
+StreamInference
+StreamExtraction
+```
+
+Existing audio-oriented API names may remain temporarily for compatibility, but new core interfaces should not deepen audio coupling. Migration should be explicit and versioned rather than silently breaking existing users.
+
+### Stream identity
+
+Every logical stream has a stable identifier independent of:
+
+- TCP/UDP port;
+- file name;
+- process or worker identity;
+- cloud region;
+- physical carrier frequency;
+- archive segment;
+- connection lifetime;
+- decoder/profile implementation.
+
+A 128-bit UUID or comparably large identifier is suitable for the public model.
+
+Identity must survive reconnects, worker migration, transport changes, archive segmentation, and offline re-analysis.
+
+### Stream types
+
+The model must be extensible to at least:
+
+- audio;
+- video;
+- image/frame sequences;
+- telemetry and measurements;
+- generic sensor observations;
+- navigation/position data;
+- radar/lidar/sonar payloads;
+- documents and text;
+- transcript segments;
+- network/system events;
+- model inputs/outputs;
+- embeddings/features;
+- identity evidence;
+- recovery/FEC shards;
+- audit/access events;
+- authorization/policy records;
+- opaque/custom provider payloads.
+
+Unknown types must remain preservable and extractable even when the current engine has no profile capable of interpreting them.
+
+## Generalized CODA record model
+
+CODA evolves toward a stable record envelope independent of payload type:
 
 ```text
 RecordEnvelope {
@@ -47,7 +140,7 @@ RecordEnvelope {
   sequence
   format_epoch
   connection_epoch
-  fidelity_class
+  truth_class
   payload_type
   payload
   payload_hash
@@ -57,302 +150,242 @@ RecordEnvelope {
 }
 ```
 
-The exact binary layout is an implementation decision and must retain backward compatibility requirements defined by the archive versioning rules.
+The exact binary representation is an implementation decision governed by archive versioning and compatibility rules.
 
-### Stream identity
+Time is generic. Audio sample positions, video PTS/DTS, sensor clocks, event timestamps, sequence counters, and other profile clocks map into the stream temporal model without redefining core semantics.
 
-Every logical stream receives an immutable identifier independent of transport ports, process IDs, file names, or physical carrier frequencies. A 128-bit UUID or comparably large stable identifier is suitable for the public model.
-
-Stream identity must survive:
-
-- reconnects;
-- node migration;
-- cloud-region changes;
-- archive segmentation;
-- transport changes;
-- offline re-analysis.
-
-### Stream types
-
-The initial implementation remains audio-oriented, but the model must be extensible to at least:
-
-- audio;
-- video;
-- image/frame sequences;
-- telemetry;
-- sensor observations;
-- navigation/position data;
-- radar/lidar/sonar-derived payloads;
-- documents and text;
-- transcript segments;
-- network/system events;
-- model inputs/outputs;
-- embeddings and derived features;
-- identity and watermark evidence;
-- recovery/FEC shards;
-- audit/access events;
-- authorization/policy records;
-- opaque custom provider payloads.
-
-Unknown stream types must remain preservable even when the current engine cannot interpret them.
-
-## Fidelity and truth classes
-
-The existing fidelity model remains foundational.
+## Truth and fidelity classes
 
 ### S0 — source exact
 
-Accepted source bytes, packets, manifests, headers, sequence information, and transport observations are preserved without mutation.
+The exact accepted source representation: bytes, packets, manifests, headers, event records, sequence information, and relevant transport observations. S0 is preserved without semantic mutation.
 
-### S1 — sample/state exact
+### S1 — state exact
 
-For decoded or normalized representations where CODEC can deterministically reproduce accepted integer samples or equivalent exact state, the archive may store a losslessly compressed exact representation.
+A deterministic normalized representation whose accepted state can be reproduced exactly according to a registered profile's canonicalization rules.
 
-For non-audio streams this class may be extended only where the representation is rigorously defined and deterministic.
+S1 is not intrinsically PCM.
+
+Examples:
+
+- Audio Profile: losslessly represented canonical integer PCM may be S1/sample-exact.
+- Telemetry Profile: canonical typed measurement/event records may be S1.
+- Other profiles may define S1 only when deterministic exact-state semantics are rigorously specified.
+
+If exact normalized-state semantics cannot be established, the representation must not be labeled S1.
 
 ### D — derived
 
-Anything produced by inference, resampling, enhancement, translation, summarization, separation, reconstruction, interpolation, denoising, classification, embedding, or other transformation remains derived.
+Inference, resampling, enhancement, summarization, separation, reconstruction, interpolation, denoising, classification, embedding, translation, prediction, or another transformation is D-class unless a profile proves it satisfies an S0/S1 definition.
 
-A D-class result must never silently replace S0 or S1.
+D-class output must never silently replace S0 or S1.
 
-## Provenance model
+## Provenance
 
-Every derived result must be traceable to:
+Every D-class result must be traceable to the exact source records or intervals supporting it and, where applicable, record:
 
 - source stream IDs;
-- precise source intervals or records;
-- model/runtime identity;
-- model hash/version;
+- source record/interval references;
+- model/runtime identity and hash/version;
 - configuration;
-- calibration where applicable;
-- inference timestamp;
+- calibration;
+- inference/transformation timestamp;
 - confidence/quality values;
 - transformation chain;
-- residual or uncertainty information where meaningful.
+- residual/uncertainty information.
 
-The engine should permit later models to append new interpretations without rewriting the original archive history.
+Later models may append new interpretations without rewriting source history.
 
-## Multiplexing and scale
-
-CODA semantics must not depend on one physical transport channel per feed.
-
-The architecture should distinguish:
-
-- **physical transport** — TCP, QUIC, UDP, file, pipe, shared memory, radio/acoustic carrier, provider protocol;
-- **logical stream** — immutable stream ID represented inside the CODEC protocol/archive;
-- **processing partition** — worker/shard assignment used internally for scale.
-
-One endpoint may therefore carry many logical streams, and one logical stream may migrate between endpoints while retaining identity and history.
-
-The archive format must remain valid whether the deployment contains one stream, one thousand streams, or tens of millions of registered logical streams. Simultaneous throughput remains bounded by bandwidth, compute, memory, and storage rather than identifier-space or port-number limits.
-
-## Transport and recovery profile
-
-Recovery is a future extension boundary, not a mandatory CODA-core algorithm.
-
-Define an abstraction capable of representing:
-
-- parity/recovery shards;
-- erasure/FEC coding groups;
-- shard sequence and block identity;
-- reconstruction verification hashes;
-- transport loss observations;
-- partial-recovery state;
-- codec enhancement/correction payloads.
-
-Implementations may later use PAR2-compatible concepts, Reed-Solomon, Raptor/fountain coding, or other validated schemes without altering the core archive semantics.
-
-Recovery must distinguish two claims:
-
-1. recovering a damaged/missing encoded bitstream exactly; and
-2. reconstructing a pre-lossy-encoding source exactly.
-
-The first can be achieved with sufficient parity. The second requires a complete exactness/correction residual and must never be implied by parity alone.
-
-## Watermark and identity profile
-
-Retain W0/W1/W2 as an audio identity specialization.
-
-The generalized architecture should treat identity evidence as a profile that may bind:
-
-- logical stream ID;
-- issuer;
-- epoch;
-- sequence;
-- device/sensor identity;
-- trust policy;
-- signed metadata;
-- physical/acoustic carrier observations.
-
-Watermark identity does not guarantee source separability and does not convert derived neural output into lossless source truth.
-
-## Inference architecture
-
-Inference remains a separate plane from preservation.
-
-Requirements:
-
-- preservation must not block on inference;
-- bounded queues and backpressure must be explicit;
-- overload may defer or drop D-class work but must not corrupt S0/S1 capture;
-- stateful streaming inference should be supported when compatible models exist;
-- offline re-inference must be supported from preserved evidence;
-- derived outputs must carry model provenance;
-- no compatible model means explicit unavailability, not fabricated output.
-
-## Distributed/cloud profile
-
-Cloud and cluster deployment should be represented as a later profile with no effect on archive truth semantics.
-
-A future implementation may include:
+## Generic processing pipeline
 
 ```text
-global endpoint
-  -> regional ingress
-  -> stream-ID partitioning
-  -> capture workers
-  -> recovery workers
-  -> inference workers
-  -> CODA writers/object storage
-  -> query/index services
+authorized heterogeneous source
+  -> StreamAdapter
+  -> S0 capture
+  -> typed StreamRecord / CODA append
+       -> optional registered exact normalization -> S1
+       -> optional profile decomposition/extraction
+       -> optional inference -> D
+       -> optional identity evidence
+       -> optional recovery/FEC records
 ```
 
-The design must avoid assuming Kubernetes or a specific cloud vendor in core APIs.
+Preservation has priority. Profile decoding or inference failure must not corrupt or block S0 capture except where explicit bounded-resource policy requires rejecting new input.
 
-Preferred properties:
+## Profiles
 
-- horizontal partitioning by stable stream ID;
-- stateless edge routing where possible;
-- explicit state ownership for stream continuity;
-- bounded queues;
-- object-store/cold-archive integration;
-- hot/cold retention profiles;
-- minimal data copies;
-- independently scalable preservation and inference planes.
+### Audio Stream Profile — first reference implementation
 
-## Confidential-compute and selective-disclosure profile
+All existing audio-specific functionality belongs here, including as applicable:
 
-Future secure deployments may use sealed records and machine-enforced authorization without changing CODA source semantics.
+- WAV/PCM and media decoding;
+- sample rate/channel layout semantics;
+- S1 sample-exact PCM and future FLAC storage;
+- W0/W1/W2 acoustic identity;
+- diarization/speaker embeddings;
+- neural source separation/stems;
+- speech/music-specific evaluation;
+- HLS/Icecast/audio transport adapters;
+- audio fidelity and watermark benchmarks.
 
-The archive should permit policy metadata and immutable audit records sufficient to support implementations such as:
+Current v0.1.0 implementation status remains truthful: moving these concepts under a profile does not claim that non-audio profiles are implemented.
 
-- encrypted payloads;
-- threshold or envelope encryption;
-- confidential-compute enclaves;
-- scoped query capability tokens;
-- purpose/time/data-class restrictions;
-- immutable disclosure/access logs;
-- selective export of only authorized records.
+### Other stream profiles
 
-CODEC core must remain neutral about the legal authority that grants access. It records and enforces declared policy inputs; it does not itself create legal authority.
+Video, telemetry, sensor, document/event, network/system, and future profiles register their own payload schemas, canonical S1 rules where valid, processors, inference capabilities, and extraction formats without modifying generic CODA semantics.
 
-## Query model
+### Recovery profile
 
-A user or downstream system should eventually be able to query by combinations of:
+Represent parity/recovery shards, erasure/FEC groups, shard/block identity, loss observations, reconstruction hashes, partial-recovery state, and correction/enhancement payloads generically. PAR2-compatible concepts, Reed-Solomon, fountain codes, or other validated algorithms may be implementations, not core requirements.
+
+Exact encoded-bitstream recovery and reconstruction of a pre-lossy source are separate claims and must remain separately proven.
+
+### Identity profile
+
+Identity evidence may bind stream ID, source/device identity, issuer, epoch, sequence, trust policy, signatures, or physical-carrier observations. W0/W1/W2 are Audio Profile specializations, not the universal identity mechanism.
+
+### Inference profile
+
+Inference is optional and subordinate to preservation. It supports stateful streaming and offline re-inference where compatible models exist. No compatible model means explicit unavailability. Every result is provenance-bearing D-class output unless independently proven otherwise.
+
+### Distributed/cloud profile
+
+Physical transport, logical streams, and processing partitions are distinct concepts. One endpoint may carry many logical streams; a stream may migrate while retaining identity.
+
+Future implementations may use regional ingress, stream-ID partitioning, capture/recovery/inference workers, CODA writers, object storage, and query/index services. Kubernetes and cloud vendors remain deployment choices rather than core semantics.
+
+### Trust/selective-disclosure profile
+
+Secure deployments may add encryption envelopes, confidential computation, capability tokens, policy/time/data-class restrictions, immutable access records, and selective export. CODEC records/enforces configured authority inputs but does not manufacture legal authority.
+
+## Query and extraction model
+
+Generic query/extraction should eventually support combinations of:
 
 - stream/source identity;
-- time range;
-- fidelity class;
-- payload/stream type;
+- time/sequence range;
+- truth class;
+- stream/payload type;
 - event identity;
 - model/version;
 - confidence threshold;
 - provenance relationship;
 - authorization/policy scope.
 
-A query result must retain links to the exact source records that support it.
+Results retain links to supporting source records. Profile-specific exporters may then produce FLAC/WAV, video, telemetry, documents, forensic packages, or other representations.
 
-## ChatGPT/Codex implementation guidance
+## Multiplexing and scale
 
-The README should contain explicit agent guidance so future automated development follows these rules:
+CODA semantics must never imply one port, connection, frequency, file, or worker per stream.
 
-1. Treat the README and approved design documents as normative requirements.
-2. Inspect repository state and tests before changing behavior.
-3. Never claim an unimplemented capability is complete.
-4. Keep current implementation-status tables accurate in every release.
-5. Preserve deterministic/probabilistic capability boundaries.
-6. Prefer narrow, testable primitives over speculative end-to-end stubs.
-7. Keep core abstractions vendor-neutral.
-8. Implement archive/transport invariants before hyperscale deployment infrastructure.
-9. Add compatibility and corruption tests for every archive-format change.
-10. Ensure inference failure cannot break preservation.
-11. Record model and transformation provenance for every D-class artifact.
-12. Benchmark throughput, latency, memory, CPU/GPU use, storage amplification, and recovery overhead before claiming scale.
-13. Treat security, privacy, authorization, and retention as first-class interfaces where those profiles are implemented.
-14. Update the roadmap when implementation reality changes rather than forcing code to match obsolete dates.
+The architecture distinguishes:
+
+1. physical transport;
+2. logical stream identity;
+3. processing partition/shard;
+4. archive placement.
+
+The same logical semantics must work for one stream, thousands of streams, or tens of millions of registered streams. Simultaneous throughput is bounded by actual bandwidth, compute, memory, storage, and latency budgets—not identifier or port count.
+
+## ChatGPT/Codex normative implementation rules
+
+1. Treat CODEC as stream-first and CODA as payload-type agnostic.
+2. Treat audio as the first implemented reference profile, not as CODEC core.
+3. When generic and audio-specific requirements conflict, preserve the generic core invariant and scope the audio requirement to Audio Stream Profile.
+4. Inspect repository state/tests before modifying behavior.
+5. Never claim an unimplemented capability is complete.
+6. Keep implementation-status tables accurate.
+7. Preserve S0/S1/D boundaries and deterministic/probabilistic distinctions.
+8. Prefer narrow, testable generic primitives over speculative end-to-end stubs.
+9. Do not add audio-only fields to generic records/APIs when they belong in profile metadata.
+10. Implement archive, identity, time, provenance, compatibility, and transport invariants before hyperscale infrastructure.
+11. Add corruption/backward-compatibility tests for archive changes.
+12. Ensure inference/profile failure cannot corrupt preservation.
+13. Record provenance for every D-class artifact.
+14. Benchmark throughput, latency, memory, CPU/GPU, storage amplification, and recovery overhead before claiming scale.
+15. Keep core abstractions vendor-neutral.
+16. Update documentation when implementation reality changes.
 
 ## Delivery sequence
 
-The recommended direction is staged as follows.
+### Stage A — preserve and classify current v0.1
 
-### Stage A — preserve current v0.1 foundation
+Keep existing behavior working and explicitly classify current audio functionality as Audio Stream Profile implementation.
 
-Maintain existing archive, secure capture, signed watermark, API, CLI, and test guarantees.
+### Stage B — stabilize stream-first core semantics
 
-### Stage B — generalized record semantics
+Introduce/standardize generic stream IDs/types/specs, generic clocks/epochs, generalized S0/S1/D semantics, payload typing, provenance envelopes, unknown-type preservation, and compatibility tests.
 
-Introduce extensible stream/payload typing, generic provenance envelopes, compatibility tests, and unknown-type preservation.
+### Stage C — generic adapter, processor, query, and extraction boundaries
 
-### Stage C — complete audio 1.0 path
+Ensure non-audio stream profiles can be added without redesigning CODA or core APIs. Migrate audio-specific assumptions behind the Audio Profile while retaining compatibility.
 
-Implement S1 FLAC/self-contained archive profile, real media adapters, stateful identity fusion, compatible neural runtime/model bundles, streaming inference, and offline re-inference.
+### Stage D — Audio Stream Profile 1.0
 
-### Stage D — transport/recovery profile
+Complete the audio specialization: self-contained S1 storage/FLAC where appropriate, production media adapters, identity fusion, compatible neural runtime/model bundles, streaming inference, offline re-inference, and audio-specific validation.
 
-Add generic recovery-shard semantics, validated FEC implementation(s), streaming repair, and exact verification.
+This stage must not block independent development of other stream profiles once Stage C is stable.
 
-### Stage E — distributed processing profile
+### Stage E — transport/recovery profile
 
-Add protocol multiplexing, stream partitioning, distributed workers, object-store backends, query indexes, and operational benchmarks.
+Add generic multiplexing/recovery semantics, validated FEC implementations, streaming repair, and exact verification.
 
-### Stage F — trust/selective-disclosure profile
+### Stage F — distributed processing profile
 
-Add encryption envelopes, policy records, scoped access, immutable access logs, and confidential-compute integration where required.
+Add partitioning, distributed workers, object-store backends, indexes, operational benchmarks, and deployment integrations without changing stream/CODA truth semantics.
 
-### Stage G — vertical profiles
+### Stage G — trust/selective-disclosure profile
 
-Build domain-specific schemas, model bundles, policies, and integrations on top of the stable substrate rather than embedding vertical assumptions in CODA core.
+Add encryption envelopes, scoped access, immutable access logs, policy records, and confidential-compute integration where required.
+
+### Stage H — additional stream/vertical profiles
+
+Build video, telemetry, sensor, document/event, network/system, and domain-specific schemas/model bundles/integrations on the stable substrate rather than forking core semantics.
 
 ## Testing requirements
 
-Every implementation stage must include tests appropriate to its invariants.
-
 At minimum:
 
-- byte-for-byte S0 round trips;
-- exact S1 round trips where supported;
-- corruption detection and bounded repair;
-- unknown stream-type preservation;
+- byte-for-byte S0 round trips for generic/opaque payloads;
+- exact S1 round trips for every profile claiming S1;
+- unknown-type preservation and extraction;
 - archive-version compatibility;
-- sequence/gap/reconnect semantics;
+- sequence/gap/reconnect/epoch semantics;
+- generic clock/timestamp tests;
 - provenance-link integrity;
-- inference-overload isolation;
-- deterministic query/extraction behavior;
-- authorization-scope enforcement for secure profiles;
-- scale benchmarks that state actual hardware and workload.
+- profile failure/inference overload isolation;
+- deterministic generic query/extraction behavior;
+- audio regression tests proving the profile migration does not weaken current guarantees;
+- corruption detection and bounded repair where recovery is implemented;
+- authorization-scope tests for secure profiles;
+- scale benchmarks tied to actual hardware/workloads.
 
 ## Success criteria
 
-This direction is successful when:
+The correction is successful when:
 
-1. CODEC can continue shipping an honest audio-first product without breaking current users.
-2. The CODA data model no longer assumes that every stream is audio.
-3. New stream types can be preserved and indexed without redesigning the archive.
-4. Every derived result remains traceable to immutable source evidence.
-5. Recovery, cloud, and secure-disclosure systems can be added as profiles instead of forks.
-6. The same logical stream semantics work on-device, on-premises, offline, and at cloud scale.
-7. Future agents have explicit instructions to build capability incrementally and keep documentation synchronized with implementation reality.
+1. A new reader cannot reasonably conclude that CODEC core means audio processing.
+2. CODA can describe and preserve an unknown non-audio stream without an archive redesign.
+3. Generic public concepts do not require PCM, sample rate, channel layout, speakers, acoustic watermarks, or neural stems.
+4. Existing audio behavior remains available and honestly documented under Audio Stream Profile.
+5. S1 means deterministic state-exactness generically; sample-exact PCM is the Audio Profile specialization.
+6. New profiles can register typed semantics, exact-state rules, processors, inference, and extraction without changing core record semantics.
+7. Every D-class result remains traceable to immutable source evidence.
+8. The same stream semantics work on-device, offline, on-premises, and at distributed cloud scale.
+9. Future ChatGPT/Codex work builds generalized invariants before profile-specific convenience.
 
-## README implementation scope
+## Immediate README implementation scope
 
-The immediate implementation after approval of this design is documentation-only:
+After this corrected spec is reviewed and approved, update `README.md` substantially rather than adding another isolated future-direction section:
 
-- add a concise generalized-platform direction section to `README.md`;
-- add normative core invariants for generalized temporal streams;
-- add future profile boundaries for recovery, distributed/cloud scale, and selective disclosure;
-- add ChatGPT/Codex implementation guidance;
-- update the delivery roadmap without changing the truthful current v0.1.0 status;
-- explicitly state that these later profiles are planned, not implemented.
+- rewrite the opening product definition around heterogeneous streams;
+- rewrite top-level goals/invariants around generic stream semantics;
+- make the generic processing architecture primary;
+- redefine S1 as state-exact and state the audio sample-exact specialization separately;
+- replace core `Feed*` conceptual vocabulary with `Stream*` direction while documenting compatibility where existing APIs remain audio-oriented;
+- move audio decoding, PCM, W0/W1/W2, diarization, separation, stems, FLAC, and audio benchmarks conceptually under Audio Stream Profile;
+- generalize ingest, timing, identity, inference, query, extraction, testing, acceptance, and roadmap language;
+- preserve an explicit current-implementation section identifying which capabilities remain audio-only today;
+- ensure planned non-audio profiles are never represented as implemented.
 
-No source-code behavior or public archive format changes are part of the immediate README update.
+No source-code/API/archive-format behavior change is part of this immediate documentation correction.

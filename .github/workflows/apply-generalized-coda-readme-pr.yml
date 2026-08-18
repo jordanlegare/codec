@@ -1,0 +1,74 @@
+name: Apply generalized CODA README patch on PR
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/apply-generalized-coda-readme-pr.yml
+      - .github/workflows/apply-generalized-coda-readme.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-readme:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Apply the approved README patch
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          workflow = Path('.github/workflows/apply-generalized-coda-readme.yml').read_text(encoding='utf-8')
+          generalized = re.search(r"generalized = r'''(.*?)'''\n\n          profiles", workflow, re.S)
+          profiles = re.search(r"profiles = r'''(.*?)'''\n\n          if marker1", workflow, re.S)
+          if not generalized or not profiles:
+              raise SystemExit('Unable to extract approved README sections')
+
+          path = Path('README.md')
+          text = path.read_text(encoding='utf-8')
+          if '## Generalized CODA platform direction' not in text:
+              anchor = '## Requirements language\n'
+              if anchor not in text:
+                  raise SystemExit('Generalized direction anchor missing')
+              text = text.replace(anchor, generalized.group(1) + anchor, 1)
+          if '## Future extension profiles' not in text or '## ChatGPT/Codex implementation guidance' not in text:
+              anchor = '## Delivery plan\n'
+              if anchor not in text:
+                  raise SystemExit('Delivery plan anchor missing')
+              text = text.replace(anchor, profiles.group(1) + anchor, 1)
+          path.write_text(text, encoding='utf-8')
+
+      - name: Verify preserved capability boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q '^## Generalized CODA platform direction$' README.md
+          grep -q '^## Future extension profiles$' README.md
+          grep -q '^## ChatGPT/Codex implementation guidance$' README.md
+          grep -q 'v0.1.0 executable preservation and signed-watermark MVP' README.md
+          grep -q 'returns `model_incompatible`' README.md
+          grep -q 'S0 — source exact' README.md
+          grep -q 'S1 — sample exact' README.md
+          grep -q 'D — derived' README.md
+          ! grep -q '\bTBD\b' README.md
+
+      - name: Commit README and remove one-shot workflows
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'codec-docs-bot'
+          git config user.email 'codec-docs-bot@users.noreply.github.com'
+          git rm .github/workflows/apply-generalized-coda-readme.yml
+          git rm .github/workflows/apply-generalized-coda-readme-pr.yml
+          git add README.md
+          git commit -m 'docs: guide CODEC toward generalized CODA'
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}

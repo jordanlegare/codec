@@ -1,6 +1,8 @@
 # Contributing to CODEC
 
-CODEC is preservation-first. Changes must keep exact source/decoded data separate from derived inference, preserve identity uncertainty, and never promote a watermark candidate to `verified_feed` without a valid W0 signature.
+CODEC is a preservation-first, stream-first system. Changes must keep exact accepted S0, exact profile-defined S1, and provenance-bearing derived D output distinct. Generic core behavior must remain payload-type agnostic; audio decoding, watermarking, separation, and feed identity belong to the Audio Stream Profile. A watermark candidate must never become authoritative identity merely because it was detected or signature-bound.
+
+Before editing, follow the repository-wide bootstrap in [`AGENTS.md`](AGENTS.md), read the architectural manifest in [`README.md`](README.md), and complete the work record and proof contract in [`AI_WORKSHEET.md`](AI_WORKSHEET.md). Recover current state from the exact checked-out SHA, open work, and current CI rather than relying on a previous conversation.
 
 ## Development
 
@@ -13,4 +15,4 @@ ctest --test-dir build --output-on-failure
 
 For memory and undefined-behavior checks, configure a second build with `-DCODEC_ENABLE_SANITIZERS=ON`.
 
-Every behavioral change needs a test that fails before the implementation is changed. Keep public headers free of vendor types, keep secrets outside fixtures and archives, and document any capability or format change in `CHANGELOG.md` and `README.md`.
+Every behavioral change needs a test that fails before the implementation is changed. Keep public headers free of vendor and profile-only types, keep secrets outside fixtures and archives, and document any proven capability or format change in `CHANGELOG.md` and `README.md`. Merge only the exact head SHA whose applicable worksheet gates and required CI are green.

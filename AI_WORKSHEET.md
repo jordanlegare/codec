@@ -13,13 +13,29 @@ Fill this before editing:
 ```yaml
 task: <one-sentence requested outcome>
 base_ref: <branch/commit>
+base_head_sha: <exact SHA verified at start>
 work_branch: <branch>
 current_version: <from CMakeLists.txt>
+active_roadmap_stage: <current README roadmap item and unmet exit evidence>
+continuity_evidence: [git_head, open_prs, exact_head_ci, roadmap_issue] # mark unavailable sources
+roadmap_issue_title: CODEC v1.0 roadmap execution log
 scope: core | archive | capture | audio-profile | inference | watermark | recovery | distributed | trust | other-profile | docs
 touched_truth_classes: [S0, S1, D]   # remove unused
 current_behavior_verified_from: [code, tests, cli, changelog]
 new_capability_claim: none | <exact claim>
 ```
+
+## 0.5. Cold-start state recovery
+
+Never assume a previous chat, local branch name, or scheduled task describes the current repository state.
+
+- [ ] Record the exact checked-out HEAD and confirm the intended base branch is current before editing.
+- [ ] Inspect the working tree and preserve unrelated changes.
+- [ ] When GitHub access is available, inspect open pull requests, their head SHAs, reviews, and CI; do not duplicate or overwrite active work.
+- [ ] Search open and closed issues for the exact title `CODEC v1.0 roadmap execution log`. If exactly one exists, read it and compare it with code/tests rather than treating it as runtime truth; if none or multiple exist, record that state instead of guessing.
+- [ ] Select the active roadmap stage from merged implementation evidence and identify its next unmet exit gate. Dates alone never advance a stage.
+- [ ] Record any unavailable continuity source and proceed only from evidence you can verify.
+- [ ] Re-read state and reverify if the base or PR head moves before merge.
 
 ## 1. Read the minimum necessary context
 

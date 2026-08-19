@@ -4,7 +4,7 @@
 
 CODEC is a C++20, stream-first engine and archive substrate for authorized heterogeneous temporal streams. It preserves source truth in **CODA** (`.coda`), keeps derived intelligence traceable to source evidence, and lets stream-specific profiles add exact normalization, inference, identity, recovery, and export behavior without redefining core semantics.
 
-> **AI entry point:** read this manifest first, then use [`AI_WORKSHEET.md`](AI_WORKSHEET.md) for execution. Detailed rationale lives in the linked design spec; do not duplicate it here.
+> **AI entry point:** repository-aware agents start with [`AGENTS.md`](AGENTS.md); otherwise read this manifest first. Then use [`AI_WORKSHEET.md`](AI_WORKSHEET.md) for execution. Detailed rationale lives in the linked design spec; do not duplicate it here.
 
 ## AI manifest
 
@@ -122,6 +122,7 @@ ctest --test-dir build-san --output-on-failure
 
 | Path | Purpose |
 |---|---|
+| `AGENTS.md` | Automatic cold-start and repository-wide agent instructions |
 | `include/` | Public C++/C interfaces |
 | `src/archive/` | CODA archive/integrity implementation |
 | `src/capture/` | Source ingest/capture |
@@ -170,6 +171,7 @@ Before changing CODEC, use [`AI_WORKSHEET.md`](AI_WORKSHEET.md). Preserve the in
 
 ## References
 
+- [`AGENTS.md`](AGENTS.md) — cold-start instructions for repository-aware agents.
 - [`AI_WORKSHEET.md`](AI_WORKSHEET.md) — canonical AI work loop and merge gate.
 - [`docs/superpowers/specs/2026-08-18-generalized-coda-direction-design.md`](docs/superpowers/specs/2026-08-18-generalized-coda-direction-design.md) — full stream-first architecture and rationale.
 - [`CHANGELOG.md`](CHANGELOG.md) — released changes.

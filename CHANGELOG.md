@@ -2,6 +2,10 @@
 
 All notable changes use semantic versioning.
 
+## Unreleased
+
+- Add a repository-wide agent bootstrap, cold-start state recovery contract, aligned contribution guidance, and CI coverage for AI-control-file and version drift.
+
 ## 0.1.0 — 2026-08-17
 
 - Add a distinctly versioned provisional CODA development profile with an append-only archive, SHA-256 record chain, committed-record trailers, exact S0 extraction, verification, and non-mutating repair. It is not the frozen normative CODA v1 schema.

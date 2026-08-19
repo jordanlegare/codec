@@ -86,6 +86,7 @@ if(CODEC_BUILD_TESTS)
     tests/test_main.cpp
     tests/test_archive.cpp
     tests/test_engine.cpp
+    tests/test_stream.cpp
     tests/test_statement.cpp
     tests/test_watermark.cpp
   )

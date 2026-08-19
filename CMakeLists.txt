@@ -110,6 +110,11 @@ if(CODEC_BUILD_TESTS)
   add_test(NAME codec-cli-integration
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/cli_integration.sh
                  $<TARGET_FILE:codec_cli>)
+
+  add_test(NAME codec-ai-contract
+    COMMAND ${CMAKE_COMMAND}
+            -DCODEC_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/ai_contract.cmake)
 endif()
 
 if(CODEC_BUILD_EXAMPLES)

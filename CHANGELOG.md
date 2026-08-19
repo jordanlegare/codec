@@ -4,6 +4,7 @@ All notable changes use semantic versioning.
 
 ## Unreleased
 
+- Add generic C++ stream metadata primitives (`StreamId`, `StreamType`, `TruthClass`, `StreamDescriptor`, `StreamClock`, and `StreamEpoch`) while retaining v0.1 `Feed*` compatibility and the existing C ABI/archive behavior.
 - Add a repository-wide agent bootstrap, cold-start state recovery contract, aligned contribution guidance, and CI coverage for AI-control-file and version drift.
 
 ## 0.1.0 — 2026-08-17

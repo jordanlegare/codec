@@ -54,6 +54,7 @@ implemented_v0_1:
     - SHA-256 payload/chain integrity evidence
     - commit trailers, final index, verification, exact S0 extraction, non-mutating repair
     - bounded file/stdin/HTTP/HTTPS capture with hardened path/network policy
+    - generic C++ metadata primitives: StreamId, StreamType, TruthClass, StreamDescriptor, StreamClock, StreamEpoch
     - C++ API, C ABI, CLI
   audio_profile:
     - PCM16 RIFF/WAVE exact read/write
@@ -66,7 +67,7 @@ implemented_v0_1:
     - no bundled neural model/runtime; incompatible model returns model_incompatible
 
 planned_not_implemented:
-  - generalized Stream* public API migration
+  - generalized Stream* engine/API migration beyond metadata primitives
   - generalized S1 canonical-state implementations beyond audio semantics
   - video, telemetry, sensor, document/event, network/system profiles
   - production neural separation/diarization/identity models

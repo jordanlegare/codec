@@ -2,8 +2,8 @@
 
 #include <codec/integrity.hpp>
 #include <codec/result.hpp>
+#include <codec/stream.hpp>
 
-#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -21,14 +21,6 @@ inline constexpr std::uint32_t coda_development_profile_version = 1;
 inline constexpr std::uint64_t coda_header_size = 64;
 inline constexpr std::uint64_t coda_record_envelope_size = 96;
 inline constexpr std::uint64_t coda_commit_trailer_size = 40;
-
-struct StreamId {
-  std::array<std::uint8_t, 16> bytes{};
-  auto operator<=>(const StreamId&) const = default;
-};
-
-StreamId derive_stream_id(std::string_view value);
-std::string to_string(const StreamId& value);
 
 enum class RecordType : std::uint16_t {
   feed_descriptor = 1,

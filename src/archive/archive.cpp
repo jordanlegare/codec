@@ -354,6 +354,14 @@ Result<RecordInfo> CodaWriter::append(RecordType type, const StreamId& stream,
                                       std::int64_t end_ns,
                                       std::span<const std::byte> payload,
                                       std::uint16_t flags) {
+  return append_raw(record_type_code(type), stream, start_ns, end_ns, payload,
+                    flags);
+}
+
+Result<RecordInfo> CodaWriter::append_raw(
+    RecordTypeCode type, const StreamId& stream, std::int64_t start_ns,
+    std::int64_t end_ns, std::span<const std::byte> payload,
+    std::uint16_t flags) {
   if (!impl_ || impl_->is_finalized) {
     return fail<RecordInfo>(ErrorCode::invalid_argument,
                             "cannot append to a finalized archive");
@@ -369,7 +377,7 @@ Result<RecordInfo> CodaWriter::append(RecordType type, const StreamId& stream,
   }
   std::array<std::byte, coda_record_envelope_size> envelope{};
   std::copy(record_magic.begin(), record_magic.end(), envelope.begin());
-  put_le<std::uint16_t>(envelope, 4, static_cast<std::uint16_t>(type));
+  put_le<RecordTypeCode>(envelope, 4, type);
   put_le<std::uint16_t>(envelope, 6, flags);
   put_le<std::uint32_t>(envelope, 8,
                         static_cast<std::uint32_t>(envelope.size()));
@@ -403,7 +411,7 @@ Result<RecordInfo> CodaWriter::append(RecordType type, const StreamId& stream,
                             "failed committing archive record");
   }
   RecordInfo info;
-  info.type = type;
+  info.type = static_cast<RecordType>(type);
   info.sequence = impl_->next_sequence;
   info.stream = stream;
   info.start_ns = start_ns;
@@ -566,11 +574,16 @@ Result<std::vector<std::byte>> CodaArchive::read_payload(
 
 Result<std::vector<std::byte>> CodaArchive::extract_stream(
     const StreamId& stream, RecordType type, ArchiveReadPolicy policy) const {
+  return extract_stream_raw(stream, record_type_code(type), policy);
+}
+
+Result<std::vector<std::byte>> CodaArchive::extract_stream_raw(
+    const StreamId& stream, RecordTypeCode type, ArchiveReadPolicy policy) const {
   auto record_list = records(policy);
   if (!record_list) return record_list.error();
   std::vector<std::byte> output;
   for (const auto& record : *record_list) {
-    if (record.stream != stream || record.type != type) continue;
+    if (record.stream != stream || record.type_code() != type) continue;
     auto payload = read_payload(record);
     if (!payload) return payload.error();
     if (output.size() > std::numeric_limits<std::size_t>::max() -
@@ -647,8 +660,8 @@ Result<RepairReport> CodaArchive::repair(
     if (record.type == RecordType::final_index) continue;
     auto payload = source_archive->read_payload(record);
     if (!payload) return payload.error();
-    auto appended = writer.append(record.type, record.stream, record.start_ns,
-                                  record.end_ns, *payload);
+    auto appended = writer.append_raw(record.type_code(), record.stream,
+                                      record.start_ns, record.end_ns, *payload);
     if (!appended) return appended.error();
     report.recovered_records += 1;
     report.recovered_payload_bytes += payload->size();

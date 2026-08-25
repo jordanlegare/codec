@@ -34,6 +34,15 @@ enum class RecordType : std::uint16_t {
   final_index = 0xfffe,
 };
 
+// The development profile stores record type codes as opaque 16-bit values.
+// Registered RecordType names are conveniences; unknown codes remain valid
+// preservation tags and do not imply that CODEC can interpret their payloads.
+using RecordTypeCode = std::uint16_t;
+
+constexpr RecordTypeCode record_type_code(RecordType type) noexcept {
+  return static_cast<RecordTypeCode>(type);
+}
+
 const char* record_type_name(RecordType type) noexcept;
 
 struct RecordInfo {
@@ -45,6 +54,10 @@ struct RecordInfo {
   std::uint64_t payload_size{};
   std::uint64_t file_offset{};
   Sha256 hash{};
+
+  constexpr RecordTypeCode type_code() const noexcept {
+    return record_type_code(type);
+  }
 };
 
 struct VerificationReport {
@@ -90,6 +103,11 @@ class CodaWriter {
                             std::int64_t start_ns, std::int64_t end_ns,
                             std::span<const std::byte> payload,
                             std::uint16_t flags = 0);
+  // Appends S0 bytes with an uninterpreted development-profile type code.
+  Result<RecordInfo> append_raw(RecordTypeCode type, const StreamId& stream,
+                                std::int64_t start_ns, std::int64_t end_ns,
+                                std::span<const std::byte> payload,
+                                std::uint16_t flags = 0);
   Result<void> finalize();
   bool finalized() const noexcept;
 
@@ -110,6 +128,11 @@ class CodaArchive {
   Result<std::vector<std::byte>> read_payload(const RecordInfo& record) const;
   Result<std::vector<std::byte>> extract_stream(const StreamId& stream,
       RecordType type = RecordType::source_bytes,
+      ArchiveReadPolicy policy = ArchiveReadPolicy::complete_archive) const;
+  // Extracts bytes by their exact 16-bit tag without requiring a registered
+  // RecordType enumerator or a payload interpreter.
+  Result<std::vector<std::byte>> extract_stream_raw(
+      const StreamId& stream, RecordTypeCode type,
       ArchiveReadPolicy policy = ArchiveReadPolicy::complete_archive) const;
   Result<std::vector<std::byte>> extract_feed(
       std::string_view label,

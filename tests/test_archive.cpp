@@ -28,6 +28,15 @@ std::vector<std::byte> bytes(std::string_view value) {
   return result;
 }
 
+std::vector<std::byte> file_bytes(const std::filesystem::path& path) {
+  const auto size = std::filesystem::file_size(path);
+  std::vector<std::byte> output(static_cast<std::size_t>(size));
+  std::ifstream input(path, std::ios::binary);
+  input.read(reinterpret_cast<char*>(output.data()),
+             static_cast<std::streamsize>(output.size()));
+  return output;
+}
+
 codec::StreamId stream_id(std::uint8_t seed) {
   codec::StreamId value{};
   for (std::size_t index = 0; index < value.bytes.size(); ++index) {
@@ -79,6 +88,88 @@ TEST(archive_extracts_committed_source_bytes_exactly) {
   expected.insert(expected.end(), second.begin(), second.end());
   EXPECT_EQ(*extracted, expected);
   std::filesystem::remove(path);
+}
+
+TEST(raw_record_type_api_matches_typed_record_encoding) {
+  const auto typed_path = test_path("typed-record.coda");
+  const auto raw_path = test_path("raw-record.coda");
+  std::filesystem::remove(typed_path);
+  std::filesystem::remove(raw_path);
+  const auto stream = stream_id(4);
+  const auto payload = bytes("same S0 bytes");
+
+  auto typed_writer = std::move(*codec::CodaWriter::create(typed_path));
+  EXPECT_TRUE(typed_writer.append(codec::RecordType::source_bytes, stream, 10,
+                                  20, payload));
+  EXPECT_TRUE(typed_writer.finalize());
+
+  auto raw_writer = std::move(*codec::CodaWriter::create(raw_path));
+  EXPECT_TRUE(raw_writer.append_raw(
+      codec::record_type_code(codec::RecordType::source_bytes), stream, 10,
+      20, payload));
+  EXPECT_TRUE(raw_writer.finalize());
+
+  const auto typed = file_bytes(typed_path);
+  const auto raw = file_bytes(raw_path);
+  EXPECT_EQ(std::vector<std::byte>(typed.begin() + codec::coda_header_size,
+                                   typed.end()),
+            std::vector<std::byte>(raw.begin() + codec::coda_header_size,
+                                   raw.end()));
+  std::filesystem::remove(typed_path);
+  std::filesystem::remove(raw_path);
+}
+
+TEST(unknown_record_type_code_round_trips_source_bytes_exactly) {
+  const auto path = test_path("unknown-record.coda");
+  std::filesystem::remove(path);
+  constexpr codec::RecordTypeCode unknown_type = 0x7a51;
+  const auto stream = stream_id(5);
+  const auto payload =
+      bytes(std::string_view{"opaque provider payload\0with binary", 35});
+
+  auto writer = std::move(*codec::CodaWriter::create(path));
+  EXPECT_TRUE(writer.append_raw(unknown_type, stream, 100, 200, payload));
+  EXPECT_TRUE(writer.finalize());
+
+  auto archive = std::move(*codec::CodaArchive::open(path));
+  auto records = archive.records();
+  EXPECT_TRUE(records);
+  EXPECT_EQ(records->front().type_code(), unknown_type);
+  auto extracted = archive.extract_stream_raw(stream, unknown_type);
+  EXPECT_TRUE(extracted);
+  EXPECT_EQ(*extracted, payload);
+  std::filesystem::remove(path);
+}
+
+TEST(repair_preserves_unknown_record_type_code_and_payload) {
+  const auto source = test_path("unknown-repair-source.coda");
+  const auto repaired = test_path("unknown-repair-output.coda");
+  std::filesystem::remove(source);
+  std::filesystem::remove(repaired);
+  constexpr codec::RecordTypeCode unknown_type = 0x7a52;
+  const auto stream = stream_id(6);
+  const auto payload = bytes("opaque record survives repair");
+
+  auto writer = std::move(*codec::CodaWriter::create(source));
+  EXPECT_TRUE(writer.append_raw(unknown_type, stream, 1, 2, payload));
+  auto torn = writer.append(codec::RecordType::source_bytes, stream, 3, 4,
+                            bytes("torn tail"));
+  EXPECT_TRUE(torn);
+  EXPECT_TRUE(writer.finalize());
+  std::filesystem::resize_file(
+      source, torn->file_offset + codec::coda_record_envelope_size + 1);
+
+  auto repair = codec::CodaArchive::repair(source, repaired);
+  EXPECT_TRUE(repair);
+  auto archive = std::move(*codec::CodaArchive::open(repaired));
+  auto records = archive.records();
+  EXPECT_TRUE(records);
+  EXPECT_EQ(records->front().type_code(), unknown_type);
+  auto extracted = archive.extract_stream_raw(stream, unknown_type);
+  EXPECT_TRUE(extracted);
+  EXPECT_EQ(*extracted, payload);
+  std::filesystem::remove(source);
+  std::filesystem::remove(repaired);
 }
 
 TEST(archive_detects_payload_tampering) {

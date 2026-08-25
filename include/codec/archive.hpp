@@ -27,6 +27,7 @@ enum class RecordType : std::uint16_t {
   source_bytes = 2,
   pcm16 = 3,
   gap = 4,
+  stream_descriptor = 5,
   watermark_statement = 20,
   watermark_observation = 21,
   feed_identity_event = 22,
@@ -108,6 +109,9 @@ class CodaWriter {
                                 std::int64_t start_ns, std::int64_t end_ns,
                                 std::span<const std::byte> payload,
                                 std::uint16_t flags = 0);
+  // Persists a versioned, payload-type-agnostic S0 stream descriptor.
+  Result<RecordInfo> append_stream_descriptor(
+      const StreamDescriptor& descriptor, std::int64_t timestamp_ns);
   Result<void> finalize();
   bool finalized() const noexcept;
 
@@ -124,6 +128,10 @@ class CodaArchive {
   Result<std::vector<RecordInfo>> records(
       ArchiveReadPolicy policy = ArchiveReadPolicy::complete_archive) const;
   Result<std::vector<FeedInfo>> feeds(
+      ArchiveReadPolicy policy = ArchiveReadPolicy::complete_archive) const;
+  // Lists generic descriptors and projects legacy feed descriptors into a
+  // compatible view with an unspecified payload type.
+  Result<std::vector<StreamDescriptor>> streams(
       ArchiveReadPolicy policy = ArchiveReadPolicy::complete_archive) const;
   Result<std::vector<std::byte>> read_payload(const RecordInfo& record) const;
   Result<std::vector<std::byte>> extract_stream(const StreamId& stream,

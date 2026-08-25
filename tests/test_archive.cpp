@@ -172,6 +172,93 @@ TEST(repair_preserves_unknown_record_type_code_and_payload) {
   std::filesystem::remove(repaired);
 }
 
+TEST(generic_stream_descriptor_round_trips_without_profile_interpretation) {
+  const auto path = test_path("stream-descriptor.coda");
+  std::filesystem::remove(path);
+  const codec::StreamDescriptor descriptor{
+      .id = stream_id(7),
+      .type = codec::StreamType::telemetry,
+      .label = "reactor-temperature",
+      .source_id = "plant-a/sensor-42",
+      .payload_type = "application/vnd.example.telemetry+cbor",
+  };
+  const auto payload =
+      bytes(std::string_view{"\x01\x00\xff\x7f", 4});
+
+  auto writer = std::move(*codec::CodaWriter::create(path));
+  EXPECT_TRUE(writer.append_stream_descriptor(descriptor, 100));
+  EXPECT_TRUE(writer.append(codec::RecordType::source_bytes, descriptor.id,
+                            101, 102, payload));
+  EXPECT_TRUE(writer.finalize());
+
+  auto archive = std::move(*codec::CodaArchive::open(path));
+  auto streams = archive.streams();
+  EXPECT_TRUE(streams);
+  EXPECT_EQ(streams->size(), std::size_t{1});
+  EXPECT_EQ(streams->front().id, descriptor.id);
+  EXPECT_EQ(streams->front().type, descriptor.type);
+  EXPECT_EQ(streams->front().label, descriptor.label);
+  EXPECT_EQ(streams->front().source_id, descriptor.source_id);
+  EXPECT_EQ(streams->front().payload_type, descriptor.payload_type);
+  auto extracted = archive.extract_stream(descriptor.id);
+  EXPECT_TRUE(extracted);
+  EXPECT_EQ(*extracted, payload);
+  std::filesystem::remove(path);
+}
+
+TEST(invalid_stream_descriptor_does_not_corrupt_committed_s0) {
+  const auto path = test_path("invalid-stream-descriptor.coda");
+  std::filesystem::remove(path);
+  const auto stream = stream_id(9);
+  const auto payload = bytes("committed before optional metadata");
+
+  auto writer = std::move(*codec::CodaWriter::create(path));
+  EXPECT_TRUE(writer.append(codec::RecordType::source_bytes, stream, 1, 2,
+                            payload));
+  const codec::StreamDescriptor invalid{
+      .id = stream,
+      .type = codec::StreamType::telemetry,
+      .label = "missing-payload-type",
+      .source_id = "sensor-9",
+      .payload_type = "",
+  };
+  auto appended = writer.append_stream_descriptor(invalid, 3);
+  EXPECT_FALSE(appended);
+  EXPECT_EQ(appended.error().code, codec::ErrorCode::invalid_argument);
+  EXPECT_TRUE(writer.finalize());
+
+  auto archive = std::move(*codec::CodaArchive::open(path));
+  EXPECT_TRUE(archive.verify().ok);
+  auto extracted = archive.extract_stream(stream);
+  EXPECT_TRUE(extracted);
+  EXPECT_EQ(*extracted, payload);
+  std::filesystem::remove(path);
+}
+
+TEST(malformed_stream_descriptor_does_not_replace_committed_s0) {
+  const auto path = test_path("malformed-stream-descriptor.coda");
+  std::filesystem::remove(path);
+  const auto stream = stream_id(10);
+  const auto payload = bytes("source remains independently readable");
+
+  auto writer = std::move(*codec::CodaWriter::create(path));
+  EXPECT_TRUE(writer.append(codec::RecordType::source_bytes, stream, 1, 2,
+                            payload));
+  EXPECT_TRUE(writer.append(codec::RecordType::stream_descriptor, stream, 3,
+                            3, bytes("not an SDS1 descriptor")));
+  EXPECT_TRUE(writer.finalize());
+
+  auto archive = std::move(*codec::CodaArchive::open(path));
+  EXPECT_TRUE(archive.verify().ok);
+  auto streams = archive.streams();
+  EXPECT_FALSE(streams);
+  EXPECT_EQ(streams.error().code, codec::ErrorCode::archive_corrupt);
+  auto extracted = archive.extract_stream(stream);
+  EXPECT_TRUE(extracted);
+  EXPECT_EQ(*extracted, payload);
+  std::filesystem::remove(path);
+}
+
 TEST(archive_detects_payload_tampering) {
   const auto path = test_path("tampered.coda");
   std::filesystem::remove(path);

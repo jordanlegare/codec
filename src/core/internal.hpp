@@ -25,5 +25,9 @@ std::string json_escape(std::string_view input);
 std::vector<std::byte> encode_feed_descriptor(const FeedInfo& feed);
 Result<FeedInfo> decode_feed_descriptor(std::span<const std::byte> payload,
                                         const StreamId& stream);
+Result<std::vector<std::byte>> encode_stream_descriptor(
+    const StreamDescriptor& descriptor);
+Result<StreamDescriptor> decode_stream_descriptor(
+    std::span<const std::byte> payload, const StreamId& stream);
 
 }  // namespace codec::detail

@@ -34,6 +34,14 @@ TEST(engine_records_a_file_feed_and_preserves_its_bytes) {
   EXPECT_TRUE(feeds);
   EXPECT_EQ(feeds->size(), std::size_t{1});
   EXPECT_EQ(feeds->front().label, std::string{"local-test"});
+  auto streams = archive->streams();
+  EXPECT_TRUE(streams);
+  EXPECT_EQ(streams->size(), std::size_t{1});
+  EXPECT_EQ(streams->front().id, feeds->front().stream);
+  EXPECT_EQ(streams->front().type, codec::StreamType::opaque);
+  EXPECT_EQ(streams->front().label, std::string{"local-test"});
+  EXPECT_EQ(streams->front().source_id, input.string());
+  EXPECT_TRUE(streams->front().payload_type.empty());
   auto extracted = archive->extract_feed("local-test");
   EXPECT_TRUE(extracted);
   EXPECT_EQ(extracted->size(), payload.size());

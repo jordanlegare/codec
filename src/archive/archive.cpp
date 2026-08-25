@@ -425,6 +425,14 @@ Result<RecordInfo> CodaWriter::append_raw(
   return info;
 }
 
+Result<RecordInfo> CodaWriter::append_stream_descriptor(
+    const StreamDescriptor& descriptor, std::int64_t timestamp_ns) {
+  auto payload = detail::encode_stream_descriptor(descriptor);
+  if (!payload) return payload.error();
+  return append(RecordType::stream_descriptor, descriptor.id, timestamp_ns,
+                timestamp_ns, *payload);
+}
+
 Result<void> CodaWriter::finalize() {
   if (!impl_) {
     return fail(ErrorCode::invalid_argument, "writer is not initialized");
@@ -505,6 +513,38 @@ Result<std::vector<FeedInfo>> CodaArchive::feeds(
     auto feed = detail::decode_feed_descriptor(*payload, record.stream);
     if (!feed) return feed.error();
     output.push_back(std::move(*feed));
+  }
+  return output;
+}
+
+Result<std::vector<StreamDescriptor>> CodaArchive::streams(
+    ArchiveReadPolicy policy) const {
+  auto record_list = records(policy);
+  if (!record_list) return record_list.error();
+  std::vector<StreamDescriptor> output;
+  for (const auto& record : *record_list) {
+    if (record.type == RecordType::stream_descriptor) {
+      auto payload = read_payload(record);
+      if (!payload) return payload.error();
+      auto descriptor =
+          detail::decode_stream_descriptor(*payload, record.stream);
+      if (!descriptor) return descriptor.error();
+      output.push_back(std::move(*descriptor));
+      continue;
+    }
+    if (record.type == RecordType::feed_descriptor) {
+      auto payload = read_payload(record);
+      if (!payload) return payload.error();
+      auto feed = detail::decode_feed_descriptor(*payload, record.stream);
+      if (!feed) return feed.error();
+      output.push_back(StreamDescriptor{
+          .id = feed->stream,
+          .type = StreamType::opaque,
+          .label = std::move(feed->label),
+          .source_id = std::move(feed->uri),
+          .payload_type = {},
+      });
+    }
   }
   return output;
 }
@@ -706,6 +746,7 @@ const char* record_type_name(RecordType type) noexcept {
     case RecordType::source_bytes: return "source_bytes";
     case RecordType::pcm16: return "pcm16";
     case RecordType::gap: return "gap";
+    case RecordType::stream_descriptor: return "stream_descriptor";
     case RecordType::watermark_statement: return "watermark_statement";
     case RecordType::watermark_observation: return "watermark_observation";
     case RecordType::feed_identity_event: return "feed_identity_event";

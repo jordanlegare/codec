@@ -55,6 +55,7 @@ implemented_v0_1:
     - commit trailers, final index, verification, exact S0 extraction, non-mutating repair
     - bounded file/stdin/HTTP/HTTPS capture with hardened path/network policy
     - generic C++ metadata primitives: StreamId, StreamType, TruthClass, StreamDescriptor, StreamClock, StreamEpoch
+    - versioned generic StreamDescriptor archive records and C++ append/list APIs, with legacy feed descriptors projected as opaque streams with unspecified payload type
     - explicit append/extract/repair round trips for unknown 16-bit development-profile record type codes without payload interpretation
     - C++ API, C ABI, CLI
   audio_profile:
@@ -69,7 +70,7 @@ implemented_v0_1:
 
 planned_not_implemented:
   - generalized Stream* engine/API migration beyond metadata primitives
-  - persisted generic StreamDescriptor, payload-type, clock/epoch, and provenance envelopes
+  - persisted generic clock/epoch, sequence/gap, integrity, and provenance envelopes
   - generalized S1 canonical-state implementations beyond audio semantics
   - video, telemetry, sensor, document/event, network/system profiles
   - production neural separation/diarization/identity models

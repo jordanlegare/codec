@@ -164,6 +164,14 @@ struct StreamProvenance {
   ProvenanceProcess process;
 };
 
+struct ProvenanceQuery {
+  // Present filters are AND-combined. Record queries apply to the resolved
+  // subject and to any one immediate input; recursive traversal is excluded.
+  std::optional<TruthClass> subject_truth;
+  std::optional<RecordQuery> subject;
+  std::optional<RecordQuery> direct_input;
+};
+
 enum class ArchiveReadPolicy {
   complete_archive,
   verified_prefix,
@@ -232,6 +240,10 @@ class CodaArchive {
   Result<std::vector<StreamContinuityEvent>> continuity(
       ArchiveReadPolicy policy = ArchiveReadPolicy::complete_archive) const;
   Result<std::vector<StreamProvenance>> provenance(
+      ArchiveReadPolicy policy = ArchiveReadPolicy::complete_archive) const;
+  // Returns matching sidecars in archive order with exact record links intact.
+  Result<std::vector<StreamProvenance>> query_provenance(
+      const ProvenanceQuery& query,
       ArchiveReadPolicy policy = ArchiveReadPolicy::complete_archive) const;
   Result<std::vector<std::byte>> read_payload(const RecordInfo& record) const;
   Result<std::vector<std::byte>> extract_stream(const StreamId& stream,

@@ -240,6 +240,11 @@ void expect_invalid_provenance_metadata(std::string_view name,
   auto provenance = archive.provenance();
   EXPECT_FALSE(provenance);
   EXPECT_EQ(provenance.error().code, codec::ErrorCode::archive_corrupt);
+  auto queried = archive.query_provenance(codec::ProvenanceQuery{});
+  EXPECT_FALSE(queried);
+  if (!queried) {
+    EXPECT_EQ(queried.error().code, codec::ErrorCode::archive_corrupt);
+  }
   auto extracted = archive.extract_stream(input->stream);
   EXPECT_TRUE(extracted);
   EXPECT_EQ(*extracted, source_payload);
@@ -779,6 +784,224 @@ TEST(generic_stream_provenance_round_trips_s1_and_multi_input_d) {
   EXPECT_FALSE(d.process.configuration_hash.has_value());
   EXPECT_TRUE(d.process.details_type.empty());
   EXPECT_TRUE(d.process.details.empty());
+  std::filesystem::remove(path);
+}
+
+TEST(generic_provenance_query_combines_truth_subject_and_direct_input) {
+  const auto path = test_path("provenance-query.coda");
+  std::filesystem::remove(path);
+  const auto source_stream = stream_id(145);
+  const auto output_stream = stream_id(146);
+  constexpr codec::RecordTypeCode normalized_type = 0x7601;
+  constexpr codec::RecordTypeCode derived_type = 0x7602;
+
+  auto writer = std::move(*codec::CodaWriter::create(path));
+  auto source = writer.append(codec::RecordType::source_bytes, source_stream,
+                              0, 10, bytes("source"));
+  auto normalized = writer.append_raw(normalized_type, output_stream, 10, 20,
+                                      bytes("normalized"));
+  EXPECT_TRUE(source);
+  EXPECT_TRUE(normalized);
+  const std::array normalized_inputs{*source};
+  EXPECT_TRUE(writer.append_stream_provenance(
+      *normalized, codec::TruthClass::state_exact, normalized_inputs,
+      provenance_process()));
+  auto derived = writer.append_raw(derived_type, output_stream, 20, 30,
+                                   bytes("derived"));
+  EXPECT_TRUE(derived);
+  const std::array derived_inputs{*source, *normalized};
+  EXPECT_TRUE(writer.append_stream_provenance(
+      *derived, codec::TruthClass::derived, derived_inputs,
+      provenance_process()));
+  EXPECT_TRUE(writer.finalize());
+
+  auto archive = std::move(*codec::CodaArchive::open(path));
+  auto all = archive.query_provenance(codec::ProvenanceQuery{});
+  EXPECT_TRUE(all);
+  EXPECT_EQ(all->size(), std::size_t{2});
+  EXPECT_EQ(all->at(0).subject.sequence, normalized->sequence);
+  EXPECT_EQ(all->at(1).subject.sequence, derived->sequence);
+
+  const codec::RecordQuery normalized_record{
+      .stream = output_stream,
+      .type = normalized_type,
+      .sequence = codec::RecordSequenceRange{
+          .begin = normalized->sequence, .end = normalized->sequence + 1},
+      .time = codec::RecordTimeRange{.begin_ns = 10, .end_ns = 20},
+  };
+  const codec::ProvenanceQuery by_subject{
+      .subject_truth = std::nullopt,
+      .subject = normalized_record,
+      .direct_input = std::nullopt,
+  };
+  auto subject_matches = archive.query_provenance(by_subject);
+  EXPECT_TRUE(subject_matches);
+  EXPECT_EQ(subject_matches->size(), std::size_t{1});
+  EXPECT_EQ(subject_matches->front().subject_truth,
+            codec::TruthClass::state_exact);
+  EXPECT_EQ(subject_matches->front().subject.sequence, normalized->sequence);
+  EXPECT_EQ(subject_matches->front().subject.hash, normalized->hash);
+
+  const codec::ProvenanceQuery by_direct_input{
+      .subject_truth = std::nullopt,
+      .subject = std::nullopt,
+      .direct_input = normalized_record,
+  };
+  auto input_matches = archive.query_provenance(by_direct_input);
+  EXPECT_TRUE(input_matches);
+  EXPECT_EQ(input_matches->size(), std::size_t{1});
+  EXPECT_EQ(input_matches->front().subject.sequence, derived->sequence);
+  EXPECT_EQ(input_matches->front().inputs.size(), std::size_t{2});
+  EXPECT_EQ(input_matches->front().inputs.at(1).sequence,
+            normalized->sequence);
+  EXPECT_EQ(input_matches->front().inputs.at(1).hash, normalized->hash);
+
+  const codec::RecordQuery derived_subject{
+      .stream = output_stream,
+      .type = derived_type,
+      .sequence = std::nullopt,
+      .time = codec::RecordTimeRange{.begin_ns = 20, .end_ns = 30},
+  };
+  const codec::RecordQuery source_input{
+      .stream = source_stream,
+      .type = codec::record_type_code(codec::RecordType::source_bytes),
+      .sequence = std::nullopt,
+      .time = std::nullopt,
+  };
+  const codec::ProvenanceQuery combined{
+      .subject_truth = codec::TruthClass::derived,
+      .subject = derived_subject,
+      .direct_input = source_input,
+  };
+  auto combined_matches = archive.query_provenance(combined);
+  EXPECT_TRUE(combined_matches);
+  EXPECT_EQ(combined_matches->size(), std::size_t{1});
+  EXPECT_EQ(combined_matches->front().subject.sequence, derived->sequence);
+  EXPECT_EQ(combined_matches->front().subject.hash, derived->hash);
+
+  auto source_truth = archive.query_provenance(codec::ProvenanceQuery{
+      .subject_truth = codec::TruthClass::source_exact,
+      .subject = std::nullopt,
+      .direct_input = std::nullopt,
+  });
+  EXPECT_TRUE(source_truth);
+  EXPECT_TRUE(source_truth->empty());
+  auto missing_input = source_input;
+  missing_input.stream = stream_id(147);
+  auto no_matches = archive.query_provenance(codec::ProvenanceQuery{
+      .subject_truth = std::nullopt,
+      .subject = std::nullopt,
+      .direct_input = missing_input,
+  });
+  EXPECT_TRUE(no_matches);
+  EXPECT_TRUE(no_matches->empty());
+  std::filesystem::remove(path);
+}
+
+TEST(generic_provenance_query_validates_before_archive_scanning) {
+  const auto path = test_path("invalid-provenance-query.coda");
+  std::filesystem::remove(path);
+  auto writer = std::move(*codec::CodaWriter::create(path));
+  EXPECT_TRUE(writer.finalize());
+  auto archive = std::move(*codec::CodaArchive::open(path));
+  std::filesystem::resize_file(path, 0);
+
+  const std::array invalid_queries{
+      codec::ProvenanceQuery{
+          .subject_truth = static_cast<codec::TruthClass>(99),
+          .subject = std::nullopt,
+          .direct_input = std::nullopt},
+      codec::ProvenanceQuery{
+          .subject_truth = std::nullopt,
+          .subject = codec::RecordQuery{
+              .stream = std::nullopt,
+              .type = std::nullopt,
+              .sequence = codec::RecordSequenceRange{.begin = 2, .end = 2},
+              .time = std::nullopt},
+          .direct_input = std::nullopt},
+      codec::ProvenanceQuery{
+          .subject_truth = std::nullopt,
+          .subject = codec::RecordQuery{
+              .stream = std::nullopt,
+              .type = std::nullopt,
+              .sequence = std::nullopt,
+              .time = codec::RecordTimeRange{.begin_ns = 5, .end_ns = 4}},
+          .direct_input = std::nullopt},
+      codec::ProvenanceQuery{
+          .subject_truth = std::nullopt,
+          .subject = std::nullopt,
+          .direct_input = codec::RecordQuery{
+              .stream = std::nullopt,
+              .type = std::nullopt,
+              .sequence = codec::RecordSequenceRange{.begin = 3, .end = 2},
+              .time = std::nullopt}},
+      codec::ProvenanceQuery{
+          .subject_truth = std::nullopt,
+          .subject = std::nullopt,
+          .direct_input = codec::RecordQuery{
+              .stream = std::nullopt,
+              .type = std::nullopt,
+              .sequence = std::nullopt,
+              .time = codec::RecordTimeRange{.begin_ns = 7, .end_ns = 7}}},
+  };
+  for (const auto& query : invalid_queries) {
+    auto result = archive.query_provenance(query);
+    EXPECT_FALSE(result);
+    if (!result) {
+      EXPECT_EQ(result.error().code, codec::ErrorCode::invalid_argument);
+    }
+  }
+  std::filesystem::remove(path);
+}
+
+TEST(generic_provenance_query_honors_verified_prefix_policy) {
+  const auto path = test_path("provenance-query-prefix.coda");
+  std::filesystem::remove(path);
+  const auto source_stream = stream_id(148);
+  const auto output_stream = stream_id(149);
+  constexpr codec::RecordTypeCode type = 0x7603;
+  auto writer = std::move(*codec::CodaWriter::create(path));
+  auto source = writer.append(codec::RecordType::source_bytes, source_stream,
+                              0, 10, bytes("source"));
+  auto subject = writer.append_raw(type, output_stream, 0, 10,
+                                   bytes("derived"));
+  EXPECT_TRUE(source);
+  EXPECT_TRUE(subject);
+  const std::array inputs{*source};
+  EXPECT_TRUE(writer.append_stream_provenance(
+      *subject, codec::TruthClass::derived, inputs, provenance_process()));
+  auto torn = writer.append(codec::RecordType::source_bytes, source_stream,
+                            10, 20, bytes("torn-tail"));
+  EXPECT_TRUE(torn);
+  EXPECT_TRUE(writer.finalize());
+  std::filesystem::resize_file(
+      path, torn->file_offset + codec::coda_record_envelope_size + 1);
+
+  auto archive = std::move(*codec::CodaArchive::open(path));
+  const codec::ProvenanceQuery query{
+      .subject_truth = codec::TruthClass::derived,
+      .subject = codec::RecordQuery{
+          .stream = output_stream,
+          .type = type,
+          .sequence = std::nullopt,
+          .time = std::nullopt},
+      .direct_input = codec::RecordQuery{
+          .stream = source_stream,
+          .type = codec::record_type_code(codec::RecordType::source_bytes),
+          .sequence = std::nullopt,
+          .time = std::nullopt},
+  };
+  EXPECT_FALSE(archive.query_provenance(query));
+  auto prefix = archive.query_provenance(
+      query, codec::ArchiveReadPolicy::verified_prefix);
+  EXPECT_TRUE(prefix);
+  if (prefix) {
+    EXPECT_EQ(prefix->size(), std::size_t{1});
+    EXPECT_EQ(prefix->front().subject.sequence, subject->sequence);
+    EXPECT_EQ(prefix->front().subject.hash, subject->hash);
+    EXPECT_EQ(prefix->front().inputs.front().sequence, source->sequence);
+    EXPECT_EQ(prefix->front().inputs.front().hash, source->hash);
+  }
   std::filesystem::remove(path);
 }
 

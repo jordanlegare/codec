@@ -4,6 +4,7 @@ All notable changes use semantic versioning.
 
 ## Unreleased
 
+- Add direct S1/D provenance queries with AND-combined truth-class, physical subject, and existential immediate-input filters, archive-order results, exact record links, verified-prefix support, and pre-scan argument validation without recursive graph traversal or a format change.
 - Add generic C++ physical-record query and boundary-preserving extraction APIs with exact stream/raw-type filters, half-open archive-sequence and envelope-time ranges, verified-prefix support, and per-record payload/hash retention without changing CODA bytes, the CLI, or C ABI.
 - Add versioned declared S1/D provenance sidecars with exact backward-only subject/input record links, bounded generic process identity, typed opaque profile details, deterministic writer/reader validation, failure isolation, and repair coverage without changing the CODA development-profile envelope or C ABI.
 - Add versioned generic S0 timing and gap persistence with C++ append/read APIs, deterministic per-stream sequence/epoch/clock validation, explicit missing ranges, exact prior source-record SHA-256 links, repair coverage, and malformed-metadata isolation without changing the CODA development-profile envelope or C ABI.

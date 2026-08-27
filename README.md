@@ -58,6 +58,7 @@ implemented_v0_1:
     - versioned generic StreamDescriptor archive records and C++ append/list APIs, with legacy feed descriptors projected as opaque streams with unspecified payload type
     - versioned generic S0 timing and gap records with C++ append/read APIs, per-stream sequence/epoch validation, explicit missing ranges, and exact prior source-record SHA-256 links preserved across repair
     - versioned declared S1/D provenance sidecars with C++ append/read APIs, exact backward-only subject/input record links, bounded generic process identity, typed opaque profile details, and repair preservation
+    - AND-combined C++ direct-provenance queries over S1/D truth class plus physical subject and immediate-input filters, preserving sidecar order and exact record links
     - explicit append/extract/repair round trips for unknown 16-bit development-profile record type codes without payload interpretation
     - AND-combined C++ physical record queries over exact stream/raw type and half-open archive-sequence/envelope-time ranges, plus boundary-preserving per-record exact payload extraction
     - C++ API, C ABI, CLI

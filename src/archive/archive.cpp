@@ -91,6 +91,63 @@ bool matches_record_query(const RecordInfo& record, const RecordQuery& query) {
   return true;
 }
 
+Result<std::vector<StreamProvenance>> decode_archive_provenance(
+    const CodaArchive& archive, const std::vector<RecordInfo>& record_list) {
+  std::vector<StreamProvenance> output;
+  std::set<std::uint64_t> provenance_subjects;
+  const auto prohibited = [](RecordTypeCode type) {
+    return type == record_type_code(RecordType::stream_provenance) ||
+           type == record_type_code(RecordType::final_index);
+  };
+  const auto exact_record = [&record_list](const ProvenanceRecordLink& link) {
+    return std::find_if(
+        record_list.begin(), record_list.end(),
+        [&link](const RecordInfo& candidate) {
+          return candidate.sequence == link.sequence &&
+                 candidate.stream == link.stream &&
+                 candidate.type_code() == link.type &&
+                 candidate.hash == link.hash;
+        });
+  };
+  for (const auto& record : record_list) {
+    if (record.type != RecordType::stream_provenance) continue;
+    auto payload = archive.read_payload(record);
+    if (!payload) return payload.error();
+    auto decoded = detail::decode_stream_provenance(*payload);
+    if (!decoded) return decoded.error();
+    const auto subject = exact_record(decoded->subject);
+    if (subject == record_list.end() || subject->sequence >= record.sequence ||
+        subject->stream != record.stream || prohibited(subject->type_code())) {
+      return fail<std::vector<StreamProvenance>>(
+          ErrorCode::archive_corrupt,
+          "provenance subject link is invalid");
+    }
+    if (!provenance_subjects.insert(subject->sequence).second) {
+      return fail<std::vector<StreamProvenance>>(
+          ErrorCode::archive_corrupt,
+          "provenance subject has duplicate sidecars");
+    }
+    std::set<std::uint64_t> input_sequences;
+    for (const auto& input_link : decoded->inputs) {
+      const auto input = exact_record(input_link);
+      if (input == record_list.end() ||
+          input->sequence >= subject->sequence ||
+          prohibited(input->type_code())) {
+        return fail<std::vector<StreamProvenance>>(
+            ErrorCode::archive_corrupt,
+            "provenance input link is invalid");
+      }
+      if (!input_sequences.insert(input->sequence).second) {
+        return fail<std::vector<StreamProvenance>>(
+            ErrorCode::archive_corrupt,
+            "provenance input link is duplicated");
+      }
+    }
+    output.push_back(std::move(*decoded));
+  }
+  return output;
+}
+
 Result<std::array<std::byte, coda_header_size>> make_header() {
   std::array<std::byte, coda_header_size> header{};
   std::copy(header_magic.begin(), header_magic.end(), header.begin());
@@ -830,12 +887,35 @@ Result<std::vector<StreamProvenance>> CodaArchive::provenance(
     ArchiveReadPolicy policy) const {
   auto record_list = records(policy);
   if (!record_list) return record_list.error();
-  std::vector<StreamProvenance> output;
-  std::set<std::uint64_t> provenance_subjects;
-  const auto prohibited = [](RecordTypeCode type) {
-    return type == record_type_code(RecordType::stream_provenance) ||
-           type == record_type_code(RecordType::final_index);
-  };
+  return decode_archive_provenance(*this, *record_list);
+}
+
+Result<std::vector<StreamProvenance>> CodaArchive::query_provenance(
+    const ProvenanceQuery& query, ArchiveReadPolicy policy) const {
+  if (query.subject_truth) {
+    switch (*query.subject_truth) {
+      case TruthClass::source_exact:
+      case TruthClass::state_exact:
+      case TruthClass::derived:
+        break;
+      default:
+        return fail<std::vector<StreamProvenance>>(
+            ErrorCode::invalid_argument,
+            "provenance query truth class is invalid");
+    }
+  }
+  if (query.subject) {
+    auto valid = validate_record_query(*query.subject);
+    if (!valid) return valid.error();
+  }
+  if (query.direct_input) {
+    auto valid = validate_record_query(*query.direct_input);
+    if (!valid) return valid.error();
+  }
+  auto record_list = records(policy);
+  if (!record_list) return record_list.error();
+  auto semantic_records = decode_archive_provenance(*this, *record_list);
+  if (!semantic_records) return semantic_records.error();
   const auto exact_record = [&record_list](const ProvenanceRecordLink& link) {
     return std::find_if(
         record_list->begin(), record_list->end(),
@@ -846,41 +926,33 @@ Result<std::vector<StreamProvenance>> CodaArchive::provenance(
                  candidate.hash == link.hash;
         });
   };
-  for (const auto& record : *record_list) {
-    if (record.type != RecordType::stream_provenance) continue;
-    auto payload = read_payload(record);
-    if (!payload) return payload.error();
-    auto decoded = detail::decode_stream_provenance(*payload);
-    if (!decoded) return decoded.error();
-    const auto subject = exact_record(decoded->subject);
-    if (subject == record_list->end() || subject->sequence >= record.sequence ||
-        subject->stream != record.stream || prohibited(subject->type_code())) {
+  std::vector<StreamProvenance> output;
+  for (const auto& provenance_record : *semantic_records) {
+    if (query.subject_truth &&
+        provenance_record.subject_truth != *query.subject_truth) {
+      continue;
+    }
+    const auto subject = exact_record(provenance_record.subject);
+    if (subject == record_list->end()) {
       return fail<std::vector<StreamProvenance>>(
           ErrorCode::archive_corrupt,
-          "provenance subject link is invalid");
+          "provenance subject changed during query");
     }
-    if (!provenance_subjects.insert(subject->sequence).second) {
-      return fail<std::vector<StreamProvenance>>(
-          ErrorCode::archive_corrupt,
-          "provenance subject has duplicate sidecars");
+    if (query.subject && !matches_record_query(*subject, *query.subject)) {
+      continue;
     }
-    std::set<std::uint64_t> input_sequences;
-    for (const auto& input_link : decoded->inputs) {
-      const auto input = exact_record(input_link);
-      if (input == record_list->end() ||
-          input->sequence >= subject->sequence ||
-          prohibited(input->type_code())) {
-        return fail<std::vector<StreamProvenance>>(
-            ErrorCode::archive_corrupt,
-            "provenance input link is invalid");
-      }
-      if (!input_sequences.insert(input->sequence).second) {
-        return fail<std::vector<StreamProvenance>>(
-            ErrorCode::archive_corrupt,
-            "provenance input link is duplicated");
-      }
+    if (query.direct_input) {
+      const auto matches_input = std::any_of(
+          provenance_record.inputs.begin(), provenance_record.inputs.end(),
+          [&exact_record, &query, &record_list](
+              const ProvenanceRecordLink& link) {
+            const auto input = exact_record(link);
+            return input != record_list->end() &&
+                   matches_record_query(*input, *query.direct_input);
+          });
+      if (!matches_input) continue;
     }
-    output.push_back(std::move(*decoded));
+    output.push_back(provenance_record);
   }
   return output;
 }

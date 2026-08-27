@@ -64,6 +64,30 @@ struct RecordInfo {
   }
 };
 
+struct RecordSequenceRange {
+  // Half-open archive sequence range [begin, end).
+  std::uint64_t begin{};
+  std::uint64_t end{};
+};
+
+struct RecordTimeRange {
+  // Half-open authenticated envelope-time range [begin_ns, end_ns).
+  std::int64_t begin_ns{};
+  std::int64_t end_ns{};
+};
+
+struct RecordQuery {
+  std::optional<StreamId> stream;
+  std::optional<RecordTypeCode> type;
+  std::optional<RecordSequenceRange> sequence;
+  std::optional<RecordTimeRange> time;
+};
+
+struct ExtractedRecord {
+  RecordInfo record{};
+  std::vector<std::byte> payload;
+};
+
 struct VerificationReport {
   bool ok{false};
   bool finalized{false};
@@ -190,6 +214,14 @@ class CodaArchive {
   static Result<CodaArchive> open(const std::filesystem::path& path);
   VerificationReport verify() const;
   Result<std::vector<RecordInfo>> records(
+      ArchiveReadPolicy policy = ArchiveReadPolicy::complete_archive) const;
+  // AND-combines physical envelope filters and preserves archive order.
+  Result<std::vector<RecordInfo>> query_records(
+      const RecordQuery& query,
+      ArchiveReadPolicy policy = ArchiveReadPolicy::complete_archive) const;
+  // Returns one individually verified payload per selected record.
+  Result<std::vector<ExtractedRecord>> extract_records(
+      const RecordQuery& query,
       ArchiveReadPolicy policy = ArchiveReadPolicy::complete_archive) const;
   Result<std::vector<FeedInfo>> feeds(
       ArchiveReadPolicy policy = ArchiveReadPolicy::complete_archive) const;

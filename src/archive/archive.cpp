@@ -59,6 +59,38 @@ bool bytes_equal(std::span<const std::byte> left,
          std::equal(left.begin(), left.end(), right.begin());
 }
 
+Result<void> validate_record_query(const RecordQuery& query) {
+  if (query.sequence && query.sequence->begin >= query.sequence->end) {
+    return fail(ErrorCode::invalid_argument,
+                "record query sequence range must be non-empty");
+  }
+  if (query.time && query.time->begin_ns >= query.time->end_ns) {
+    return fail(ErrorCode::invalid_argument,
+                "record query time range must be non-empty");
+  }
+  return {};
+}
+
+bool matches_record_query(const RecordInfo& record, const RecordQuery& query) {
+  if (query.stream && record.stream != *query.stream) return false;
+  if (query.type && record.type_code() != *query.type) return false;
+  if (query.sequence &&
+      (record.sequence < query.sequence->begin ||
+       record.sequence >= query.sequence->end)) {
+    return false;
+  }
+  if (query.time) {
+    const auto point = record.start_ns == record.end_ns;
+    const auto matches =
+        point ? query.time->begin_ns <= record.start_ns &&
+                    record.start_ns < query.time->end_ns
+              : record.start_ns < query.time->end_ns &&
+                    query.time->begin_ns < record.end_ns;
+    if (!matches) return false;
+  }
+  return true;
+}
+
 Result<std::array<std::byte, coda_header_size>> make_header() {
   std::array<std::byte, coda_header_size> header{};
   std::copy(header_magic.begin(), header_magic.end(), header.begin());
@@ -660,6 +692,34 @@ Result<std::vector<RecordInfo>> CodaArchive::records(
   return std::move(scanned->records);
 }
 
+Result<std::vector<RecordInfo>> CodaArchive::query_records(
+    const RecordQuery& query, ArchiveReadPolicy policy) const {
+  auto valid = validate_record_query(query);
+  if (!valid) return valid.error();
+  auto record_list = records(policy);
+  if (!record_list) return record_list.error();
+  std::vector<RecordInfo> output;
+  output.reserve(record_list->size());
+  for (const auto& record : *record_list) {
+    if (matches_record_query(record, query)) output.push_back(record);
+  }
+  return output;
+}
+
+Result<std::vector<ExtractedRecord>> CodaArchive::extract_records(
+    const RecordQuery& query, ArchiveReadPolicy policy) const {
+  auto selected = query_records(query, policy);
+  if (!selected) return selected.error();
+  std::vector<ExtractedRecord> output;
+  output.reserve(selected->size());
+  for (const auto& record : *selected) {
+    auto payload = read_payload(record);
+    if (!payload) return payload.error();
+    output.push_back(ExtractedRecord{record, std::move(*payload)});
+  }
+  return output;
+}
+
 Result<std::vector<FeedInfo>> CodaArchive::feeds(
     ArchiveReadPolicy policy) const {
   auto record_list = records(policy);
@@ -895,11 +955,16 @@ Result<std::vector<std::byte>> CodaArchive::extract_stream(
 
 Result<std::vector<std::byte>> CodaArchive::extract_stream_raw(
     const StreamId& stream, RecordTypeCode type, ArchiveReadPolicy policy) const {
-  auto record_list = records(policy);
-  if (!record_list) return record_list.error();
+  const RecordQuery query{
+      .stream = stream,
+      .type = type,
+      .sequence = std::nullopt,
+      .time = std::nullopt,
+  };
+  auto selected = query_records(query, policy);
+  if (!selected) return selected.error();
   std::vector<std::byte> output;
-  for (const auto& record : *record_list) {
-    if (record.stream != stream || record.type_code() != type) continue;
+  for (const auto& record : *selected) {
     auto payload = read_payload(record);
     if (!payload) return payload.error();
     if (output.size() > std::numeric_limits<std::size_t>::max() -

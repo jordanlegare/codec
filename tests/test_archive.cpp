@@ -390,6 +390,180 @@ TEST(repair_preserves_unknown_record_type_code_and_payload) {
   std::filesystem::remove(repaired);
 }
 
+TEST(generic_record_query_combines_filters_and_time_boundaries) {
+  const auto path = test_path("generic-record-query.coda");
+  std::filesystem::remove(path);
+  const auto selected_stream = stream_id(140);
+  const auto other_stream = stream_id(141);
+  constexpr codec::RecordTypeCode selected_type = 0x7400;
+  constexpr codec::RecordTypeCode other_type = 0x7401;
+
+  auto writer = std::move(*codec::CodaWriter::create(path));
+  auto ending_at_query_start = writer.append_raw(
+      selected_type, selected_stream, 0, 10, bytes("ends-at-start"));
+  auto overlapping = writer.append_raw(
+      selected_type, selected_stream, 10, 20, bytes("overlaps"));
+  auto wrong_type = writer.append_raw(
+      other_type, selected_stream, 12, 18, bytes("wrong-type"));
+  auto wrong_stream = writer.append_raw(
+      selected_type, other_stream, 12, 18, bytes("wrong-stream"));
+  auto point_at_query_start = writer.append_raw(
+      selected_type, selected_stream, 10, 10, bytes("point-at-start"));
+  auto point_at_query_end = writer.append_raw(
+      selected_type, selected_stream, 20, 20, bytes("point-at-end"));
+  EXPECT_TRUE(ending_at_query_start);
+  EXPECT_TRUE(overlapping);
+  EXPECT_TRUE(wrong_type);
+  EXPECT_TRUE(wrong_stream);
+  EXPECT_TRUE(point_at_query_start);
+  EXPECT_TRUE(point_at_query_end);
+  EXPECT_TRUE(writer.finalize());
+
+  auto archive = std::move(*codec::CodaArchive::open(path));
+  const codec::RecordQuery query{
+      .stream = selected_stream,
+      .type = selected_type,
+      .sequence = codec::RecordSequenceRange{.begin = 1, .end = 6},
+      .time = codec::RecordTimeRange{.begin_ns = 10, .end_ns = 20},
+  };
+  auto records = archive.query_records(query);
+  EXPECT_TRUE(records);
+  EXPECT_EQ(records->size(), std::size_t{2});
+  EXPECT_EQ(records->at(0).sequence, overlapping->sequence);
+  EXPECT_EQ(records->at(0).hash, overlapping->hash);
+  EXPECT_EQ(records->at(1).sequence, point_at_query_start->sequence);
+  EXPECT_EQ(records->at(1).hash, point_at_query_start->hash);
+
+  const codec::RecordQuery first_window{
+      .stream = selected_stream,
+      .type = selected_type,
+      .sequence = std::nullopt,
+      .time = codec::RecordTimeRange{.begin_ns = 0, .end_ns = 10},
+  };
+  auto first_window_records = archive.query_records(first_window);
+  EXPECT_TRUE(first_window_records);
+  EXPECT_EQ(first_window_records->size(), std::size_t{1});
+  EXPECT_EQ(first_window_records->front().sequence,
+            ending_at_query_start->sequence);
+  std::filesystem::remove(path);
+}
+
+TEST(generic_record_query_rejects_empty_or_inverted_ranges) {
+  const auto path = test_path("invalid-record-query.coda");
+  std::filesystem::remove(path);
+  auto writer = std::move(*codec::CodaWriter::create(path));
+  EXPECT_TRUE(writer.finalize());
+  auto archive = std::move(*codec::CodaArchive::open(path));
+
+  const std::array invalid_queries{
+      codec::RecordQuery{
+          .stream = std::nullopt,
+          .type = std::nullopt,
+          .sequence = codec::RecordSequenceRange{.begin = 2, .end = 2},
+          .time = std::nullopt},
+      codec::RecordQuery{
+          .stream = std::nullopt,
+          .type = std::nullopt,
+          .sequence = codec::RecordSequenceRange{.begin = 3, .end = 2},
+          .time = std::nullopt},
+      codec::RecordQuery{
+          .stream = std::nullopt,
+          .type = std::nullopt,
+          .sequence = std::nullopt,
+          .time = codec::RecordTimeRange{.begin_ns = 20, .end_ns = 20}},
+      codec::RecordQuery{
+          .stream = std::nullopt,
+          .type = std::nullopt,
+          .sequence = std::nullopt,
+          .time = codec::RecordTimeRange{.begin_ns = 21, .end_ns = 20}},
+  };
+  for (const auto& query : invalid_queries) {
+    auto result = archive.query_records(query);
+    EXPECT_FALSE(result);
+    if (!result) {
+      EXPECT_EQ(result.error().code, codec::ErrorCode::invalid_argument);
+    }
+  }
+  std::filesystem::remove(path);
+}
+
+TEST(generic_record_query_honors_verified_prefix_policy) {
+  const auto path = test_path("record-query-prefix.coda");
+  std::filesystem::remove(path);
+  const auto stream = stream_id(142);
+  constexpr codec::RecordTypeCode type = 0x7402;
+  auto writer = std::move(*codec::CodaWriter::create(path));
+  auto first = writer.append_raw(type, stream, 0, 10, bytes("prefix"));
+  auto torn = writer.append_raw(type, stream, 10, 20, bytes("torn-tail"));
+  EXPECT_TRUE(first);
+  EXPECT_TRUE(torn);
+  EXPECT_TRUE(writer.finalize());
+  std::filesystem::resize_file(
+      path, torn->file_offset + codec::coda_record_envelope_size + 1);
+
+  auto archive = std::move(*codec::CodaArchive::open(path));
+  const codec::RecordQuery query{
+      .stream = stream,
+      .type = type,
+      .sequence = codec::RecordSequenceRange{.begin = 0, .end = 2},
+      .time = codec::RecordTimeRange{.begin_ns = 0, .end_ns = 20},
+  };
+  EXPECT_FALSE(archive.query_records(query));
+  auto prefix = archive.query_records(
+      query, codec::ArchiveReadPolicy::verified_prefix);
+  EXPECT_TRUE(prefix);
+  EXPECT_EQ(prefix->size(), std::size_t{1});
+  EXPECT_EQ(prefix->front().sequence, first->sequence);
+  EXPECT_EQ(prefix->front().hash, first->hash);
+  auto extracted_prefix = archive.extract_records(
+      query, codec::ArchiveReadPolicy::verified_prefix);
+  EXPECT_TRUE(extracted_prefix);
+  EXPECT_EQ(extracted_prefix->size(), std::size_t{1});
+  EXPECT_EQ(extracted_prefix->front().record.hash, first->hash);
+  EXPECT_EQ(extracted_prefix->front().payload, bytes("prefix"));
+  std::filesystem::remove(path);
+}
+
+TEST(generic_record_extraction_preserves_boundaries_and_metadata) {
+  const auto path = test_path("record-query-extraction.coda");
+  std::filesystem::remove(path);
+  const auto stream = stream_id(143);
+  constexpr codec::RecordTypeCode type = 0x7403;
+  const auto first_payload = bytes("first opaque payload");
+  const auto second_payload = bytes("second opaque payload");
+
+  auto writer = std::move(*codec::CodaWriter::create(path));
+  auto first = writer.append_raw(type, stream, 30, 40, first_payload);
+  auto second = writer.append_raw(type, stream, 40, 50, second_payload);
+  EXPECT_TRUE(first);
+  EXPECT_TRUE(second);
+  EXPECT_TRUE(writer.append_raw(0x7404, stream_id(144), 30, 50,
+                                bytes("not selected")));
+  EXPECT_TRUE(writer.finalize());
+
+  auto archive = std::move(*codec::CodaArchive::open(path));
+  const codec::RecordQuery query{
+      .stream = stream,
+      .type = type,
+      .sequence = std::nullopt,
+      .time = std::nullopt,
+  };
+  auto extracted = archive.extract_records(query);
+  EXPECT_TRUE(extracted);
+  EXPECT_EQ(extracted->size(), std::size_t{2});
+  EXPECT_EQ(extracted->at(0).record.stream, first->stream);
+  EXPECT_EQ(extracted->at(0).record.type_code(), first->type_code());
+  EXPECT_EQ(extracted->at(0).record.sequence, first->sequence);
+  EXPECT_EQ(extracted->at(0).record.hash, first->hash);
+  EXPECT_EQ(extracted->at(0).payload, first_payload);
+  EXPECT_EQ(extracted->at(1).record.stream, second->stream);
+  EXPECT_EQ(extracted->at(1).record.type_code(), second->type_code());
+  EXPECT_EQ(extracted->at(1).record.sequence, second->sequence);
+  EXPECT_EQ(extracted->at(1).record.hash, second->hash);
+  EXPECT_EQ(extracted->at(1).payload, second_payload);
+  std::filesystem::remove(path);
+}
+
 TEST(generic_stream_descriptor_round_trips_without_profile_interpretation) {
   const auto path = test_path("stream-descriptor.coda");
   std::filesystem::remove(path);

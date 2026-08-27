@@ -29,5 +29,24 @@ Result<std::vector<std::byte>> encode_stream_descriptor(
     const StreamDescriptor& descriptor);
 Result<StreamDescriptor> decode_stream_descriptor(
     std::span<const std::byte> payload, const StreamId& stream);
+std::vector<std::byte> encode_stream_timing(const StreamTiming& timing);
+Result<StreamTiming> decode_stream_timing(std::span<const std::byte> payload,
+                                          const StreamId& stream);
+std::vector<std::byte> encode_stream_gap(const StreamGap& gap);
+Result<StreamGap> decode_stream_gap(std::span<const std::byte> payload,
+                                    const StreamId& stream);
+
+struct StreamContinuityState {
+  std::uint64_t next_sequence{};
+  StreamEpoch epoch{};
+  std::int64_t last_monotonic_ns{};
+  bool initialized{false};
+  bool has_monotonic{false};
+};
+
+Result<void> validate_and_advance(StreamContinuityState& state,
+                                  const StreamTiming& timing);
+Result<void> validate_and_advance(StreamContinuityState& state,
+                                  const StreamGap& gap);
 
 }  // namespace codec::detail

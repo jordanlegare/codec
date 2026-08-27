@@ -12,6 +12,7 @@
 #include <fcntl.h>
 #include <fstream>
 #include <limits>
+#include <map>
 #include <optional>
 #include <sstream>
 #include <sys/stat.h>
@@ -303,6 +304,7 @@ struct CodaWriter::Impl {
   std::uint64_t next_sequence{};
   Sha256 previous_hash{};
   std::vector<RecordInfo> records;
+  std::map<StreamId, detail::StreamContinuityState> continuity_states;
   bool is_finalized{false};
 
   ~Impl() {
@@ -433,6 +435,73 @@ Result<RecordInfo> CodaWriter::append_stream_descriptor(
                 timestamp_ns, *payload);
 }
 
+Result<RecordInfo> CodaWriter::append_stream_timing(
+    const RecordInfo& source, std::uint64_t stream_sequence,
+    const StreamClock& clock, const StreamEpoch& epoch) {
+  if (!impl_ || impl_->is_finalized) {
+    return fail<RecordInfo>(ErrorCode::invalid_argument,
+                            "cannot append to a finalized archive");
+  }
+  const auto committed = std::find_if(
+      impl_->records.begin(), impl_->records.end(),
+      [&source](const RecordInfo& candidate) {
+        return candidate.sequence == source.sequence;
+      });
+  if (committed == impl_->records.end() ||
+      committed->type != RecordType::source_bytes ||
+      source.type != RecordType::source_bytes ||
+      committed->stream != source.stream || committed->hash != source.hash) {
+    return fail<RecordInfo>(
+        ErrorCode::invalid_argument,
+        "stream timing source must match an exact committed source record");
+  }
+  const auto committed_stream = committed->stream;
+  const StreamTiming timing{
+      .stream = committed_stream,
+      .sequence = stream_sequence,
+      .clock = clock,
+      .epoch = epoch,
+      .source_record_sequence = committed->sequence,
+      .source_record_hash = committed->hash,
+  };
+  detail::StreamContinuityState next_state;
+  const auto state = impl_->continuity_states.find(committed_stream);
+  if (state != impl_->continuity_states.end()) next_state = state->second;
+  auto valid = detail::validate_and_advance(next_state, timing);
+  if (!valid) return valid.error();
+  const auto payload = detail::encode_stream_timing(timing);
+  auto appended = append(RecordType::stream_timing, committed_stream,
+                         clock.monotonic_ns, clock.monotonic_ns, payload);
+  if (!appended) return appended.error();
+  impl_->continuity_states[committed_stream] = next_state;
+  return appended;
+}
+
+Result<RecordInfo> CodaWriter::append_stream_gap(
+    const StreamId& stream, std::uint64_t first_sequence,
+    std::uint64_t missing_count, const StreamEpoch& epoch) {
+  const StreamGap gap{
+      .stream = stream,
+      .first_sequence = first_sequence,
+      .missing_count = missing_count,
+      .epoch = epoch,
+  };
+  if (!impl_ || impl_->is_finalized) {
+    return fail<RecordInfo>(ErrorCode::invalid_argument,
+                            "cannot append to a finalized archive");
+  }
+  detail::StreamContinuityState next_state;
+  const auto state = impl_->continuity_states.find(stream);
+  if (state != impl_->continuity_states.end()) next_state = state->second;
+  auto valid = detail::validate_and_advance(next_state, gap);
+  if (!valid) return valid.error();
+  const auto payload = detail::encode_stream_gap(gap);
+  auto appended = append(RecordType::gap, stream, 0, 0, payload);
+  if (!appended) return appended.error();
+  impl_->continuity_states[stream] = next_state;
+  return appended;
+}
+
 Result<void> CodaWriter::finalize() {
   if (!impl_) {
     return fail(ErrorCode::invalid_argument, "writer is not initialized");
@@ -543,6 +612,64 @@ Result<std::vector<StreamDescriptor>> CodaArchive::streams(
           .label = std::move(feed->label),
           .source_id = std::move(feed->uri),
           .payload_type = {},
+      });
+    }
+  }
+  return output;
+}
+
+Result<std::vector<StreamContinuityEvent>> CodaArchive::continuity(
+    ArchiveReadPolicy policy) const {
+  auto record_list = records(policy);
+  if (!record_list) return record_list.error();
+  std::vector<StreamContinuityEvent> output;
+  std::map<StreamId, detail::StreamContinuityState> states;
+  for (const auto& record : *record_list) {
+    if (record.type == RecordType::stream_timing) {
+      auto payload = read_payload(record);
+      if (!payload) return payload.error();
+      auto timing = detail::decode_stream_timing(*payload, record.stream);
+      if (!timing) return timing.error();
+      const auto source = std::find_if(
+          record_list->begin(), record_list->end(),
+          [&timing](const RecordInfo& candidate) {
+            return candidate.sequence == timing->source_record_sequence;
+          });
+      if (source == record_list->end() || source->sequence >= record.sequence ||
+          source->type != RecordType::source_bytes ||
+          source->stream != timing->stream ||
+          source->hash != timing->source_record_hash) {
+        return fail<std::vector<StreamContinuityEvent>>(
+            ErrorCode::archive_corrupt,
+            "stream timing source link is invalid");
+      }
+      auto valid = detail::validate_and_advance(states[timing->stream],
+                                                *timing);
+      if (!valid) {
+        return fail<std::vector<StreamContinuityEvent>>(
+            ErrorCode::archive_corrupt,
+            "invalid stream timing continuity: " + valid.error().message);
+      }
+      output.push_back(StreamContinuityEvent{
+          .kind = StreamContinuityKind::timing,
+          .timing = std::move(*timing),
+      });
+      continue;
+    }
+    if (record.type == RecordType::gap) {
+      auto payload = read_payload(record);
+      if (!payload) return payload.error();
+      auto gap = detail::decode_stream_gap(*payload, record.stream);
+      if (!gap) return gap.error();
+      auto valid = detail::validate_and_advance(states[gap->stream], *gap);
+      if (!valid) {
+        return fail<std::vector<StreamContinuityEvent>>(
+            ErrorCode::archive_corrupt,
+            "invalid stream gap continuity: " + valid.error().message);
+      }
+      output.push_back(StreamContinuityEvent{
+          .kind = StreamContinuityKind::gap,
+          .gap = std::move(*gap),
       });
     }
   }
@@ -747,6 +874,7 @@ const char* record_type_name(RecordType type) noexcept {
     case RecordType::pcm16: return "pcm16";
     case RecordType::gap: return "gap";
     case RecordType::stream_descriptor: return "stream_descriptor";
+    case RecordType::stream_timing: return "stream_timing";
     case RecordType::watermark_statement: return "watermark_statement";
     case RecordType::watermark_observation: return "watermark_observation";
     case RecordType::feed_identity_event: return "feed_identity_event";

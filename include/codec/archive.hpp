@@ -28,6 +28,7 @@ enum class RecordType : std::uint16_t {
   pcm16 = 3,
   gap = 4,
   stream_descriptor = 5,
+  stream_timing = 6,
   watermark_statement = 20,
   watermark_observation = 21,
   feed_identity_event = 22,
@@ -85,6 +86,33 @@ struct FeedInfo {
   bool preserve_source{true};
 };
 
+enum class StreamContinuityKind : std::uint8_t {
+  timing = 1,
+  gap = 2,
+};
+
+struct StreamTiming {
+  StreamId stream{};
+  std::uint64_t sequence{};
+  StreamClock clock{};
+  StreamEpoch epoch{};
+  std::uint64_t source_record_sequence{};
+  Sha256 source_record_hash{};
+};
+
+struct StreamGap {
+  StreamId stream{};
+  std::uint64_t first_sequence{};
+  std::uint64_t missing_count{};
+  StreamEpoch epoch{};
+};
+
+struct StreamContinuityEvent {
+  StreamContinuityKind kind{StreamContinuityKind::timing};
+  StreamTiming timing{};
+  StreamGap gap{};
+};
+
 enum class ArchiveReadPolicy {
   complete_archive,
   verified_prefix,
@@ -112,6 +140,12 @@ class CodaWriter {
   // Persists a versioned, payload-type-agnostic S0 stream descriptor.
   Result<RecordInfo> append_stream_descriptor(
       const StreamDescriptor& descriptor, std::int64_t timestamp_ns);
+  Result<RecordInfo> append_stream_timing(
+      const RecordInfo& source, std::uint64_t stream_sequence,
+      const StreamClock& clock, const StreamEpoch& epoch);
+  Result<RecordInfo> append_stream_gap(
+      const StreamId& stream, std::uint64_t first_sequence,
+      std::uint64_t missing_count, const StreamEpoch& epoch);
   Result<void> finalize();
   bool finalized() const noexcept;
 
@@ -132,6 +166,8 @@ class CodaArchive {
   // Lists generic descriptors and projects legacy feed descriptors into a
   // compatible view with an unspecified payload type.
   Result<std::vector<StreamDescriptor>> streams(
+      ArchiveReadPolicy policy = ArchiveReadPolicy::complete_archive) const;
+  Result<std::vector<StreamContinuityEvent>> continuity(
       ArchiveReadPolicy policy = ArchiveReadPolicy::complete_archive) const;
   Result<std::vector<std::byte>> read_payload(const RecordInfo& record) const;
   Result<std::vector<std::byte>> extract_stream(const StreamId& stream,

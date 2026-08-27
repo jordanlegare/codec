@@ -4,6 +4,7 @@ All notable changes use semantic versioning.
 
 ## Unreleased
 
+- Add versioned generic S0 timing and gap persistence with C++ append/read APIs, deterministic per-stream sequence/epoch/clock validation, explicit missing ranges, exact prior source-record SHA-256 links, repair coverage, and malformed-metadata isolation without changing the CODA development-profile envelope or C ABI.
 - Add versioned, payload-type-agnostic `StreamDescriptor` persistence and C++ append/list APIs, including legacy `FeedInfo` projection and failure-isolation coverage without changing the CODA development-profile header, record envelope, or C ABI.
 - Add explicit C++ append/extract APIs for unknown 16-bit CODA development-profile record type codes, with byte-exact S0 and repair round-trip coverage and no binary-layout change.
 - Add generic C++ stream metadata primitives (`StreamId`, `StreamType`, `TruthClass`, `StreamDescriptor`, `StreamClock`, and `StreamEpoch`) while retaining v0.1 `Feed*` compatibility and the existing C ABI/archive behavior.

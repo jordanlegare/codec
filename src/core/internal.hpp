@@ -35,6 +35,10 @@ Result<StreamTiming> decode_stream_timing(std::span<const std::byte> payload,
 std::vector<std::byte> encode_stream_gap(const StreamGap& gap);
 Result<StreamGap> decode_stream_gap(std::span<const std::byte> payload,
                                     const StreamId& stream);
+Result<std::vector<std::byte>> encode_stream_provenance(
+    const StreamProvenance& provenance);
+Result<StreamProvenance> decode_stream_provenance(
+    std::span<const std::byte> payload);
 
 struct StreamContinuityState {
   std::uint64_t next_sequence{};

@@ -124,6 +124,145 @@ void expect_invalid_continuity_metadata(std::string_view name,
   std::filesystem::remove(path);
 }
 
+codec::ProvenanceProcess provenance_process() {
+  return codec::ProvenanceProcess{
+      .operation = "test.transform",
+      .implementation_id = "codec.tests",
+      .implementation_version = "1",
+      .implementation_hash = std::nullopt,
+      .configuration_hash = std::nullopt,
+      .created_utc_ns = 1234,
+      .details_type = {},
+      .details = {},
+  };
+}
+
+void put_provenance_link(std::span<std::byte> output, std::size_t offset,
+                         const codec::RecordInfo& record) {
+  for (std::size_t index = 0; index < record.stream.bytes.size(); ++index) {
+    output[offset + index] =
+        static_cast<std::byte>(record.stream.bytes[index]);
+  }
+  put_le<codec::RecordTypeCode>(output, offset + 16, record.type_code());
+  put_le<std::uint16_t>(output, offset + 18, 0);
+  put_le<std::uint64_t>(output, offset + 20, record.sequence);
+  for (std::size_t index = 0; index < record.hash.size(); ++index) {
+    output[offset + 28 + index] = static_cast<std::byte>(record.hash[index]);
+  }
+}
+
+std::vector<std::byte> provenance_payload(
+    codec::TruthClass truth, const codec::RecordInfo& subject,
+    std::span<const codec::RecordInfo> inputs,
+    const codec::ProvenanceProcess& process = provenance_process()) {
+  constexpr std::size_t header_size = 56;
+  constexpr std::size_t link_size = 60;
+  constexpr std::uint32_t implementation_hash_flag = 1U << 0U;
+  constexpr std::uint32_t configuration_hash_flag = 1U << 1U;
+  const auto flags =
+      (process.implementation_hash ? implementation_hash_flag : 0U) |
+      (process.configuration_hash ? configuration_hash_flag : 0U);
+  const auto size =
+      header_size + link_size +
+      (process.implementation_hash ? codec::Sha256{}.size() : 0) +
+      (process.configuration_hash ? codec::Sha256{}.size() : 0) +
+      inputs.size() * link_size + process.operation.size() +
+      process.implementation_id.size() + process.implementation_version.size() +
+      process.details_type.size() + process.details.size();
+  std::vector<std::byte> output(size);
+  std::memcpy(output.data(), "SPV1", 4);
+  put_le<std::uint16_t>(output, 4, 1);
+  put_le<std::uint16_t>(output, 6, 0);
+  output[8] = static_cast<std::byte>(truth);
+  put_le<std::uint32_t>(output, 12, flags);
+  put_le<std::uint32_t>(output, 16,
+                        static_cast<std::uint32_t>(inputs.size()));
+  put_le<std::uint32_t>(output, 20,
+                        static_cast<std::uint32_t>(process.operation.size()));
+  put_le<std::uint32_t>(
+      output, 24,
+      static_cast<std::uint32_t>(process.implementation_id.size()));
+  put_le<std::uint32_t>(
+      output, 28,
+      static_cast<std::uint32_t>(process.implementation_version.size()));
+  put_le<std::uint32_t>(
+      output, 32,
+      static_cast<std::uint32_t>(process.details_type.size()));
+  put_le<std::uint32_t>(output, 36,
+                        static_cast<std::uint32_t>(process.details.size()));
+  put_le<std::int64_t>(output, 40, process.created_utc_ns);
+  put_le<std::uint64_t>(output, 48, 0);
+  std::size_t cursor = header_size;
+  put_provenance_link(output, cursor, subject);
+  cursor += link_size;
+  const auto copy_hash = [&output, &cursor](const codec::Sha256& hash) {
+    for (const auto value : hash) {
+      output[cursor++] = static_cast<std::byte>(value);
+    }
+  };
+  if (process.implementation_hash) copy_hash(*process.implementation_hash);
+  if (process.configuration_hash) copy_hash(*process.configuration_hash);
+  for (const auto& input : inputs) {
+    put_provenance_link(output, cursor, input);
+    cursor += link_size;
+  }
+  const auto copy_text = [&output, &cursor](std::string_view value) {
+    std::memcpy(output.data() + cursor, value.data(), value.size());
+    cursor += value.size();
+  };
+  copy_text(process.operation);
+  copy_text(process.implementation_id);
+  copy_text(process.implementation_version);
+  copy_text(process.details_type);
+  std::copy(process.details.begin(), process.details.end(),
+            output.begin() + cursor);
+  return output;
+}
+
+template <typename AppendMetadata>
+void expect_invalid_provenance_metadata(std::string_view name,
+                                        AppendMetadata append_metadata) {
+  const auto path = test_path(name);
+  std::filesystem::remove(path);
+  const auto source_payload = bytes("preserved despite invalid provenance");
+  auto writer = std::move(*codec::CodaWriter::create(path));
+  auto input = writer.append(codec::RecordType::source_bytes, stream_id(131),
+                             1, 2, source_payload);
+  auto subject = writer.append_raw(0x7200, stream_id(132), 1, 2,
+                                   bytes("derived subject"));
+  EXPECT_TRUE(input);
+  EXPECT_TRUE(subject);
+  append_metadata(writer, *input, *subject);
+  EXPECT_TRUE(writer.finalize());
+
+  auto archive = std::move(*codec::CodaArchive::open(path));
+  EXPECT_TRUE(archive.verify().ok);
+  auto provenance = archive.provenance();
+  EXPECT_FALSE(provenance);
+  EXPECT_EQ(provenance.error().code, codec::ErrorCode::archive_corrupt);
+  auto extracted = archive.extract_stream(input->stream);
+  EXPECT_TRUE(extracted);
+  EXPECT_EQ(*extracted, source_payload);
+  std::filesystem::remove(path);
+}
+
+template <typename Attempt>
+void expect_invalid_provenance_write(std::string_view name, Attempt attempt) {
+  const auto path = test_path(name);
+  std::filesystem::remove(path);
+  auto writer = std::move(*codec::CodaWriter::create(path));
+  auto input = writer.append(codec::RecordType::source_bytes, stream_id(122),
+                             1, 2, bytes("input"));
+  auto subject = writer.append_raw(0x7100, stream_id(123), 1, 2,
+                                   bytes("subject"));
+  EXPECT_TRUE(input);
+  EXPECT_TRUE(subject);
+  auto result = attempt(writer, *input, *subject);
+  EXPECT_FALSE(result);
+  EXPECT_EQ(result.error().code, codec::ErrorCode::invalid_argument);
+  std::filesystem::remove(path);
+}
+
 }  // namespace
 
 TEST(sha256_matches_the_nist_abc_vector) {
@@ -369,6 +508,620 @@ TEST(generic_stream_continuity_round_trips_exact_timing_and_gaps) {
   EXPECT_EQ(second.timing.epoch.format, std::uint64_t{1});
   EXPECT_EQ(second.timing.source_record_sequence, second_source->sequence);
   EXPECT_EQ(second.timing.source_record_hash, second_source->hash);
+  std::filesystem::remove(path);
+}
+
+TEST(generic_stream_provenance_round_trips_s1_and_multi_input_d) {
+  const auto path = test_path("stream-provenance.coda");
+  std::filesystem::remove(path);
+  const auto source_stream = stream_id(120);
+  const auto output_stream = stream_id(121);
+
+  auto writer = std::move(*codec::CodaWriter::create(path));
+  auto source = writer.append(codec::RecordType::source_bytes, source_stream,
+                              10, 20, bytes("source evidence"));
+  EXPECT_TRUE(source);
+  auto normalized = writer.append_raw(0x7001, output_stream, 10, 20,
+                                      bytes("canonical state"));
+  EXPECT_TRUE(normalized);
+  const auto implementation_hash = codec::sha256(bytes("normalizer binary"));
+  const auto configuration_hash = codec::sha256(bytes("canonical config"));
+  const codec::ProvenanceProcess normalizer{
+      .operation = "profile.normalize",
+      .implementation_id = "example.telemetry",
+      .implementation_version = "1.0.0",
+      .implementation_hash = implementation_hash,
+      .configuration_hash = configuration_hash,
+      .created_utc_ns = 1'725'000'000'000'000'000LL,
+      .details_type = "application/cbor",
+      .details = bytes("quality=exact"),
+  };
+  const std::array normalized_inputs{*source};
+  EXPECT_TRUE(writer.append_stream_provenance(
+      *normalized, codec::TruthClass::state_exact, normalized_inputs,
+      normalizer));
+
+  auto derived = writer.append_raw(0x7002, output_stream, 10, 20,
+                                   bytes("derived assessment"));
+  EXPECT_TRUE(derived);
+  const codec::ProvenanceProcess inference{
+      .operation = "model.infer",
+      .implementation_id = "example.model-runtime",
+      .implementation_version = "2.1.0",
+      .implementation_hash = std::nullopt,
+      .configuration_hash = std::nullopt,
+      .created_utc_ns = 1'725'000'000'000'000'100LL,
+      .details_type = {},
+      .details = {},
+  };
+  const std::array derived_inputs{*source, *normalized};
+  EXPECT_TRUE(writer.append_stream_provenance(
+      *derived, codec::TruthClass::derived, derived_inputs, inference));
+  EXPECT_TRUE(writer.finalize());
+
+  auto archive = std::move(*codec::CodaArchive::open(path));
+  auto provenance = archive.provenance();
+  EXPECT_TRUE(provenance);
+  EXPECT_EQ(provenance->size(), std::size_t{2});
+
+  const auto& s1 = provenance->at(0);
+  EXPECT_EQ(s1.subject_truth, codec::TruthClass::state_exact);
+  EXPECT_EQ(s1.subject.stream, normalized->stream);
+  EXPECT_EQ(s1.subject.type, normalized->type_code());
+  EXPECT_EQ(s1.subject.sequence, normalized->sequence);
+  EXPECT_EQ(s1.subject.hash, normalized->hash);
+  EXPECT_EQ(s1.inputs.size(), std::size_t{1});
+  EXPECT_EQ(s1.inputs.front().stream, source->stream);
+  EXPECT_EQ(s1.inputs.front().type, source->type_code());
+  EXPECT_EQ(s1.inputs.front().sequence, source->sequence);
+  EXPECT_EQ(s1.inputs.front().hash, source->hash);
+  EXPECT_EQ(s1.process.operation, std::string{"profile.normalize"});
+  EXPECT_EQ(s1.process.implementation_id,
+            std::string{"example.telemetry"});
+  EXPECT_EQ(s1.process.implementation_version, std::string{"1.0.0"});
+  EXPECT_EQ(s1.process.implementation_hash,
+            std::optional<codec::Sha256>{implementation_hash});
+  EXPECT_EQ(s1.process.configuration_hash,
+            std::optional<codec::Sha256>{configuration_hash});
+  EXPECT_EQ(s1.process.created_utc_ns,
+            std::int64_t{1'725'000'000'000'000'000LL});
+  EXPECT_EQ(s1.process.details_type, std::string{"application/cbor"});
+  EXPECT_EQ(s1.process.details, bytes("quality=exact"));
+
+  const auto& d = provenance->at(1);
+  EXPECT_EQ(d.subject_truth, codec::TruthClass::derived);
+  EXPECT_EQ(d.subject.sequence, derived->sequence);
+  EXPECT_EQ(d.subject.hash, derived->hash);
+  EXPECT_EQ(d.inputs.size(), std::size_t{2});
+  EXPECT_EQ(d.inputs.at(0).sequence, source->sequence);
+  EXPECT_EQ(d.inputs.at(0).hash, source->hash);
+  EXPECT_EQ(d.inputs.at(1).sequence, normalized->sequence);
+  EXPECT_EQ(d.inputs.at(1).hash, normalized->hash);
+  EXPECT_EQ(d.process.operation, std::string{"model.infer"});
+  EXPECT_EQ(d.process.implementation_id,
+            std::string{"example.model-runtime"});
+  EXPECT_EQ(d.process.implementation_version, std::string{"2.1.0"});
+  EXPECT_FALSE(d.process.implementation_hash.has_value());
+  EXPECT_FALSE(d.process.configuration_hash.has_value());
+  EXPECT_TRUE(d.process.details_type.empty());
+  EXPECT_TRUE(d.process.details.empty());
+  std::filesystem::remove(path);
+}
+
+TEST(writer_rejects_uncommitted_or_forged_provenance_links) {
+  expect_invalid_provenance_write(
+      "provenance-forged-subject-sequence",
+      [](codec::CodaWriter& writer, const codec::RecordInfo& input,
+         const codec::RecordInfo& subject) {
+        auto forged = subject;
+        forged.sequence += 99;
+        const std::array inputs{input};
+        return writer.append_stream_provenance(
+            forged, codec::TruthClass::derived, inputs,
+            provenance_process());
+      });
+  expect_invalid_provenance_write(
+      "provenance-forged-subject-stream",
+      [](codec::CodaWriter& writer, const codec::RecordInfo& input,
+         const codec::RecordInfo& subject) {
+        auto forged = subject;
+        forged.stream = stream_id(124);
+        const std::array inputs{input};
+        return writer.append_stream_provenance(
+            forged, codec::TruthClass::derived, inputs,
+            provenance_process());
+      });
+  expect_invalid_provenance_write(
+      "provenance-forged-input-type",
+      [](codec::CodaWriter& writer, const codec::RecordInfo& input,
+         const codec::RecordInfo& subject) {
+        auto forged = input;
+        forged.type = codec::RecordType::pcm16;
+        const std::array inputs{forged};
+        return writer.append_stream_provenance(
+            subject, codec::TruthClass::derived, inputs,
+            provenance_process());
+      });
+  expect_invalid_provenance_write(
+      "provenance-forged-input-hash",
+      [](codec::CodaWriter& writer, const codec::RecordInfo& input,
+         const codec::RecordInfo& subject) {
+        auto forged = input;
+        forged.hash[0] ^= 0xffU;
+        const std::array inputs{forged};
+        return writer.append_stream_provenance(
+            subject, codec::TruthClass::derived, inputs,
+            provenance_process());
+      });
+}
+
+TEST(writer_rejects_invalid_provenance_truth_and_order) {
+  expect_invalid_provenance_write(
+      "provenance-source-exact-subject",
+      [](codec::CodaWriter& writer, const codec::RecordInfo& input,
+         const codec::RecordInfo& subject) {
+        const std::array inputs{input};
+        return writer.append_stream_provenance(
+            subject, codec::TruthClass::source_exact, inputs,
+            provenance_process());
+      });
+  expect_invalid_provenance_write(
+      "provenance-empty-inputs",
+      [](codec::CodaWriter& writer, const codec::RecordInfo&,
+         const codec::RecordInfo& subject) {
+        return writer.append_stream_provenance(
+            subject, codec::TruthClass::derived,
+            std::span<const codec::RecordInfo>{}, provenance_process());
+      });
+  expect_invalid_provenance_write(
+      "provenance-forward-input",
+      [](codec::CodaWriter& writer, const codec::RecordInfo&,
+         const codec::RecordInfo& subject) {
+        auto later = writer.append(codec::RecordType::source_bytes,
+                                   stream_id(125), 3, 4, bytes("later"));
+        EXPECT_TRUE(later);
+        const std::array inputs{*later};
+        return writer.append_stream_provenance(
+            subject, codec::TruthClass::derived, inputs,
+            provenance_process());
+      });
+}
+
+TEST(writer_rejects_duplicate_inputs_and_subject_provenance) {
+  expect_invalid_provenance_write(
+      "provenance-duplicate-input",
+      [](codec::CodaWriter& writer, const codec::RecordInfo& input,
+         const codec::RecordInfo& subject) {
+        const std::array inputs{input, input};
+        return writer.append_stream_provenance(
+            subject, codec::TruthClass::derived, inputs,
+            provenance_process());
+      });
+
+  const auto path = test_path("provenance-duplicate-subject.coda");
+  std::filesystem::remove(path);
+  auto writer = std::move(*codec::CodaWriter::create(path));
+  auto input = writer.append(codec::RecordType::source_bytes, stream_id(126),
+                             1, 2, bytes("input"));
+  auto subject = writer.append_raw(0x7101, stream_id(127), 1, 2,
+                                   bytes("subject"));
+  EXPECT_TRUE(input);
+  EXPECT_TRUE(subject);
+  const std::array inputs{*input};
+  EXPECT_TRUE(writer.append_stream_provenance(
+      *subject, codec::TruthClass::derived, inputs, provenance_process()));
+  auto duplicate = writer.append_stream_provenance(
+      *subject, codec::TruthClass::derived, inputs, provenance_process());
+  EXPECT_FALSE(duplicate);
+  EXPECT_EQ(duplicate.error().code, codec::ErrorCode::invalid_argument);
+  std::filesystem::remove(path);
+}
+
+TEST(writer_rejects_provenance_metadata_record_links) {
+  const auto path = test_path("provenance-metadata-links.coda");
+  std::filesystem::remove(path);
+  auto writer = std::move(*codec::CodaWriter::create(path));
+  auto input = writer.append(codec::RecordType::source_bytes, stream_id(128),
+                             1, 2, bytes("input"));
+  auto first_subject = writer.append_raw(0x7102, stream_id(129), 1, 2,
+                                         bytes("first subject"));
+  EXPECT_TRUE(input);
+  EXPECT_TRUE(first_subject);
+  const std::array first_inputs{*input};
+  auto sidecar = writer.append_stream_provenance(
+      *first_subject, codec::TruthClass::derived, first_inputs,
+      provenance_process());
+  EXPECT_TRUE(sidecar);
+  auto second_subject = writer.append_raw(0x7103, stream_id(130), 3, 4,
+                                          bytes("second subject"));
+  EXPECT_TRUE(second_subject);
+  const std::array sidecar_input{*sidecar};
+  auto provenance_input = writer.append_stream_provenance(
+      *second_subject, codec::TruthClass::derived, sidecar_input,
+      provenance_process());
+  EXPECT_FALSE(provenance_input);
+  EXPECT_EQ(provenance_input.error().code,
+            codec::ErrorCode::invalid_argument);
+  const std::array ordinary_input{*input};
+  auto provenance_subject = writer.append_stream_provenance(
+      *sidecar, codec::TruthClass::derived, ordinary_input,
+      provenance_process());
+  EXPECT_FALSE(provenance_subject);
+  EXPECT_EQ(provenance_subject.error().code,
+            codec::ErrorCode::invalid_argument);
+  std::filesystem::remove(path);
+}
+
+TEST(writer_rejects_invalid_provenance_process_fields) {
+  const auto expect_process = [](std::string_view name,
+                                 codec::ProvenanceProcess process) {
+    expect_invalid_provenance_write(
+        name, [process = std::move(process)](
+                  codec::CodaWriter& writer, const codec::RecordInfo& input,
+                  const codec::RecordInfo& subject) {
+          const std::array inputs{input};
+          return writer.append_stream_provenance(
+              subject, codec::TruthClass::derived, inputs, process);
+        });
+  };
+
+  auto empty_operation = provenance_process();
+  empty_operation.operation.clear();
+  expect_process("provenance-empty-operation", std::move(empty_operation));
+  auto empty_id = provenance_process();
+  empty_id.implementation_id.clear();
+  expect_process("provenance-empty-implementation", std::move(empty_id));
+  auto empty_version = provenance_process();
+  empty_version.implementation_version.clear();
+  expect_process("provenance-empty-version", std::move(empty_version));
+  auto embedded_nul = provenance_process();
+  embedded_nul.operation = std::string{"bad\0operation", 13};
+  expect_process("provenance-embedded-nul", std::move(embedded_nul));
+  auto details_without_type = provenance_process();
+  details_without_type.details = bytes("opaque");
+  expect_process("provenance-details-without-type",
+                 std::move(details_without_type));
+  auto type_without_details = provenance_process();
+  type_without_details.details_type = "application/cbor";
+  expect_process("provenance-type-without-details",
+                 std::move(type_without_details));
+  auto oversized_text = provenance_process();
+  oversized_text.implementation_id.assign(4097, 'x');
+  expect_process("provenance-oversized-text", std::move(oversized_text));
+  auto oversized_details = provenance_process();
+  oversized_details.details_type = "application/octet-stream";
+  oversized_details.details.resize(1024 * 1024 + 1);
+  expect_process("provenance-oversized-details",
+                 std::move(oversized_details));
+}
+
+TEST(reader_rejects_malformed_hash_valid_provenance_payloads) {
+  expect_invalid_provenance_metadata(
+      "provenance-malformed-magic",
+      [](codec::CodaWriter& writer, const codec::RecordInfo& input,
+         const codec::RecordInfo& subject) {
+        const std::array inputs{input};
+        auto payload = provenance_payload(codec::TruthClass::derived, subject,
+                                          inputs);
+        payload[0] = std::byte{'X'};
+        EXPECT_TRUE(writer.append_raw(
+            codec::record_type_code(codec::RecordType::stream_provenance),
+            subject.stream, subject.start_ns, subject.end_ns, payload));
+      });
+  expect_invalid_provenance_metadata(
+      "provenance-malformed-version",
+      [](codec::CodaWriter& writer, const codec::RecordInfo& input,
+         const codec::RecordInfo& subject) {
+        const std::array inputs{input};
+        auto payload = provenance_payload(codec::TruthClass::derived, subject,
+                                          inputs);
+        put_le<std::uint16_t>(payload, 4, 2);
+        EXPECT_TRUE(writer.append_raw(
+            codec::record_type_code(codec::RecordType::stream_provenance),
+            subject.stream, 1, 2, payload));
+      });
+  expect_invalid_provenance_metadata(
+      "provenance-invalid-truth",
+      [](codec::CodaWriter& writer, const codec::RecordInfo& input,
+         const codec::RecordInfo& subject) {
+        const std::array inputs{input};
+        auto payload = provenance_payload(codec::TruthClass::source_exact,
+                                          subject, inputs);
+        EXPECT_TRUE(writer.append_raw(
+            codec::record_type_code(codec::RecordType::stream_provenance),
+            subject.stream, 1, 2, payload));
+      });
+  expect_invalid_provenance_metadata(
+      "provenance-unknown-flag",
+      [](codec::CodaWriter& writer, const codec::RecordInfo& input,
+         const codec::RecordInfo& subject) {
+        const std::array inputs{input};
+        auto payload = provenance_payload(codec::TruthClass::derived, subject,
+                                          inputs);
+        put_le<std::uint32_t>(payload, 12, 4);
+        EXPECT_TRUE(writer.append_raw(
+            codec::record_type_code(codec::RecordType::stream_provenance),
+            subject.stream, 1, 2, payload));
+      });
+  expect_invalid_provenance_metadata(
+      "provenance-nonzero-reserved",
+      [](codec::CodaWriter& writer, const codec::RecordInfo& input,
+         const codec::RecordInfo& subject) {
+        const std::array inputs{input};
+        auto payload = provenance_payload(codec::TruthClass::derived, subject,
+                                          inputs);
+        payload[9] = std::byte{1};
+        EXPECT_TRUE(writer.append_raw(
+            codec::record_type_code(codec::RecordType::stream_provenance),
+            subject.stream, 1, 2, payload));
+      });
+  expect_invalid_provenance_metadata(
+      "provenance-zero-inputs",
+      [](codec::CodaWriter& writer, const codec::RecordInfo&,
+         const codec::RecordInfo& subject) {
+        auto payload = provenance_payload(
+            codec::TruthClass::derived, subject,
+            std::span<const codec::RecordInfo>{});
+        EXPECT_TRUE(writer.append_raw(
+            codec::record_type_code(codec::RecordType::stream_provenance),
+            subject.stream, 1, 2, payload));
+      });
+  expect_invalid_provenance_metadata(
+      "provenance-trailing-byte",
+      [](codec::CodaWriter& writer, const codec::RecordInfo& input,
+         const codec::RecordInfo& subject) {
+        const std::array inputs{input};
+        auto payload = provenance_payload(codec::TruthClass::derived, subject,
+                                          inputs);
+        payload.push_back(std::byte{0});
+        EXPECT_TRUE(writer.append_raw(
+            codec::record_type_code(codec::RecordType::stream_provenance),
+            subject.stream, 1, 2, payload));
+      });
+  expect_invalid_provenance_metadata(
+      "provenance-embedded-nul",
+      [](codec::CodaWriter& writer, const codec::RecordInfo& input,
+         const codec::RecordInfo& subject) {
+        auto process = provenance_process();
+        process.operation = std::string{"bad\0operation", 13};
+        const std::array inputs{input};
+        auto payload = provenance_payload(codec::TruthClass::derived, subject,
+                                          inputs, process);
+        EXPECT_TRUE(writer.append_raw(
+            codec::record_type_code(codec::RecordType::stream_provenance),
+            subject.stream, 1, 2, payload));
+      });
+  expect_invalid_provenance_metadata(
+      "provenance-details-pairing",
+      [](codec::CodaWriter& writer, const codec::RecordInfo& input,
+         const codec::RecordInfo& subject) {
+        auto process = provenance_process();
+        process.details = bytes("opaque");
+        const std::array inputs{input};
+        auto payload = provenance_payload(codec::TruthClass::derived, subject,
+                                          inputs, process);
+        EXPECT_TRUE(writer.append_raw(
+            codec::record_type_code(codec::RecordType::stream_provenance),
+            subject.stream, 1, 2, payload));
+      });
+}
+
+TEST(reader_rejects_invalid_provenance_record_links) {
+  expect_invalid_provenance_metadata(
+      "provenance-missing-subject",
+      [](codec::CodaWriter& writer, const codec::RecordInfo& input,
+         const codec::RecordInfo& subject) {
+        auto forged = subject;
+        forged.sequence = 999;
+        const std::array inputs{input};
+        auto payload = provenance_payload(codec::TruthClass::derived, forged,
+                                          inputs);
+        EXPECT_TRUE(writer.append_raw(
+            codec::record_type_code(codec::RecordType::stream_provenance),
+            subject.stream, 1, 2, payload));
+      });
+  expect_invalid_provenance_metadata(
+      "provenance-wrong-subject-hash",
+      [](codec::CodaWriter& writer, const codec::RecordInfo& input,
+         const codec::RecordInfo& subject) {
+        auto forged = subject;
+        forged.hash[0] ^= 0xffU;
+        const std::array inputs{input};
+        auto payload = provenance_payload(codec::TruthClass::derived, forged,
+                                          inputs);
+        EXPECT_TRUE(writer.append_raw(
+            codec::record_type_code(codec::RecordType::stream_provenance),
+            subject.stream, 1, 2, payload));
+      });
+  expect_invalid_provenance_metadata(
+      "provenance-wrong-input-stream",
+      [](codec::CodaWriter& writer, const codec::RecordInfo& input,
+         const codec::RecordInfo& subject) {
+        auto forged = input;
+        forged.stream = stream_id(133);
+        const std::array inputs{forged};
+        auto payload = provenance_payload(codec::TruthClass::derived, subject,
+                                          inputs);
+        EXPECT_TRUE(writer.append_raw(
+            codec::record_type_code(codec::RecordType::stream_provenance),
+            subject.stream, 1, 2, payload));
+      });
+  expect_invalid_provenance_metadata(
+      "provenance-wrong-input-type",
+      [](codec::CodaWriter& writer, const codec::RecordInfo& input,
+         const codec::RecordInfo& subject) {
+        auto forged = input;
+        forged.type = codec::RecordType::pcm16;
+        const std::array inputs{forged};
+        auto payload = provenance_payload(codec::TruthClass::derived, subject,
+                                          inputs);
+        EXPECT_TRUE(writer.append_raw(
+            codec::record_type_code(codec::RecordType::stream_provenance),
+            subject.stream, 1, 2, payload));
+      });
+}
+
+TEST(reader_rejects_invalid_provenance_graph_semantics) {
+  expect_invalid_provenance_metadata(
+      "provenance-late-input",
+      [](codec::CodaWriter& writer, const codec::RecordInfo&,
+         const codec::RecordInfo& subject) {
+        auto later = writer.append(codec::RecordType::source_bytes,
+                                   stream_id(134), 3, 4, bytes("later"));
+        EXPECT_TRUE(later);
+        const std::array inputs{*later};
+        auto payload = provenance_payload(codec::TruthClass::derived, subject,
+                                          inputs);
+        EXPECT_TRUE(writer.append_raw(
+            codec::record_type_code(codec::RecordType::stream_provenance),
+            subject.stream, 1, 2, payload));
+      });
+  expect_invalid_provenance_metadata(
+      "provenance-duplicate-input-links",
+      [](codec::CodaWriter& writer, const codec::RecordInfo& input,
+         const codec::RecordInfo& subject) {
+        const std::array inputs{input, input};
+        auto payload = provenance_payload(codec::TruthClass::derived, subject,
+                                          inputs);
+        EXPECT_TRUE(writer.append_raw(
+            codec::record_type_code(codec::RecordType::stream_provenance),
+            subject.stream, 1, 2, payload));
+      });
+  expect_invalid_provenance_metadata(
+      "provenance-envelope-stream-mismatch",
+      [](codec::CodaWriter& writer, const codec::RecordInfo& input,
+         const codec::RecordInfo& subject) {
+        const std::array inputs{input};
+        auto payload = provenance_payload(codec::TruthClass::derived, subject,
+                                          inputs);
+        EXPECT_TRUE(writer.append_raw(
+            codec::record_type_code(codec::RecordType::stream_provenance),
+            stream_id(135), 1, 2, payload));
+      });
+  expect_invalid_provenance_metadata(
+      "provenance-duplicate-subject-links",
+      [](codec::CodaWriter& writer, const codec::RecordInfo& input,
+         const codec::RecordInfo& subject) {
+        const std::array inputs{input};
+        auto payload = provenance_payload(codec::TruthClass::derived, subject,
+                                          inputs);
+        EXPECT_TRUE(writer.append_raw(
+            codec::record_type_code(codec::RecordType::stream_provenance),
+            subject.stream, 1, 2, payload));
+        EXPECT_TRUE(writer.append_raw(
+            codec::record_type_code(codec::RecordType::stream_provenance),
+            subject.stream, 1, 2, payload));
+      });
+  expect_invalid_provenance_metadata(
+      "provenance-sidecar-as-input",
+      [](codec::CodaWriter& writer, const codec::RecordInfo& input,
+         const codec::RecordInfo& subject) {
+        const std::array first_inputs{input};
+        auto first_payload = provenance_payload(
+            codec::TruthClass::derived, subject, first_inputs);
+        auto sidecar = writer.append_raw(
+            codec::record_type_code(codec::RecordType::stream_provenance),
+            subject.stream, 1, 2, first_payload);
+        EXPECT_TRUE(sidecar);
+        auto later_subject = writer.append_raw(
+            0x7201, stream_id(136), 3, 4, bytes("later subject"));
+        EXPECT_TRUE(later_subject);
+        const std::array second_inputs{*sidecar};
+        auto second_payload = provenance_payload(
+            codec::TruthClass::derived, *later_subject, second_inputs);
+        EXPECT_TRUE(writer.append_raw(
+            codec::record_type_code(codec::RecordType::stream_provenance),
+            later_subject->stream, 3, 4, second_payload));
+      });
+}
+
+TEST(repair_preserves_valid_stream_provenance_links) {
+  const auto source_path = test_path("provenance-repair-source.coda");
+  const auto repaired_path = test_path("provenance-repair-output.coda");
+  std::filesystem::remove(source_path);
+  std::filesystem::remove(repaired_path);
+  const auto source_stream = stream_id(137);
+  const auto output_stream = stream_id(138);
+  const auto source_bytes = bytes("repair keeps this exact source");
+
+  auto writer = std::move(*codec::CodaWriter::create(source_path));
+  auto source = writer.append(codec::RecordType::source_bytes, source_stream,
+                              10, 20, source_bytes);
+  auto normalized = writer.append_raw(0x7300, output_stream, 10, 20,
+                                      bytes("canonical"));
+  EXPECT_TRUE(source);
+  EXPECT_TRUE(normalized);
+  auto normalizer = provenance_process();
+  normalizer.operation = "profile.normalize";
+  normalizer.implementation_hash = codec::sha256(bytes("normalizer"));
+  normalizer.configuration_hash = codec::sha256(bytes("configuration"));
+  normalizer.details_type = "application/cbor";
+  normalizer.details = bytes("quality=exact");
+  const std::array normalized_inputs{*source};
+  EXPECT_TRUE(writer.append_stream_provenance(
+      *normalized, codec::TruthClass::state_exact, normalized_inputs,
+      normalizer));
+
+  auto derived = writer.append_raw(0x7301, output_stream, 10, 20,
+                                   bytes("derived"));
+  EXPECT_TRUE(derived);
+  auto inference = provenance_process();
+  inference.operation = "model.infer";
+  const std::array derived_inputs{*source, *normalized};
+  EXPECT_TRUE(writer.append_stream_provenance(
+      *derived, codec::TruthClass::derived, derived_inputs, inference));
+  auto torn = writer.append(codec::RecordType::source_bytes, source_stream,
+                            21, 30, bytes("torn tail"));
+  EXPECT_TRUE(torn);
+  EXPECT_TRUE(writer.finalize());
+  std::filesystem::resize_file(
+      source_path,
+      torn->file_offset + codec::coda_record_envelope_size + std::uint64_t{1});
+
+  auto repair = codec::CodaArchive::repair(source_path, repaired_path);
+  EXPECT_TRUE(repair);
+  EXPECT_EQ(repair->recovered_records, std::uint64_t{5});
+  auto archive = std::move(*codec::CodaArchive::open(repaired_path));
+  EXPECT_TRUE(archive.verify().ok);
+  auto provenance = archive.provenance();
+  EXPECT_TRUE(provenance);
+  EXPECT_EQ(provenance->size(), std::size_t{2});
+  EXPECT_EQ(provenance->at(0).subject.sequence, normalized->sequence);
+  EXPECT_EQ(provenance->at(0).subject.hash, normalized->hash);
+  EXPECT_EQ(provenance->at(0).inputs.front().sequence, source->sequence);
+  EXPECT_EQ(provenance->at(0).inputs.front().hash, source->hash);
+  EXPECT_EQ(provenance->at(0).process.operation,
+            std::string{"profile.normalize"});
+  EXPECT_EQ(provenance->at(0).process.implementation_hash,
+            normalizer.implementation_hash);
+  EXPECT_EQ(provenance->at(0).process.configuration_hash,
+            normalizer.configuration_hash);
+  EXPECT_EQ(provenance->at(0).process.details, normalizer.details);
+  EXPECT_EQ(provenance->at(1).subject.sequence, derived->sequence);
+  EXPECT_EQ(provenance->at(1).subject.hash, derived->hash);
+  EXPECT_EQ(provenance->at(1).inputs.at(0).sequence, source->sequence);
+  EXPECT_EQ(provenance->at(1).inputs.at(0).hash, source->hash);
+  EXPECT_EQ(provenance->at(1).inputs.at(1).sequence,
+            normalized->sequence);
+  EXPECT_EQ(provenance->at(1).inputs.at(1).hash, normalized->hash);
+  auto extracted = archive.extract_stream(source_stream);
+  EXPECT_TRUE(extracted);
+  EXPECT_EQ(*extracted, source_bytes);
+  std::filesystem::remove(source_path);
+  std::filesystem::remove(repaired_path);
+}
+
+TEST(legacy_archive_has_empty_provenance_view) {
+  const auto path = test_path("legacy-empty-provenance.coda");
+  std::filesystem::remove(path);
+  auto writer = std::move(*codec::CodaWriter::create(path));
+  EXPECT_TRUE(writer.append(codec::RecordType::source_bytes, stream_id(139),
+                            1, 2, bytes("legacy source")));
+  EXPECT_TRUE(writer.finalize());
+  auto archive = std::move(*codec::CodaArchive::open(path));
+  auto provenance = archive.provenance();
+  EXPECT_TRUE(provenance);
+  EXPECT_TRUE(provenance->empty());
   std::filesystem::remove(path);
 }
 

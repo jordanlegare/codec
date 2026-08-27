@@ -22,6 +22,7 @@ add_library(codec_core
   src/core/feed_descriptor.cpp
   src/core/sha256.cpp
   src/core/stream_continuity.cpp
+  src/core/stream_provenance.cpp
   src/inference/backend.cpp
   src/watermark/carrier.cpp
   src/watermark/statement.cpp

@@ -57,6 +57,7 @@ implemented_v0_1:
     - generic C++ metadata primitives: StreamId, StreamType, TruthClass, StreamDescriptor, StreamClock, StreamEpoch
     - versioned generic StreamDescriptor archive records and C++ append/list APIs, with legacy feed descriptors projected as opaque streams with unspecified payload type
     - versioned generic S0 timing and gap records with C++ append/read APIs, per-stream sequence/epoch validation, explicit missing ranges, and exact prior source-record SHA-256 links preserved across repair
+    - versioned declared S1/D provenance sidecars with C++ append/read APIs, exact backward-only subject/input record links, bounded generic process identity, typed opaque profile details, and repair preservation
     - explicit append/extract/repair round trips for unknown 16-bit development-profile record type codes without payload interpretation
     - C++ API, C ABI, CLI
   audio_profile:
@@ -71,7 +72,7 @@ implemented_v0_1:
 
 planned_not_implemented:
   - generalized Stream* engine/API migration beyond metadata primitives
-  - persisted generic provenance envelopes and policy tags
+  - persisted generic policy tags
   - generalized S1 canonical-state implementations beyond audio semantics
   - video, telemetry, sensor, document/event, network/system profiles
   - production neural separation/diarization/identity models

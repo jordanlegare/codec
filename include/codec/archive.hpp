@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -29,6 +30,7 @@ enum class RecordType : std::uint16_t {
   gap = 4,
   stream_descriptor = 5,
   stream_timing = 6,
+  stream_provenance = 7,
   watermark_statement = 20,
   watermark_observation = 21,
   feed_identity_event = 22,
@@ -113,6 +115,31 @@ struct StreamContinuityEvent {
   StreamGap gap{};
 };
 
+struct ProvenanceRecordLink {
+  StreamId stream{};
+  RecordTypeCode type{};
+  std::uint64_t sequence{};
+  Sha256 hash{};
+};
+
+struct ProvenanceProcess {
+  std::string operation;
+  std::string implementation_id;
+  std::string implementation_version;
+  std::optional<Sha256> implementation_hash;
+  std::optional<Sha256> configuration_hash;
+  std::int64_t created_utc_ns{};
+  std::string details_type;
+  std::vector<std::byte> details;
+};
+
+struct StreamProvenance {
+  TruthClass subject_truth{TruthClass::derived};
+  ProvenanceRecordLink subject{};
+  std::vector<ProvenanceRecordLink> inputs;
+  ProvenanceProcess process;
+};
+
 enum class ArchiveReadPolicy {
   complete_archive,
   verified_prefix,
@@ -146,6 +173,9 @@ class CodaWriter {
   Result<RecordInfo> append_stream_gap(
       const StreamId& stream, std::uint64_t first_sequence,
       std::uint64_t missing_count, const StreamEpoch& epoch);
+  Result<RecordInfo> append_stream_provenance(
+      const RecordInfo& subject, TruthClass subject_truth,
+      std::span<const RecordInfo> inputs, const ProvenanceProcess& process);
   Result<void> finalize();
   bool finalized() const noexcept;
 
@@ -168,6 +198,8 @@ class CodaArchive {
   Result<std::vector<StreamDescriptor>> streams(
       ArchiveReadPolicy policy = ArchiveReadPolicy::complete_archive) const;
   Result<std::vector<StreamContinuityEvent>> continuity(
+      ArchiveReadPolicy policy = ArchiveReadPolicy::complete_archive) const;
+  Result<std::vector<StreamProvenance>> provenance(
       ArchiveReadPolicy policy = ArchiveReadPolicy::complete_archive) const;
   Result<std::vector<std::byte>> read_payload(const RecordInfo& record) const;
   Result<std::vector<std::byte>> extract_stream(const StreamId& stream,

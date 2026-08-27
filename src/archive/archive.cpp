@@ -14,6 +14,7 @@
 #include <limits>
 #include <map>
 #include <optional>
+#include <set>
 #include <sstream>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -305,6 +306,7 @@ struct CodaWriter::Impl {
   Sha256 previous_hash{};
   std::vector<RecordInfo> records;
   std::map<StreamId, detail::StreamContinuityState> continuity_states;
+  std::set<std::uint64_t> provenance_subjects;
   bool is_finalized{false};
 
   ~Impl() {
@@ -502,6 +504,94 @@ Result<RecordInfo> CodaWriter::append_stream_gap(
   return appended;
 }
 
+Result<RecordInfo> CodaWriter::append_stream_provenance(
+    const RecordInfo& subject, TruthClass subject_truth,
+    std::span<const RecordInfo> inputs, const ProvenanceProcess& process) {
+  if (!impl_ || impl_->is_finalized) {
+    return fail<RecordInfo>(ErrorCode::invalid_argument,
+                            "cannot append to a finalized archive");
+  }
+  const auto exact_record = [this](const RecordInfo& requested) {
+    return std::find_if(
+        impl_->records.begin(), impl_->records.end(),
+        [&requested](const RecordInfo& candidate) {
+          return candidate.sequence == requested.sequence &&
+                 candidate.stream == requested.stream &&
+                 candidate.type_code() == requested.type_code() &&
+                 candidate.hash == requested.hash;
+        });
+  };
+  const auto committed_subject = exact_record(subject);
+  if (committed_subject == impl_->records.end()) {
+    return fail<RecordInfo>(
+        ErrorCode::invalid_argument,
+        "provenance subject must match an exact committed record");
+  }
+  const auto committed_subject_record = *committed_subject;
+  const auto prohibited = [](RecordTypeCode type) {
+    return type == record_type_code(RecordType::stream_provenance) ||
+           type == record_type_code(RecordType::final_index);
+  };
+  if (prohibited(committed_subject_record.type_code())) {
+    return fail<RecordInfo>(ErrorCode::invalid_argument,
+                            "provenance subject cannot be metadata");
+  }
+  if (impl_->provenance_subjects.contains(
+          committed_subject_record.sequence)) {
+    return fail<RecordInfo>(ErrorCode::invalid_argument,
+                            "provenance subject already has a sidecar");
+  }
+  std::set<std::uint64_t> input_sequences;
+  StreamProvenance provenance{
+      .subject_truth = subject_truth,
+      .subject = ProvenanceRecordLink{
+          .stream = committed_subject_record.stream,
+          .type = committed_subject_record.type_code(),
+          .sequence = committed_subject_record.sequence,
+          .hash = committed_subject_record.hash,
+      },
+      .inputs = {},
+      .process = process,
+  };
+  provenance.inputs.reserve(inputs.size());
+  for (const auto& input : inputs) {
+    const auto committed_input = exact_record(input);
+    if (committed_input == impl_->records.end()) {
+      return fail<RecordInfo>(
+          ErrorCode::invalid_argument,
+          "provenance input must match an exact committed record");
+    }
+    if (committed_input->sequence >= committed_subject_record.sequence) {
+      return fail<RecordInfo>(ErrorCode::invalid_argument,
+                              "provenance input must precede its subject");
+    }
+    if (prohibited(committed_input->type_code())) {
+      return fail<RecordInfo>(ErrorCode::invalid_argument,
+                              "provenance input cannot be metadata");
+    }
+    if (!input_sequences.insert(committed_input->sequence).second) {
+      return fail<RecordInfo>(ErrorCode::invalid_argument,
+                              "provenance input is duplicated");
+    }
+    provenance.inputs.push_back(ProvenanceRecordLink{
+        .stream = committed_input->stream,
+        .type = committed_input->type_code(),
+        .sequence = committed_input->sequence,
+        .hash = committed_input->hash,
+    });
+  }
+  auto payload = detail::encode_stream_provenance(provenance);
+  if (!payload) return payload.error();
+  const auto subject_sequence = committed_subject_record.sequence;
+  auto appended = append(RecordType::stream_provenance,
+                         committed_subject_record.stream,
+                         committed_subject_record.start_ns,
+                         committed_subject_record.end_ns, *payload);
+  if (!appended) return appended.error();
+  impl_->provenance_subjects.insert(subject_sequence);
+  return appended;
+}
+
 Result<void> CodaWriter::finalize() {
   if (!impl_) {
     return fail(ErrorCode::invalid_argument, "writer is not initialized");
@@ -672,6 +762,65 @@ Result<std::vector<StreamContinuityEvent>> CodaArchive::continuity(
           .gap = std::move(*gap),
       });
     }
+  }
+  return output;
+}
+
+Result<std::vector<StreamProvenance>> CodaArchive::provenance(
+    ArchiveReadPolicy policy) const {
+  auto record_list = records(policy);
+  if (!record_list) return record_list.error();
+  std::vector<StreamProvenance> output;
+  std::set<std::uint64_t> provenance_subjects;
+  const auto prohibited = [](RecordTypeCode type) {
+    return type == record_type_code(RecordType::stream_provenance) ||
+           type == record_type_code(RecordType::final_index);
+  };
+  const auto exact_record = [&record_list](const ProvenanceRecordLink& link) {
+    return std::find_if(
+        record_list->begin(), record_list->end(),
+        [&link](const RecordInfo& candidate) {
+          return candidate.sequence == link.sequence &&
+                 candidate.stream == link.stream &&
+                 candidate.type_code() == link.type &&
+                 candidate.hash == link.hash;
+        });
+  };
+  for (const auto& record : *record_list) {
+    if (record.type != RecordType::stream_provenance) continue;
+    auto payload = read_payload(record);
+    if (!payload) return payload.error();
+    auto decoded = detail::decode_stream_provenance(*payload);
+    if (!decoded) return decoded.error();
+    const auto subject = exact_record(decoded->subject);
+    if (subject == record_list->end() || subject->sequence >= record.sequence ||
+        subject->stream != record.stream || prohibited(subject->type_code())) {
+      return fail<std::vector<StreamProvenance>>(
+          ErrorCode::archive_corrupt,
+          "provenance subject link is invalid");
+    }
+    if (!provenance_subjects.insert(subject->sequence).second) {
+      return fail<std::vector<StreamProvenance>>(
+          ErrorCode::archive_corrupt,
+          "provenance subject has duplicate sidecars");
+    }
+    std::set<std::uint64_t> input_sequences;
+    for (const auto& input_link : decoded->inputs) {
+      const auto input = exact_record(input_link);
+      if (input == record_list->end() ||
+          input->sequence >= subject->sequence ||
+          prohibited(input->type_code())) {
+        return fail<std::vector<StreamProvenance>>(
+            ErrorCode::archive_corrupt,
+            "provenance input link is invalid");
+      }
+      if (!input_sequences.insert(input->sequence).second) {
+        return fail<std::vector<StreamProvenance>>(
+            ErrorCode::archive_corrupt,
+            "provenance input link is duplicated");
+      }
+    }
+    output.push_back(std::move(*decoded));
   }
   return output;
 }
@@ -875,6 +1024,7 @@ const char* record_type_name(RecordType type) noexcept {
     case RecordType::gap: return "gap";
     case RecordType::stream_descriptor: return "stream_descriptor";
     case RecordType::stream_timing: return "stream_timing";
+    case RecordType::stream_provenance: return "stream_provenance";
     case RecordType::watermark_statement: return "watermark_statement";
     case RecordType::watermark_observation: return "watermark_observation";
     case RecordType::feed_identity_event: return "feed_identity_event";

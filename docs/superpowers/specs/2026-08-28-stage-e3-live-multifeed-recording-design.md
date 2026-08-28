@@ -16,7 +16,7 @@ codec extract live.coda --feed LABEL1 \
   --fidelity source-exact --follow --output LABEL1.bin
 ```
 
-All requested feeds must capture concurrently. Their exact S0 chunks are serialized through one CODA writer and may therefore be physically interleaved while retaining distinct `StreamId`s. A concurrent extractor must read only fully committed records from CODA's verified prefix and append only newly committed S0 bytes for the selected feed.
+All requested feeds within the configured concurrency bound must capture concurrently. Their exact S0 chunks are serialized through one CODA writer and may therefore be physically interleaved while retaining distinct `StreamId`s. A concurrent extractor must read only fully committed records from CODA's verified prefix and append only newly committed S0 bytes for the selected feed or stream.
 
 E.3 does not embed CMX1 envelopes inside CODA. CODA already multiplexes physical records by `StreamId`; E.1 remains the framing boundary for an external shared byte transport.
 
@@ -30,12 +30,12 @@ The current CLI already accepts repeated `--feed LABEL=URI` arguments and maps t
 
 E.3 adds:
 
-1. concurrent capture for all prepared sources in one `Engine::record()` / `Engine::record_streams()` operation;
+1. concurrent capture for all prepared sources in one `Engine::record()` / `Engine::record_streams()` operation, up to an explicit configured source/thread bound;
 2. bounded per-source buffering and fair single-writer draining;
 3. cooperative internal cancellation so one failed source or writer failure can stop the other capture workers instead of waiting for unrelated live sources forever;
 4. descriptor-first persistence: all feed/stream descriptors are committed before any source chunk;
 5. CLI compatibility for repeated `--feed`, plus `--feeds` as an accepted alias;
-6. `codec extract ... --follow` for source-exact extraction, including feed-label selection;
+6. `codec extract ... --follow` for source-exact extraction by feed label or exact stream ID;
 7. verified-prefix cursoring so a follower never duplicates a previously emitted archive record and never consumes an uncommitted tail;
 8. tests that prove a second live feed is committed while the first remains open, and that a follower emits bytes before recording finishes.
 
@@ -51,23 +51,28 @@ After writer creation, every descriptor is committed before capture workers star
 derive_stream_id(label + "\n" + uri)
 ```
 
-### Worker model
-
-One capture worker thread owns each prepared source. A worker runs the existing capture engine and copies each delivered chunk into that source's bounded queue.
+### Explicit concurrency and queue bounds
 
 `EngineConfig` gains:
 
 ```cpp
+std::size_t maximum_concurrent_streams{64};
 std::size_t maximum_queued_chunks_per_stream{4};
 ```
 
-The value must be nonzero and reasonably bounded. Each queue therefore holds at most:
+Both values must be nonzero. `maximum_concurrent_streams` may not exceed 4096 and `maximum_queued_chunks_per_stream` may not exceed 1024. A recording request whose source count exceeds `maximum_concurrent_streams` fails with `resource_exhausted` before archive creation.
+
+Each per-source queue therefore holds at most:
 
 ```text
 maximum_queued_chunks_per_stream * capture_chunk_bytes
 ```
 
 plus allocator/container overhead. Producers block on queue capacity rather than growing memory without bound.
+
+### Worker model
+
+One capture worker thread owns each prepared source. A worker runs the existing capture engine and copies each delivered chunk into that source's bounded queue.
 
 ### Single writer and fairness
 
@@ -95,7 +100,9 @@ A writer error becomes the operation error immediately, sets cancellation, stops
 
 The internal `PreparedCapture::run()` path gains an optional cancellation flag.
 
-Local descriptor capture checks it before blocking/read iterations and before handing chunks to the sink. HTTP capture uses libcurl progress callbacks (`CURLOPT_NOPROGRESS=0`, `CURLOPT_XFERINFOFUNCTION`) so cancellation does not depend solely on receiving another body chunk. Cancellation returns `ErrorCode::cancelled` and is not allowed to overwrite the original operation failure.
+Local descriptor capture uses `poll()` with a bounded wake interval before blocking reads, checks cancellation on every wake, and returns `ErrorCode::cancelled` when requested. Regular files remain effectively immediately readable. HTTP capture enables libcurl progress callbacks (`CURLOPT_NOPROGRESS=0`, `CURLOPT_XFERINFOFUNCTION`) so cancellation does not depend solely on receiving another body chunk.
+
+Cancellation errors from peer workers are not allowed to overwrite the original operation failure.
 
 E.3 does not add a public cancellation token or signal-handling contract.
 
@@ -110,27 +117,30 @@ codec extract ARCHIVE --feed LABEL --fidelity source-exact --output FILE
 codec extract ARCHIVE --stream STREAM_ID --fidelity source-exact --output FILE
 ```
 
-E.3 adds:
+E.3 adds follow mode for either existing selector:
 
 ```text
 codec extract ARCHIVE --feed LABEL --fidelity source-exact --follow --output FILE
+codec extract ARCHIVE --stream STREAM_ID --fidelity source-exact --follow --output FILE
 ```
 
-The implementation may also accept `--follow` with `--stream` because both resolve to one exact `StreamId`; no new fidelity is introduced.
+No new fidelity is introduced.
 
 ### Output creation
 
-Follow mode creates a new output file and refuses to replace an existing path. It uses no-follow/exclusive output semantics consistent with CODEC's preservation-oriented file handling. E.3 does not add resume-to-an-existing-output behavior.
+Follow mode creates a new output file with exclusive/no-follow semantics and refuses to replace an existing path. E.3 does not add resume-to-an-existing-output behavior.
 
 ### Feed resolution
 
-A follower repeatedly inspects `feeds(ArchiveReadPolicy::verified_prefix)` until the requested label is available. Duplicate labels mapping to different streams are treated as archive corruption, matching `extract_feed()` semantics.
+A feed-label follower repeatedly inspects `feeds(ArchiveReadPolicy::verified_prefix)` until the requested label is available. Duplicate labels mapping to different streams are treated as archive corruption, matching `extract_feed()` semantics.
 
 If the archive finalizes before the requested feed descriptor ever appears, follow extraction fails with `invalid_argument` / feed-not-found.
 
+A stream-ID follower already has its exact logical identity and therefore skips label resolution.
+
 ### Record cursor
 
-After resolving the selected stream, the follower keeps the next archive sequence it has not emitted. Each polling iteration queries only `source_bytes` records for that stream from the verified prefix and ignores already emitted sequences.
+The follower keeps the next archive sequence it has not emitted. Each polling iteration queries only `source_bytes` records for the selected stream from the verified prefix and ignores already emitted sequences.
 
 For every returned record:
 
@@ -150,7 +160,7 @@ A crashed writer that leaves an incomplete tail is not automatically distinguish
 
 ### Polling
 
-The CLI uses a small fixed sleep between no-progress scans to avoid busy-waiting. No latency guarantee is claimed.
+The CLI sleeps for 100 milliseconds between scans that make no progress. This is an implementation cadence, not a latency guarantee.
 
 ## CLI feed option compatibility
 
@@ -180,7 +190,8 @@ The same test verifies all feed descriptors precede every source record.
 
 Tests cover:
 
-- zero queue bound rejected at `Engine::create()`;
+- zero or excessive concurrency/queue bounds rejected at `Engine::create()`;
+- a source count above `maximum_concurrent_streams` rejected before archive creation;
 - bounded queue configuration accepted;
 - concurrent finite feeds preserve exact bytes for every label;
 - duplicate labels remain rejected;

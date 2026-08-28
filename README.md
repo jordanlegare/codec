@@ -62,6 +62,7 @@ implemented_v0_1:
     - explicit append/extract/repair round trips for unknown 16-bit development-profile record type codes without payload interpretation
     - AND-combined C++ physical record queries over exact stream/raw type and half-open archive-sequence/envelope-time ranges, plus boundary-preserving per-record exact payload extraction
     - pull-based C++ StreamAdapter S0 and bounded batch StreamProcessor S1/D contracts with interval, truth, process-metadata, and resource validation; registration, scheduling, and automatic persistence remain external
+    - typed C++ generic stream recording with caller-owned stable StreamId and exact StreamDescriptor persistence through the existing hardened URI capture path; FeedSpec recording remains compatible
     - C++ API, C ABI, CLI
   audio_profile:
     - PCM16 RIFF/WAVE exact read/write
@@ -74,7 +75,7 @@ implemented_v0_1:
     - no bundled neural model/runtime; incompatible model returns model_incompatible
 
 planned_not_implemented:
-  - generalized Stream* engine/API migration beyond metadata primitives
+  - generalized Stream* CLI, C ABI, and profile API migration beyond generic C++ recording
   - persisted generic policy tags
   - generalized S1 canonical-state implementations beyond audio semantics
   - video, telemetry, sensor, document/event, network/system profiles

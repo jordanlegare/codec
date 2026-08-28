@@ -8,6 +8,7 @@
 #include <cctype>
 #include <set>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace codec {
@@ -42,6 +43,64 @@ std::int64_t now_ns() {
       .count();
 }
 
+struct PreparedSource {
+  StreamId stream{};
+  detail::PreparedCapture capture;
+};
+
+template <typename Spec, typename StreamForSpec>
+Result<std::vector<PreparedSource>> prepare_sources(
+    const std::vector<Spec>& specs, const EngineConfig& config,
+    StreamForSpec&& stream_for_spec) {
+  std::vector<PreparedSource> prepared;
+  prepared.reserve(specs.size());
+  for (const auto& spec : specs) {
+    detail::CaptureOptions options;
+    options.chunk_bytes = config.capture_chunk_bytes;
+    options.maximum_bytes =
+        std::min(config.maximum_feed_bytes, spec.maximum_bytes);
+    options.maximum_redirects = config.maximum_redirects;
+    options.deny_private_network = config.deny_private_network;
+    auto source = detail::PreparedCapture::prepare(spec.uri, options);
+    if (!source) return source.error();
+    prepared.push_back(
+        PreparedSource{stream_for_spec(spec), std::move(*source)});
+  }
+  return prepared;
+}
+
+template <typename AppendDescriptor>
+Result<StreamRecordingReport> record_prepared_sources(
+    std::vector<PreparedSource> prepared,
+    const std::filesystem::path& archive_path,
+    AppendDescriptor&& append_descriptor) {
+  auto writer_result = CodaWriter::create(archive_path);
+  if (!writer_result) return writer_result.error();
+  auto writer = std::move(*writer_result);
+  StreamRecordingReport report;
+  report.archive = archive_path;
+  for (std::size_t index = 0; index < prepared.size(); ++index) {
+    auto descriptor = append_descriptor(writer, index, now_ns());
+    if (!descriptor) return descriptor.error();
+    auto captured = prepared[index].capture.run(
+        [&](std::span<const std::byte> bytes) -> Result<void> {
+          const auto observed = now_ns();
+          auto appended = writer.append(RecordType::source_bytes,
+                                        prepared[index].stream, observed,
+                                        observed, bytes);
+          if (!appended) return appended.error();
+          report.source_bytes += bytes.size();
+          report.source_records += 1;
+          return {};
+        });
+    if (!captured) return captured.error();
+    report.streams_recorded += 1;
+  }
+  auto finalized = writer.finalize();
+  if (!finalized) return finalized.error();
+  return report;
+}
+
 }  // namespace
 
 Result<Engine> Engine::create(EngineConfig config) {
@@ -55,6 +114,41 @@ Result<Engine> Engine::create(EngineConfig config) {
 }
 
 Capabilities Engine::capabilities() noexcept { return {}; }
+
+Result<StreamRecordingReport> Engine::record_streams(
+    const std::vector<StreamSpec>& streams,
+    const std::filesystem::path& archive_path) const {
+  if (streams.empty()) {
+    return fail<StreamRecordingReport>(ErrorCode::invalid_argument,
+                                       "at least one stream is required");
+  }
+  std::set<StreamId> ids;
+  for (const auto& stream : streams) {
+    if (stream.uri.empty() || !stream.preserve_source ||
+        stream.maximum_bytes == 0) {
+      return fail<StreamRecordingReport>(
+          ErrorCode::invalid_argument,
+          "each stream requires a URI and S0 preservation");
+    }
+    if (!ids.insert(stream.descriptor.id).second) {
+      return fail<StreamRecordingReport>(ErrorCode::invalid_argument,
+                                         "stream IDs must be unique");
+    }
+    auto encoded = detail::encode_stream_descriptor(stream.descriptor);
+    if (!encoded) return encoded.error();
+  }
+  auto prepared = prepare_sources(
+      streams, config_,
+      [](const StreamSpec& stream) { return stream.descriptor.id; });
+  if (!prepared) return prepared.error();
+  return record_prepared_sources(
+      std::move(*prepared), archive_path,
+      [&streams](CodaWriter& writer, std::size_t index,
+                 std::int64_t timestamp_ns) {
+        return writer.append_stream_descriptor(streams[index].descriptor,
+                                               timestamp_ns);
+      });
+}
 
 Result<RecordingReport> Engine::record(
     const std::vector<FeedSpec>& feeds,
@@ -76,53 +170,33 @@ Result<RecordingReport> Engine::record(
                                    "feed labels must be unique");
     }
   }
-  std::vector<detail::PreparedCapture> prepared;
-  prepared.reserve(feeds.size());
-  for (const auto& spec : feeds) {
-    detail::CaptureOptions options;
-    options.chunk_bytes = config_.capture_chunk_bytes;
-    options.maximum_bytes =
-        std::min(config_.maximum_feed_bytes, spec.maximum_bytes);
-    options.maximum_redirects = config_.maximum_redirects;
-    options.deny_private_network = config_.deny_private_network;
-    auto source = detail::PreparedCapture::prepare(spec.uri, options);
-    if (!source) return source.error();
-    prepared.push_back(std::move(*source));
-  }
-  auto writer_result = CodaWriter::create(archive_path);
-  if (!writer_result) return writer_result.error();
-  auto writer = std::move(*writer_result);
-  RecordingReport report;
-  report.archive = archive_path;
-  for (std::size_t feed_index = 0; feed_index < feeds.size(); ++feed_index) {
-    const auto& spec = feeds[feed_index];
-    const auto stream = derive_stream_id(spec.label + "\n" + spec.uri);
-    FeedInfo info{stream, spec.label, redacted_uri(spec.uri), true};
-    const auto descriptor = detail::encode_feed_descriptor(info);
-    if (descriptor.empty()) {
-      return fail<RecordingReport>(ErrorCode::invalid_argument,
-                                   "feed descriptor is too large");
-    }
-    const auto timestamp = now_ns();
-    auto descriptor_record = writer.append(RecordType::feed_descriptor, stream,
-                                           timestamp, timestamp, descriptor);
-    if (!descriptor_record) return descriptor_record.error();
-    auto captured = prepared[feed_index].run(
-        [&](std::span<const std::byte> bytes) -> Result<void> {
-          const auto observed = now_ns();
-          auto appended = writer.append(RecordType::source_bytes, stream,
-                                        observed, observed, bytes);
-          if (!appended) return appended.error();
-          report.source_bytes += bytes.size();
-          report.source_records += 1;
-          return {};
-        });
-    if (!captured) return captured.error();
-    report.feeds_recorded += 1;
-  }
-  auto finalized = writer.finalize();
-  if (!finalized) return finalized.error();
-  return report;
+  auto prepared = prepare_sources(
+      feeds, config_, [](const FeedSpec& feed) {
+        return derive_stream_id(feed.label + "\n" + feed.uri);
+      });
+  if (!prepared) return prepared.error();
+  auto captured = record_prepared_sources(
+      std::move(*prepared), archive_path,
+      [&feeds](CodaWriter& writer, std::size_t index,
+               std::int64_t timestamp_ns) -> Result<RecordInfo> {
+        const auto& spec = feeds[index];
+        const auto stream = derive_stream_id(spec.label + "\n" + spec.uri);
+        const FeedInfo info{stream, spec.label, redacted_uri(spec.uri), true};
+        const auto descriptor = detail::encode_feed_descriptor(info);
+        if (descriptor.empty()) {
+          return fail<RecordInfo>(ErrorCode::invalid_argument,
+                                  "feed descriptor is too large");
+        }
+        return writer.append(RecordType::feed_descriptor, stream, timestamp_ns,
+                             timestamp_ns, descriptor);
+      });
+  if (!captured) return captured.error();
+  return RecordingReport{
+      .archive = std::move(captured->archive),
+      .feeds_recorded = captured->streams_recorded,
+      .source_bytes = captured->source_bytes,
+      .source_records = captured->source_records,
+  };
 }
 
 }  // namespace codec

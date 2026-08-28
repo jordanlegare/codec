@@ -11,6 +11,13 @@
 
 namespace codec {
 
+struct StreamSpec {
+  std::string uri;
+  StreamDescriptor descriptor;
+  bool preserve_source{true};
+  std::uint64_t maximum_bytes{16ULL * 1024ULL * 1024ULL * 1024ULL};
+};
+
 struct FeedSpec {
   std::string uri;
   std::string label;
@@ -23,6 +30,13 @@ struct EngineConfig {
   std::uint64_t maximum_feed_bytes{16ULL * 1024ULL * 1024ULL * 1024ULL};
   std::uint32_t maximum_redirects{5};
   bool deny_private_network{true};
+};
+
+struct StreamRecordingReport {
+  std::filesystem::path archive;
+  std::size_t streams_recorded{};
+  std::uint64_t source_bytes{};
+  std::uint64_t source_records{};
 };
 
 struct RecordingReport {
@@ -49,6 +63,9 @@ class Engine {
   static Result<Engine> create(EngineConfig config);
   static Capabilities capabilities() noexcept;
 
+  Result<StreamRecordingReport> record_streams(
+      const std::vector<StreamSpec>& streams,
+      const std::filesystem::path& archive_path) const;
   Result<RecordingReport> record(const std::vector<FeedSpec>& feeds,
                                  const std::filesystem::path& archive_path) const;
 
@@ -58,4 +75,3 @@ class Engine {
 };
 
 }  // namespace codec
-

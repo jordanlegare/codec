@@ -17,6 +17,8 @@ pkg_check_modules(FLAC REQUIRED IMPORTED_TARGET flac)
 
 add_library(codec_core
   src/archive/archive.cpp
+  src/audio/flac_encoder.cpp
+  src/audio/pcm16_flac_export.cpp
   src/audio/pcm16_ingest.cpp
   src/audio/pcm16_state.cpp
   src/audio/pcm16_state_reader.cpp
@@ -51,7 +53,7 @@ target_include_directories(codec_core
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
-target_link_libraries(codec_core PUBLIC OpenSSL::Crypto CURL::libcurl)
+target_link_libraries(codec_core PUBLIC OpenSSL::Crypto CURL::libcurl PkgConfig::FLAC)
 
 function(codec_enable_warnings target)
   if(MSVC)

@@ -30,6 +30,8 @@ struct EngineConfig {
   std::uint64_t maximum_feed_bytes{16ULL * 1024ULL * 1024ULL * 1024ULL};
   std::uint32_t maximum_redirects{5};
   bool deny_private_network{true};
+  std::size_t maximum_concurrent_streams{64};
+  std::size_t maximum_queued_chunks_per_stream{4};
 };
 
 struct StreamRecordingReport {

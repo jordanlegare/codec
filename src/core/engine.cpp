@@ -20,9 +20,6 @@
 namespace codec {
 namespace {
 
-constexpr std::size_t default_pending_chunks_per_stream = 8;
-constexpr std::uint64_t default_pending_bytes = 64ULL * 1024ULL * 1024ULL;
-
 bool valid_label(std::string_view label) {
   if (label.empty() || label.size() > 128) return false;
   return std::all_of(label.begin(), label.end(), [](unsigned char ch) {
@@ -118,7 +115,7 @@ void cancel_scheduler(SchedulerState& scheduler, Error error) {
 template <typename AppendDescriptor>
 Result<StreamRecordingReport> record_prepared_sources(
     std::vector<PreparedSource> prepared,
-    const std::filesystem::path& archive_path,
+    const std::filesystem::path& archive_path, const EngineConfig& config,
     AppendDescriptor&& append_descriptor) {
   auto writer_result = CodaWriter::create(archive_path);
   if (!writer_result) return writer_result.error();
@@ -127,9 +124,6 @@ Result<StreamRecordingReport> record_prepared_sources(
   StreamRecordingReport report;
   report.archive = archive_path;
 
-  // Feed/stream identity must be visible before any source payload can be
-  // committed. This also lets verified-prefix readers resolve labels while
-  // long-lived producers are still running.
   for (std::size_t index = 0; index < prepared.size(); ++index) {
     auto descriptor = append_descriptor(writer, index, now_ns());
     if (!descriptor) return descriptor.error();
@@ -153,7 +147,7 @@ Result<StreamRecordingReport> record_prepared_sources(
             chunk.observed_ns = now_ns();
             const auto chunk_bytes =
                 static_cast<std::uint64_t>(chunk.bytes.size());
-            if (chunk_bytes > default_pending_bytes) {
+            if (chunk_bytes > config.maximum_pending_bytes) {
               return fail(ErrorCode::resource_exhausted,
                           "capture chunk exceeds pending-byte bound");
             }
@@ -162,9 +156,9 @@ Result<StreamRecordingReport> record_prepared_sources(
             scheduler.changed.wait(lock, [&] {
               return scheduler.cancelled ||
                      (scheduler.producers[index].chunks.size() <
-                          default_pending_chunks_per_stream &&
+                          config.maximum_pending_chunks_per_stream &&
                       scheduler.pending_bytes <=
-                          default_pending_bytes - chunk_bytes);
+                          config.maximum_pending_bytes - chunk_bytes);
             });
             if (scheduler.cancelled) {
               return fail(ErrorCode::internal, "capture recording cancelled");
@@ -268,7 +262,9 @@ Result<StreamRecordingReport> record_prepared_sources(
 Result<Engine> Engine::create(EngineConfig config) {
   if (config.capture_chunk_bytes < 4096 ||
       config.capture_chunk_bytes > 16U * 1024U * 1024U ||
-      config.maximum_feed_bytes == 0 || config.maximum_redirects > 20) {
+      config.maximum_feed_bytes == 0 || config.maximum_redirects > 20 ||
+      config.maximum_pending_chunks_per_stream == 0 ||
+      config.maximum_pending_bytes == 0) {
     return fail<Engine>(ErrorCode::invalid_argument,
                         "invalid engine capture limits");
   }
@@ -304,7 +300,7 @@ Result<StreamRecordingReport> Engine::record_streams(
       [](const StreamSpec& stream) { return stream.descriptor.id; });
   if (!prepared) return prepared.error();
   return record_prepared_sources(
-      std::move(*prepared), archive_path,
+      std::move(*prepared), archive_path, config_,
       [&streams](CodaWriter& writer, std::size_t index,
                  std::int64_t timestamp_ns) {
         return writer.append_stream_descriptor(streams[index].descriptor,
@@ -338,7 +334,7 @@ Result<RecordingReport> Engine::record(
       });
   if (!prepared) return prepared.error();
   auto captured = record_prepared_sources(
-      std::move(*prepared), archive_path,
+      std::move(*prepared), archive_path, config_,
       [&feeds](CodaWriter& writer, std::size_t index,
                std::int64_t timestamp_ns) -> Result<RecordInfo> {
         const auto& spec = feeds[index];

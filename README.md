@@ -67,6 +67,7 @@ implemented_v0_1:
     - typed C++ generic stream recording with caller-owned stable StreamId and exact StreamDescriptor persistence through the existing hardened URI capture path; FeedSpec recording remains compatible
     - generic CLI stream listing and exact S0 extraction by stable StreamId; legacy feed list/extract remains available
     - bounded deterministic CMX1 generic multiplex framing and incremental demultiplexing for many logical StreamIds over one physical byte stream, preserving per-frame sequence, connection/format epochs, generic clock, interval, and opaque payload with bounded backpressure and SHA-256 corruption detection; no truth classification, recovery/FEC, or network provider is implied
+    - bounded generic sequence-loss observation and recovery-group semantics: provisional half-open gaps are tracked independently per exact StreamId/connection/format epoch and may be filled by late frames; caller-declared non-overlapping source ranges can be sealed into deterministic complete/incomplete reports under explicit memory bounds without claiming that missing members are repairable
     - C++ API, C ABI, CLI
   audio_profile:
     - explicit C++ profile facade at codec/profiles/audio.hpp in codec::profiles::audio, forwarding the exact existing WAV/PCM, watermark, and separation types/functions while root-level codec::* audio APIs remain compatible
@@ -96,7 +97,7 @@ planned_not_implemented:
   - generalized S1 canonical-state implementations beyond deterministic audio PCM16
   - video, telemetry, sensor, document/event, network/system profiles
   - production neural separation/diarization/identity models
-  - transport loss/recovery/FEC semantics beyond implemented E.1 multiplex framing
+  - concrete transport repair-symbol encoding, FEC/parity generation, reconstruction, retransmission/ARQ, and measured loss-tolerance claims beyond implemented E.1/E.2 framing and recovery semantics
   - distributed/cloud execution profile
   - trust/selective-disclosure profile
 
@@ -154,7 +155,7 @@ ctest --test-dir build-san --output-on-failure
 | `src/archive/` | CODA archive/integrity implementation |
 | `src/capture/` | Source ingest/capture |
 | `src/core/` | Engine/core primitives; currently includes compatibility-era feed naming |
-| `src/transport/` | Generic transport-profile framing and demultiplexing primitives |
+| `src/transport/` | Generic transport-profile framing, demultiplexing, loss observation, and recovery-group primitives |
 | `src/audio/` | Audio Stream Profile implementation |
 | `src/watermark/` | Audio W0/W1/W2 identity implementation |
 | `src/inference/` | Inference backend boundary |
@@ -182,7 +183,9 @@ Physical transport, logical stream identity, processing partition, and archive p
 
 ## Transport / Recovery Profile
 
-Stage E has started with the additive C++ `CMX1` multiplex boundary in `<codec/transport.hpp>`. `encode_multiplex_frame` deterministically frames one logical `StreamId` plus its independent sequence, connection/format epochs, generic `StreamClock`, interval, and opaque bytes; `MultiplexDecoder` incrementally demultiplexes arbitrary physical chunks in arrival order with caller-bounded buffering and frame-count backpressure. The version-1 frame SHA-256 detects corruption of its semantic header or payload but is not a signature, MAC, authentication, or authorization mechanism. E.1 deliberately does not assign S0/S1/D truth, infer gaps, reorder, retransmit, recover loss, generate parity/FEC, resynchronize after corruption, perform network I/O, write CODA, or claim throughput/latency/scale. Those transport/recovery semantics remain separate later Stage E gates.
+Stage E started with the additive C++ `CMX1` multiplex boundary in `<codec/transport.hpp>`. `encode_multiplex_frame` deterministically frames one logical `StreamId` plus its independent sequence, connection/format epochs, generic `StreamClock`, interval, and opaque bytes; `MultiplexDecoder` incrementally demultiplexes arbitrary physical chunks in arrival order with caller-bounded buffering and frame-count backpressure. The version-1 frame SHA-256 detects corruption of its semantic header or payload but is not a signature, MAC, authentication, or authorization mechanism. E.1 deliberately does not assign S0/S1/D truth, infer gaps, reorder, retransmit, recover loss, generate parity/FEC, resynchronize after corruption, perform network I/O, write CODA, or claim throughput/latency/scale.
+
+E.2 adds `<codec/recovery.hpp>` above CMX1 without changing CMX1 bytes. `SequenceLossObserver` keeps bounded provisional missing sequence ranges independently for each exact `(StreamId, connection epoch, format epoch)` track: the first observation establishes a baseline, forward jumps open provisional ranges, and late members can fill or split those ranges; older observations outside a current gap remain only `late_or_replayed`. `RecoveryGroupTracker` separately tracks caller-declared non-overlapping source-sequence ranges within one exact stream/epoch namespace, accepts out-of-order first observations and duplicates, and freezes exact unresolved ranges only when the caller explicitly seals a group. `collecting`/`observed_complete` are pre-seal observations; `sealed_complete`/`sealed_incomplete` are closure states. An incomplete group is **not** a claim that CODEC can or cannot reconstruct it. E.2 does not automatically persist `StreamGap` records, encode repair symbols, generate parity/FEC, reconstruct missing frames, retransmit/ARQ, perform network I/O, authenticate transport, expose recovery through CLI/C ABI, or claim measured loss tolerance, throughput, latency, scale, or Stage E completion.
 
 ## Audio Stream Profile
 

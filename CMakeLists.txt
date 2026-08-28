@@ -152,6 +152,7 @@ if(CODEC_BUILD_TESTS)
     tests/test_statement.cpp
     tests/test_transport_multiplex.cpp
     tests/test_transport_recovery.cpp
+    tests/test_transport_recovery_integration.cpp
     tests/test_watermark.cpp
   )
   set_target_properties(codec_tests PROPERTIES

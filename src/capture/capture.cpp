@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cerrno>
 #include <cctype>
 #include <cstring>
@@ -11,6 +12,7 @@
 #include <limits>
 #include <mutex>
 #include <netinet/in.h>
+#include <poll.h>
 #include <string_view>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -22,6 +24,15 @@ namespace {
 bool starts_with(std::string_view value, std::string_view prefix) {
   return value.size() >= prefix.size() &&
          value.substr(0, prefix.size()) == prefix;
+}
+
+bool cancellation_requested(const std::atomic_bool* cancelled) noexcept {
+  return cancelled != nullptr &&
+         cancelled->load(std::memory_order_relaxed);
+}
+
+Result<CaptureReport> cancelled_capture() {
+  return fail<CaptureReport>(ErrorCode::cancelled, "capture cancelled");
 }
 
 std::string lower(std::string value) {
@@ -68,12 +79,29 @@ bool private_http_host(const std::string& uri) {
   return false;
 }
 
-Result<CaptureReport> capture_descriptor(int descriptor,
-                                         const CaptureOptions& options,
-                                         const ByteSink& sink) {
+Result<CaptureReport> capture_descriptor(
+    int descriptor, const CaptureOptions& options, const ByteSink& sink,
+    const std::atomic_bool* cancelled) {
   std::vector<std::byte> buffer(options.chunk_bytes);
   CaptureReport report;
   for (;;) {
+    if (cancellation_requested(cancelled)) return cancelled_capture();
+
+    pollfd readiness{descriptor, POLLIN | POLLHUP | POLLERR, 0};
+    const auto ready = ::poll(&readiness, 1, 100);
+    if (ready < 0 && errno == EINTR) continue;
+    if (ready < 0) {
+      return fail<CaptureReport>(
+          ErrorCode::archive_io,
+          "capture source poll failed: " + std::string{std::strerror(errno)});
+    }
+    if (ready == 0) continue;
+    if (cancellation_requested(cancelled)) return cancelled_capture();
+    if ((readiness.revents & POLLNVAL) != 0) {
+      return fail<CaptureReport>(ErrorCode::archive_io,
+                                 "capture source descriptor became invalid");
+    }
+
     const auto count = ::read(descriptor, buffer.data(), buffer.size());
     if (count < 0 && errno == EINTR) continue;
     if (count < 0) {
@@ -87,6 +115,7 @@ Result<CaptureReport> capture_descriptor(int descriptor,
       return fail<CaptureReport>(ErrorCode::resource_exhausted,
                                  "capture exceeded the feed byte limit");
     }
+    if (cancellation_requested(cancelled)) return cancelled_capture();
     auto accepted = sink(std::span{buffer}.first(static_cast<std::size_t>(count)));
     if (!accepted) return accepted.error();
     report.bytes += bytes;
@@ -98,6 +127,7 @@ Result<CaptureReport> capture_descriptor(int descriptor,
 struct CurlSink {
   const CaptureOptions* options{};
   const ByteSink* sink{};
+  const std::atomic_bool* cancelled{};
   CaptureReport report;
   Error error;
   bool failed{false};
@@ -163,10 +193,24 @@ curl_socket_t curl_open_socket(void* user_data, curlsocktype purpose,
   return ::socket(address->family, address->socktype, address->protocol);
 }
 
+int curl_progress(void* user_data, curl_off_t, curl_off_t, curl_off_t,
+                  curl_off_t) {
+  auto* context = static_cast<CurlSink*>(user_data);
+  if (!cancellation_requested(context->cancelled)) return 0;
+  context->error = {ErrorCode::cancelled, "capture cancelled", false};
+  context->failed = true;
+  return 1;
+}
+
 std::size_t curl_write(char* data, std::size_t size, std::size_t count,
                        void* user_data) {
   auto* context = static_cast<CurlSink*>(user_data);
   if (context->failed) return 0;
+  if (cancellation_requested(context->cancelled)) {
+    context->error = {ErrorCode::cancelled, "capture cancelled", false};
+    context->failed = true;
+    return 0;
+  }
   if (size != 0 && count > std::numeric_limits<std::size_t>::max() / size) {
     context->error = {ErrorCode::resource_exhausted,
                       "HTTP capture chunk size overflow", false};
@@ -198,9 +242,10 @@ void initialize_curl() {
   std::call_once(flag, [] { curl_global_init(CURL_GLOBAL_DEFAULT); });
 }
 
-Result<CaptureReport> capture_http(const std::string& uri,
-                                   const CaptureOptions& options,
-                                   const ByteSink& sink) {
+Result<CaptureReport> capture_http(
+    const std::string& uri, const CaptureOptions& options,
+    const ByteSink& sink, const std::atomic_bool* cancelled) {
+  if (cancellation_requested(cancelled)) return cancelled_capture();
   if (options.deny_private_network && private_http_host(uri)) {
     return fail<CaptureReport>(ErrorCode::unauthorized_source,
                                "private-network HTTP targets are denied");
@@ -212,7 +257,7 @@ Result<CaptureReport> capture_http(const std::string& uri,
                                "cannot initialize HTTP capture", true);
   }
   std::array<char, CURL_ERROR_SIZE> error_buffer{};
-  CurlSink context{&options, &sink, {}, {}, false};
+  CurlSink context{&options, &sink, cancelled, {}, {}, false};
   curl_easy_setopt(handle, CURLOPT_URL, uri.c_str());
   curl_easy_setopt(handle, CURLOPT_PROTOCOLS_STR, "http,https");
   curl_easy_setopt(handle, CURLOPT_REDIR_PROTOCOLS_STR, "http,https");
@@ -228,6 +273,9 @@ Result<CaptureReport> capture_http(const std::string& uri,
   curl_easy_setopt(handle, CURLOPT_WRITEDATA, &context);
   curl_easy_setopt(handle, CURLOPT_OPENSOCKETFUNCTION, &curl_open_socket);
   curl_easy_setopt(handle, CURLOPT_OPENSOCKETDATA, &context);
+  curl_easy_setopt(handle, CURLOPT_NOPROGRESS, 0L);
+  curl_easy_setopt(handle, CURLOPT_XFERINFOFUNCTION, &curl_progress);
+  curl_easy_setopt(handle, CURLOPT_XFERINFODATA, &context);
   if (options.deny_private_network) {
     // Environment proxy variables can otherwise route a denied target through
     // a different socket than the one inspected by curl_open_socket.
@@ -309,17 +357,19 @@ PreparedCapture::~PreparedCapture() {
   if (descriptor_ >= 0) ::close(descriptor_);
 }
 
-Result<CaptureReport> PreparedCapture::run(const ByteSink& sink) {
+Result<CaptureReport> PreparedCapture::run(
+    const ByteSink& sink, const std::atomic_bool* cancelled) {
   if (!sink) {
     return fail<CaptureReport>(ErrorCode::invalid_argument,
                                "capture sink is required");
   }
-  if (http_) return capture_http(uri_, options_, sink);
+  if (cancellation_requested(cancelled)) return cancelled_capture();
+  if (http_) return capture_http(uri_, options_, sink, cancelled);
   if (descriptor_ < 0) {
     return fail<CaptureReport>(ErrorCode::internal,
                                "capture source is not prepared");
   }
-  return capture_descriptor(descriptor_, options_, sink);
+  return capture_descriptor(descriptor_, options_, sink, cancelled);
 }
 
 }  // namespace codec::detail

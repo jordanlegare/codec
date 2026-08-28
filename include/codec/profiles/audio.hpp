@@ -5,6 +5,7 @@
 #include <codec/profiles/audio_export.hpp>
 #include <codec/profiles/audio_flac_export.hpp>
 #include <codec/profiles/audio_ingest.hpp>
+#include <codec/profiles/audio_offline_separation.hpp>
 #include <codec/profiles/audio_state_reader.hpp>
 #include <codec/statement.hpp>
 #include <codec/watermark.hpp>

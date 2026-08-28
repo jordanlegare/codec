@@ -18,6 +18,18 @@ grep -q '"label":"news"' "$test_dir/feeds.jsonl"
   --fidelity source-exact --output "$test_dir/extracted.bin"
 cmp "$test_dir/input.bin" "$test_dir/extracted.bin"
 
+printf 'alpha alias bytes\n' > "$test_dir/alpha-alias.bin"
+printf 'beta alias bytes\n' > "$test_dir/beta-alias.bin"
+"$codec_bin" record --archive "$test_dir/alias.coda" \
+  --feeds "alpha=$test_dir/alpha-alias.bin" \
+  --feed "beta=$test_dir/beta-alias.bin"
+"$codec_bin" list feeds "$test_dir/alias.coda" > "$test_dir/alias-feeds.jsonl"
+grep -q '"label":"alpha"' "$test_dir/alias-feeds.jsonl"
+grep -q '"label":"beta"' "$test_dir/alias-feeds.jsonl"
+"$codec_bin" extract "$test_dir/alias.coda" --feed alpha \
+  --fidelity source-exact --output "$test_dir/alpha-alias-extracted.bin"
+cmp "$test_dir/alpha-alias.bin" "$test_dir/alpha-alias-extracted.bin"
+
 if "$codec_bin" extract "$test_dir/session.coda" \
     --stream 00000000-0000-0000-0000-000000000001 \
     --fidelity source-exact --output "$test_dir/missing.bin" \

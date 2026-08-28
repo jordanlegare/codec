@@ -68,6 +68,7 @@ implemented_v0_1:
     - generic CLI stream listing and exact S0 extraction by stable StreamId; legacy feed list/extract remains available
     - C++ API, C ABI, CLI
   audio_profile:
+    - explicit C++ profile facade at codec/profiles/audio.hpp in codec::profiles::audio, forwarding the exact existing WAV/PCM, watermark, and separation types/functions while root-level codec::* audio APIs remain compatible
     - PCM16 RIFF/WAVE exact read/write
     - Ed25519/COSE W0 signed statements
     - W1 reference sub-20-kHz carrier/detector
@@ -78,7 +79,7 @@ implemented_v0_1:
     - no bundled neural model/runtime; incompatible model returns model_incompatible
 
 planned_not_implemented:
-  - generalized Stream* CLI recording/processing/export, C ABI, and profile API migration beyond generic C++ recording, CLI list/extract, and caller-supplied exporter invocation
+  - generalized Stream* CLI recording/processing/export and C ABI migration; profile API migration beyond the explicit Audio Stream Profile facade
   - persisted generic policy tags
   - generalized S1 canonical-state implementations beyond audio semantics
   - video, telemetry, sensor, document/event, network/system profiles
@@ -90,6 +91,7 @@ planned_not_implemented:
 profile_rule:
   generic_requirement_wins_core_conflict: true
   audio_is_first_reference_profile: true
+  root_audio_names_remain_v0_1_compatibility_surface: true
   current_Feed_names_may_remain_for_v0_1_compatibility: true
 
 roadmap_order:
@@ -168,6 +170,8 @@ Physical transport, logical stream identity, processing partition, and archive p
 ## Audio Stream Profile
 
 Audio is the first implemented profile, not CODEC core. PCM/WAV, sample rate/channel layout, FLAC, W0/W1/W2, diarization, speaker embeddings, neural source separation/stems, and audio-specific fidelity tests belong to this profile.
+
+The canonical additive C++ profile entry point is `<codec/profiles/audio.hpp>` under `codec::profiles::audio`. It aliases/imports the existing WAV/PCM, watermark, and separation surface rather than moving ABI-bearing symbols; existing root-level `codec::*` audio headers and names remain the v0.1 compatibility surface.
 
 For audio, S1 may mean sample-exact canonical integer PCM. Resampling, enhancement, concealment, separation, embeddings, and inferred labels remain D-class. CODEC-generated watermark derivatives must not mutate preserved S0/S1 truth.
 

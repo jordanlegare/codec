@@ -313,40 +313,49 @@ Result<std::vector<MultiplexFrame>> MultiplexDecoder::push(
 
   try {
     impl_->buffer.insert(impl_->buffer.end(), bytes.begin(), bytes.end());
-    std::vector<MultiplexFrame> output;
-    if (impl_->buffer.size() < header_size) return output;
+    std::vector<MultiplexFrame> staged;
+    staged.reserve(std::min<std::size_t>(impl_->limits.maximum_frames_per_push,
+                                         std::size_t{64}));
+    std::size_t consumed = 0;
 
-    const auto total_size =
-        get_le<std::uint64_t>(std::span<const std::byte>{impl_->buffer}, 12);
-    if (total_size > impl_->limits.maximum_buffered_bytes) {
-      impl_->failed = true;
-      return fail<std::vector<MultiplexFrame>>(
-          ErrorCode::resource_exhausted,
-          "multiplex frame exceeds decoder buffer limit");
-    }
-    if (total_size > std::numeric_limits<std::size_t>::max()) {
-      impl_->failed = true;
-      return fail<std::vector<MultiplexFrame>>(
-          ErrorCode::resource_exhausted,
-          "multiplex frame is not addressable");
-    }
-    if (impl_->buffer.size() < static_cast<std::size_t>(total_size)) {
-      return output;
+    while (staged.size() < impl_->limits.maximum_frames_per_push) {
+      const auto remaining = impl_->buffer.size() - consumed;
+      if (remaining < header_size) break;
+
+      const auto view =
+          std::span<const std::byte>{impl_->buffer}.subspan(consumed);
+      const auto total_size = get_le<std::uint64_t>(view, 12);
+      if (total_size > impl_->limits.maximum_buffered_bytes) {
+        impl_->failed = true;
+        return fail<std::vector<MultiplexFrame>>(
+            ErrorCode::resource_exhausted,
+            "multiplex frame exceeds decoder buffer limit");
+      }
+      if (total_size > std::numeric_limits<std::size_t>::max()) {
+        impl_->failed = true;
+        return fail<std::vector<MultiplexFrame>>(
+            ErrorCode::resource_exhausted,
+            "multiplex frame is not addressable");
+      }
+      const auto frame_size = static_cast<std::size_t>(total_size);
+      if (remaining < frame_size) break;
+
+      auto decoded = decode_complete_frame(view.first(frame_size),
+                                           impl_->limits);
+      if (!decoded) {
+        impl_->failed = true;
+        return decoded.error();
+      }
+      staged.push_back(std::move(*decoded));
+      consumed += frame_size;
     }
 
-    auto decoded = decode_complete_frame(
-        std::span<const std::byte>{impl_->buffer}.first(
-            static_cast<std::size_t>(total_size)),
-        impl_->limits);
-    if (!decoded) {
-      impl_->failed = true;
-      return decoded.error();
+    if (consumed != 0) {
+      impl_->buffer.erase(
+          impl_->buffer.begin(),
+          impl_->buffer.begin() + static_cast<std::ptrdiff_t>(consumed));
     }
-    output.push_back(std::move(*decoded));
-    impl_->buffer.erase(
-        impl_->buffer.begin(),
-        impl_->buffer.begin() + static_cast<std::ptrdiff_t>(total_size));
-    return output;
+    return staged;
   } catch (const std::bad_alloc&) {
     impl_->failed = true;
     return fail<std::vector<MultiplexFrame>>(

@@ -12,9 +12,13 @@ option(CODEC_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSan
 
 find_package(OpenSSL 3.0 REQUIRED COMPONENTS Crypto)
 find_package(CURL REQUIRED)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(FLAC REQUIRED IMPORTED_TARGET flac)
 
 add_library(codec_core
   src/archive/archive.cpp
+  src/audio/flac_encoder.cpp
+  src/audio/pcm16_flac_export.cpp
   src/audio/pcm16_ingest.cpp
   src/audio/pcm16_state.cpp
   src/audio/pcm16_state_reader.cpp
@@ -49,7 +53,7 @@ target_include_directories(codec_core
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
-target_link_libraries(codec_core PUBLIC OpenSSL::Crypto CURL::libcurl)
+target_link_libraries(codec_core PUBLIC OpenSSL::Crypto CURL::libcurl PkgConfig::FLAC)
 
 function(codec_enable_warnings target)
   if(MSVC)
@@ -95,6 +99,7 @@ if(CODEC_BUILD_TESTS)
     tests/test_audio_profile.cpp
     tests/test_audio_state_reader.cpp
     tests/test_audio_export.cpp
+    tests/test_audio_flac_export.cpp
     tests/test_engine.cpp
     tests/test_processing.cpp
     tests/test_exporter.cpp
@@ -108,7 +113,7 @@ if(CODEC_BUILD_TESTS)
     CXX_EXTENSIONS NO
   )
   target_include_directories(codec_tests PRIVATE tests)
-  target_link_libraries(codec_tests PRIVATE codec::codec)
+  target_link_libraries(codec_tests PRIVATE codec::codec PkgConfig::FLAC)
   codec_enable_warnings(codec_tests)
   codec_enable_sanitizers(codec_tests)
   add_test(NAME codec-unit COMMAND codec_tests)
@@ -147,27 +152,22 @@ install(TARGETS codec_core codec_cli
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-  INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-)
+  INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 install(DIRECTORY include/codec DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
 configure_package_config_file(
   cmake/codec-config.cmake.in
   ${CMAKE_CURRENT_BINARY_DIR}/codec-config.cmake
-  INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/codec
-)
+  INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/codec)
 write_basic_package_version_file(
   ${CMAKE_CURRENT_BINARY_DIR}/codec-config-version.cmake
   VERSION ${PROJECT_VERSION}
-  COMPATIBILITY SameMajorVersion
-)
+  COMPATIBILITY SameMajorVersion)
 install(FILES
   ${CMAKE_CURRENT_BINARY_DIR}/codec-config.cmake
   ${CMAKE_CURRENT_BINARY_DIR}/codec-config-version.cmake
-  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/codec
-)
+  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/codec)
 install(EXPORT codec-targets
   FILE codec-targets.cmake
   NAMESPACE codec::
-  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/codec
-)
+  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/codec)

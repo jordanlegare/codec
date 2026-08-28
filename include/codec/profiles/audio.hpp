@@ -3,6 +3,7 @@
 #include <codec/audio.hpp>
 #include <codec/inference.hpp>
 #include <codec/profiles/audio_export.hpp>
+#include <codec/profiles/audio_flac_export.hpp>
 #include <codec/profiles/audio_ingest.hpp>
 #include <codec/profiles/audio_state_reader.hpp>
 #include <codec/statement.hpp>

@@ -66,6 +66,7 @@ implemented_v0_1:
     - bounded caller-supplied C++ StreamExporter contract for typed external representations from exact extracted record batches, with input/output/payload-type limits and exact ordered physical support links; registry, automatic query, persistence, CLI, and C ABI export remain external
     - typed C++ generic stream recording with caller-owned stable StreamId and exact StreamDescriptor persistence through the existing hardened URI capture path; FeedSpec recording remains compatible
     - generic CLI stream listing and exact S0 extraction by stable StreamId; legacy feed list/extract remains available
+    - bounded deterministic CMX1 generic multiplex framing and incremental demultiplexing for many logical StreamIds over one physical byte stream, preserving per-frame sequence, connection/format epochs, generic clock, interval, and opaque payload with bounded backpressure and SHA-256 corruption detection; no truth classification, recovery/FEC, or network provider is implied
     - C++ API, C ABI, CLI
   audio_profile:
     - explicit C++ profile facade at codec/profiles/audio.hpp in codec::profiles::audio, forwarding the exact existing WAV/PCM, watermark, and separation types/functions while root-level codec::* audio APIs remain compatible
@@ -95,7 +96,7 @@ planned_not_implemented:
   - generalized S1 canonical-state implementations beyond deterministic audio PCM16
   - video, telemetry, sensor, document/event, network/system profiles
   - production neural separation/diarization/identity models
-  - recovery/FEC profile
+  - transport loss/recovery/FEC semantics beyond implemented E.1 multiplex framing
   - distributed/cloud execution profile
   - trust/selective-disclosure profile
 
@@ -109,7 +110,7 @@ roadmap_order:
   - stabilize generic stream identity/type/time/provenance/archive semantics
   - expose generic adapter/processor/query/extraction boundaries
   - complete Audio Stream Profile 1.0
-  - add recovery/multiplexing
+  - extend Stage E transport/recovery beyond implemented generic multiplex framing
   - add distributed/cloud execution
   - add trust/selective-disclosure
   - add more stream/vertical profiles
@@ -153,6 +154,7 @@ ctest --test-dir build-san --output-on-failure
 | `src/archive/` | CODA archive/integrity implementation |
 | `src/capture/` | Source ingest/capture |
 | `src/core/` | Engine/core primitives; currently includes compatibility-era feed naming |
+| `src/transport/` | Generic transport-profile framing and demultiplexing primitives |
 | `src/audio/` | Audio Stream Profile implementation |
 | `src/watermark/` | Audio W0/W1/W2 identity implementation |
 | `src/inference/` | Inference backend boundary |
@@ -177,6 +179,10 @@ RecordEnvelope {
 ```
 
 Physical transport, logical stream identity, processing partition, and archive placement are separate concerns. One endpoint may multiplex many logical streams; one stream may migrate while retaining identity and provenance.
+
+## Transport / Recovery Profile
+
+Stage E has started with the additive C++ `CMX1` multiplex boundary in `<codec/transport.hpp>`. `encode_multiplex_frame` deterministically frames one logical `StreamId` plus its independent sequence, connection/format epochs, generic `StreamClock`, interval, and opaque bytes; `MultiplexDecoder` incrementally demultiplexes arbitrary physical chunks in arrival order with caller-bounded buffering and frame-count backpressure. The version-1 frame SHA-256 detects corruption of its semantic header or payload but is not a signature, MAC, authentication, or authorization mechanism. E.1 deliberately does not assign S0/S1/D truth, infer gaps, reorder, retransmit, recover loss, generate parity/FEC, resynchronize after corruption, perform network I/O, write CODA, or claim throughput/latency/scale. Those transport/recovery semantics remain separate later Stage E gates.
 
 ## Audio Stream Profile
 

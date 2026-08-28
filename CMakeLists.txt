@@ -9,6 +9,8 @@ option(CODEC_BUILD_TESTS "Build CODEC tests" ON)
 option(CODEC_BUILD_EXAMPLES "Build CODEC examples" ON)
 option(CODEC_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 option(CODEC_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
+set(CODEC_ONNXRUNTIME_ROOT "" CACHE PATH
+    "Optional ONNX Runtime distribution root for the Audio CPU backend")
 
 find_package(OpenSSL 3.0 REQUIRED COMPONENTS Crypto)
 find_package(CURL REQUIRED)
@@ -20,6 +22,7 @@ add_library(codec_core
   src/audio/flac_decoder.cpp
   src/audio/flac_encoder.cpp
   src/audio/offline_pcm16_separation.cpp
+  src/audio/onnx_cpu_separation.cpp
   src/audio/pcm16_flac_export.cpp
   src/audio/pcm16_flac_ingest.cpp
   src/audio/pcm16_ingest.cpp
@@ -58,6 +61,37 @@ target_include_directories(codec_core
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 target_link_libraries(codec_core PUBLIC OpenSSL::Crypto CURL::libcurl PkgConfig::FLAC)
+target_link_libraries(codec_core PRIVATE ${CMAKE_DL_LIBS})
+
+set(CODEC_HAS_ONNXRUNTIME OFF)
+if(CODEC_ONNXRUNTIME_ROOT)
+  find_path(CODEC_ONNXRUNTIME_INCLUDE_DIR
+    NAMES onnxruntime_c_api.h
+    PATHS "${CODEC_ONNXRUNTIME_ROOT}/include"
+    NO_DEFAULT_PATH)
+  if(WIN32)
+    find_file(CODEC_ONNXRUNTIME_LIBRARY
+      NAMES onnxruntime.dll
+      PATHS "${CODEC_ONNXRUNTIME_ROOT}/lib"
+            "${CODEC_ONNXRUNTIME_ROOT}/bin"
+      NO_DEFAULT_PATH)
+  else()
+    find_library(CODEC_ONNXRUNTIME_LIBRARY
+      NAMES onnxruntime
+      PATHS "${CODEC_ONNXRUNTIME_ROOT}/lib"
+      NO_DEFAULT_PATH)
+  endif()
+  if(NOT CODEC_ONNXRUNTIME_INCLUDE_DIR OR NOT CODEC_ONNXRUNTIME_LIBRARY)
+    message(FATAL_ERROR
+      "CODEC_ONNXRUNTIME_ROOT must contain include/onnxruntime_c_api.h and the ONNX Runtime shared library")
+  endif()
+  set(CODEC_HAS_ONNXRUNTIME ON)
+  target_include_directories(codec_core PRIVATE ${CODEC_ONNXRUNTIME_INCLUDE_DIR})
+  target_compile_definitions(codec_core PRIVATE CODEC_HAS_ONNXRUNTIME=1)
+  message(STATUS "CODEC Audio ONNX Runtime CPU backend: enabled")
+else()
+  message(STATUS "CODEC Audio ONNX Runtime CPU backend: unavailable (set CODEC_ONNXRUNTIME_ROOT to enable)")
+endif()
 
 function(codec_enable_warnings target)
   if(MSVC)
@@ -101,6 +135,7 @@ if(CODEC_BUILD_TESTS)
     tests/test_main.cpp
     tests/test_archive.cpp
     tests/test_audio_model_bundle.cpp
+    tests/test_audio_onnx_cpu_runtime.cpp
     tests/test_audio_profile.cpp
     tests/test_audio_state_reader.cpp
     tests/test_audio_export.cpp
@@ -122,9 +157,25 @@ if(CODEC_BUILD_TESTS)
   )
   target_include_directories(codec_tests PRIVATE tests)
   target_link_libraries(codec_tests PRIVATE codec::codec PkgConfig::FLAC)
+  if(CODEC_HAS_ONNXRUNTIME)
+    target_compile_definitions(codec_tests PRIVATE
+      CODEC_TEST_ONNXRUNTIME_LIBRARY="${CODEC_ONNXRUNTIME_LIBRARY}")
+  endif()
   codec_enable_warnings(codec_tests)
   codec_enable_sanitizers(codec_tests)
-  add_test(NAME codec-unit COMMAND codec_tests)
+
+  if(CODEC_ENABLE_SANITIZERS AND CODEC_HAS_ONNXRUNTIME AND
+     CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    add_test(NAME codec-unit
+      COMMAND codec_tests --exclude-prefix audio_onnx_cpu_runtime_)
+    add_test(NAME codec-onnx-runtime
+      COMMAND codec_tests --include-prefix audio_onnx_cpu_runtime_)
+    set_tests_properties(codec-onnx-runtime PROPERTIES
+      ENVIRONMENT
+        "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/tests/lsan_onnxruntime.supp:print_suppressions=1")
+  else()
+    add_test(NAME codec-unit COMMAND codec_tests)
+  endif()
 
   add_executable(codec_c_api_test tests/test_c_api.c)
   set_target_properties(codec_c_api_test PROPERTIES LINKER_LANGUAGE CXX)

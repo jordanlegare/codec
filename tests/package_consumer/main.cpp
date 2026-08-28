@@ -7,6 +7,10 @@ int main() {
   const codec::profiles::audio::Pcm16FlacExportLimits limits{};
   const codec::profiles::audio::OfflinePcm16SeparationRequest offline{};
   const codec::profiles::audio::OfflinePcm16SeparationLimits offline_limits{};
+  const codec::profiles::audio::OnnxCpuSeparationOptions runtime_options{};
+  const auto runtime_compiled =
+      codec::profiles::audio::onnx_cpu_separation_runtime_compiled();
+  (void)runtime_compiled;
   const codec::profiles::audio::SeparationModelBundle model_bundle{
       .manifest = {
           .model_id = "consumer.separator",
@@ -35,6 +39,8 @@ int main() {
   return limits.maximum_output_bytes == 0 ||
                  offline.maximum_sources == 0 ||
                  offline_limits.maximum_output_bytes == 0 ||
+                 runtime_options.intra_op_threads == 0 ||
+                 runtime_options.limits.maximum_input_frames == 0 ||
                  !encoded_model_bundle ||
                  state.frames() != 1
              ? 1

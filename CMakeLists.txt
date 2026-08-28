@@ -148,6 +148,7 @@ if(CODEC_BUILD_TESTS)
     tests/test_exporter.cpp
     tests/test_stream.cpp
     tests/test_statement.cpp
+    tests/test_transport_multiplex.cpp
     tests/test_watermark.cpp
   )
   set_target_properties(codec_tests PROPERTIES

@@ -1,5 +1,6 @@
 #include "test.hpp"
 
+#include <codec/integrity.hpp>
 #include <codec/transport.hpp>
 
 #include <array>
@@ -45,6 +46,50 @@ void append_bytes(std::vector<std::byte>& output,
   output.insert(output.end(), input.begin(), input.end());
 }
 
+void put_u16(std::vector<std::byte>& bytes, std::size_t offset,
+             std::uint16_t value) {
+  for (std::size_t index = 0; index < 2; ++index) {
+    bytes[offset + index] = static_cast<std::byte>(value & 0xffU);
+    value >>= 8U;
+  }
+}
+
+void put_u32(std::vector<std::byte>& bytes, std::size_t offset,
+             std::uint32_t value) {
+  for (std::size_t index = 0; index < 4; ++index) {
+    bytes[offset + index] = static_cast<std::byte>(value & 0xffU);
+    value >>= 8U;
+  }
+}
+
+void put_u64(std::vector<std::byte>& bytes, std::size_t offset,
+             std::uint64_t value) {
+  for (std::size_t index = 0; index < 8; ++index) {
+    bytes[offset + index] = static_cast<std::byte>(value & 0xffU);
+    value >>= 8U;
+  }
+}
+
+void put_i64(std::vector<std::byte>& bytes, std::size_t offset,
+             std::int64_t value) {
+  put_u64(bytes, offset, static_cast<std::uint64_t>(value));
+}
+
+void rehash(std::vector<std::byte>& bytes) {
+  constexpr std::size_t hash_offset = 132;
+  constexpr std::size_t header_size = 164;
+  std::vector<std::byte> input;
+  input.insert(input.end(), bytes.begin(),
+               bytes.begin() + static_cast<std::ptrdiff_t>(hash_offset));
+  input.insert(input.end(),
+               bytes.begin() + static_cast<std::ptrdiff_t>(header_size),
+               bytes.end());
+  const auto digest = codec::sha256(input);
+  for (std::size_t index = 0; index < digest.size(); ++index) {
+    bytes[hash_offset + index] = static_cast<std::byte>(digest[index]);
+  }
+}
+
 void expect_same_frame(const codec::MultiplexFrame& actual,
                        const codec::MultiplexFrame& expected) {
   EXPECT_EQ(actual.stream, expected.stream);
@@ -63,6 +108,14 @@ void expect_same_frame(const codec::MultiplexFrame& actual,
   EXPECT_EQ(actual.start_ns, expected.start_ns);
   EXPECT_EQ(actual.end_ns, expected.end_ns);
   EXPECT_EQ(actual.payload, expected.payload);
+}
+
+void expect_complete_wire_error(std::vector<std::byte> bytes,
+                                codec::ErrorCode code) {
+  codec::MultiplexDecoder decoder;
+  auto decoded = decoder.push(bytes);
+  EXPECT_FALSE(decoded);
+  EXPECT_EQ(decoded.error().code, code);
 }
 
 }  // namespace
@@ -227,4 +280,133 @@ TEST(transport_multiplex_backpressure_drains_complete_frames_without_loss) {
   expect_same_frame(three->front(), third);
   EXPECT_EQ(decoder.buffered_bytes(), std::size_t{0});
   EXPECT_TRUE(decoder.finish());
+}
+
+TEST(transport_multiplex_detects_header_and_payload_corruption) {
+  auto payload_corrupt = encoded_frame(
+      frame_for("corrupt/payload", 1, std::byte{0x51}));
+  payload_corrupt[164] ^= std::byte{0x01};
+  expect_complete_wire_error(std::move(payload_corrupt),
+                             codec::ErrorCode::protocol);
+
+  auto header_corrupt = encoded_frame(
+      frame_for("corrupt/header", 2, std::byte{0x52}));
+  header_corrupt[36] ^= std::byte{0x01};
+  expect_complete_wire_error(std::move(header_corrupt),
+                             codec::ErrorCode::protocol);
+}
+
+TEST(transport_multiplex_rejects_invalid_complete_wire_headers) {
+  auto bad_magic = encoded_frame(frame_for("bad/magic", 1, std::byte{1}));
+  bad_magic[0] = std::byte{'X'};
+  expect_complete_wire_error(std::move(bad_magic),
+                             codec::ErrorCode::protocol);
+
+  auto bad_version = encoded_frame(frame_for("bad/version", 2, std::byte{2}));
+  put_u16(bad_version, 4, 2);
+  expect_complete_wire_error(std::move(bad_version),
+                             codec::ErrorCode::protocol);
+
+  auto bad_flags = encoded_frame(frame_for("bad/flags", 3, std::byte{3}));
+  put_u16(bad_flags, 6, 1);
+  expect_complete_wire_error(std::move(bad_flags),
+                             codec::ErrorCode::protocol);
+
+  auto bad_header_size =
+      encoded_frame(frame_for("bad/header-size", 4, std::byte{4}));
+  put_u32(bad_header_size, 8, 163);
+  expect_complete_wire_error(std::move(bad_header_size),
+                             codec::ErrorCode::protocol);
+
+  auto inconsistent =
+      encoded_frame(frame_for("bad/length", 5, std::byte{5}));
+  put_u64(inconsistent, 124, 999);
+  expect_complete_wire_error(std::move(inconsistent),
+                             codec::ErrorCode::protocol);
+}
+
+TEST(transport_multiplex_rejects_semantically_invalid_hash_valid_wire) {
+  auto bad_timebase =
+      encoded_frame(frame_for("bad/timebase", 6, std::byte{6}));
+  put_i64(bad_timebase, 116, 0);
+  rehash(bad_timebase);
+  expect_complete_wire_error(std::move(bad_timebase),
+                             codec::ErrorCode::protocol);
+
+  auto inverted =
+      encoded_frame(frame_for("bad/interval", 7, std::byte{7}));
+  put_i64(inverted, 60, 1000);
+  put_i64(inverted, 68, 999);
+  rehash(inverted);
+  expect_complete_wire_error(std::move(inverted),
+                             codec::ErrorCode::protocol);
+}
+
+TEST(transport_multiplex_rejects_bad_header_before_waiting_for_payload) {
+  auto wire = encoded_frame(frame_for("early/bad-magic", 8, std::byte{8}));
+  wire[0] = std::byte{'X'};
+
+  codec::MultiplexDecoder decoder;
+  auto decoded = decoder.push(
+      std::span<const std::byte>{wire}.first(std::size_t{164}));
+  EXPECT_FALSE(decoded);
+  EXPECT_EQ(decoded.error().code, codec::ErrorCode::protocol);
+}
+
+TEST(transport_multiplex_rejects_oversize_declaration_from_header_alone) {
+  auto frame = frame_for("early/oversize", 9, std::byte{9});
+  frame.payload.assign(10, std::byte{0x44});
+  const auto wire = encoded_frame(frame);
+
+  codec::MultiplexLimits limits{};
+  limits.maximum_payload_bytes = 4;
+  limits.maximum_buffered_bytes = 1024;
+  limits.maximum_frames_per_push = 16;
+  codec::MultiplexDecoder decoder{limits};
+  auto decoded = decoder.push(
+      std::span<const std::byte>{wire}.first(std::size_t{164}));
+  EXPECT_FALSE(decoded);
+  EXPECT_EQ(decoded.error().code, codec::ErrorCode::resource_exhausted);
+}
+
+TEST(transport_multiplex_returns_no_partial_vector_on_later_corrupt_frame) {
+  const auto first = encoded_frame(
+      frame_for("transaction/first", 1, std::byte{0x61}));
+  auto corrupt = encoded_frame(
+      frame_for("transaction/corrupt", 2, std::byte{0x62}));
+  corrupt[164] ^= std::byte{0x01};
+
+  std::vector<std::byte> physical;
+  append_bytes(physical, first);
+  append_bytes(physical, corrupt);
+
+  codec::MultiplexDecoder decoder;
+  auto decoded = decoder.push(physical);
+  EXPECT_FALSE(decoded);
+  EXPECT_EQ(decoded.error().code, codec::ErrorCode::protocol);
+
+  auto retry = decoder.push({});
+  EXPECT_FALSE(retry);
+  EXPECT_EQ(retry.error().code, codec::ErrorCode::invalid_argument);
+}
+
+TEST(transport_multiplex_finish_rejects_truncation_and_closes_decoder) {
+  const auto wire = encoded_frame(
+      frame_for("finish/truncated", 1, std::byte{0x71}));
+  codec::MultiplexDecoder truncated;
+  auto partial = truncated.push(
+      std::span<const std::byte>{wire}.first(std::size_t{100}));
+  EXPECT_TRUE(partial);
+  EXPECT_EQ(partial->size(), std::size_t{0});
+  auto incomplete = truncated.finish();
+  EXPECT_FALSE(incomplete);
+  EXPECT_EQ(incomplete.error().code, codec::ErrorCode::protocol);
+
+  codec::MultiplexDecoder complete;
+  auto decoded = complete.push(wire);
+  EXPECT_TRUE(decoded);
+  EXPECT_TRUE(complete.finish());
+  auto after_finish = complete.push({});
+  EXPECT_FALSE(after_finish);
+  EXPECT_EQ(after_finish.error().code, codec::ErrorCode::invalid_argument);
 }

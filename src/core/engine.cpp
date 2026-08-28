@@ -6,13 +6,22 @@
 #include <algorithm>
 #include <chrono>
 #include <cctype>
+#include <condition_variable>
+#include <cstdint>
+#include <deque>
+#include <mutex>
+#include <optional>
 #include <set>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
 namespace codec {
 namespace {
+
+constexpr std::size_t default_pending_chunks_per_stream = 8;
+constexpr std::uint64_t default_pending_bytes = 64ULL * 1024ULL * 1024ULL;
 
 bool valid_label(std::string_view label) {
   if (label.empty() || label.size() > 128) return false;
@@ -48,6 +57,27 @@ struct PreparedSource {
   detail::PreparedCapture capture;
 };
 
+struct PendingChunk {
+  std::vector<std::byte> bytes;
+  std::int64_t observed_ns{};
+};
+
+struct ProducerState {
+  std::deque<PendingChunk> chunks;
+  bool done{false};
+};
+
+struct SchedulerState {
+  explicit SchedulerState(std::size_t count) : producers(count) {}
+
+  std::mutex mutex;
+  std::condition_variable changed;
+  std::vector<ProducerState> producers;
+  std::uint64_t pending_bytes{};
+  bool cancelled{false};
+  std::optional<Error> first_error;
+};
+
 template <typename Spec, typename StreamForSpec>
 Result<std::vector<PreparedSource>> prepare_sources(
     const std::vector<Spec>& specs, const EngineConfig& config,
@@ -69,6 +99,22 @@ Result<std::vector<PreparedSource>> prepare_sources(
   return prepared;
 }
 
+bool all_producers_done(const SchedulerState& scheduler) {
+  return std::all_of(scheduler.producers.begin(), scheduler.producers.end(),
+                     [](const ProducerState& producer) {
+                       return producer.done && producer.chunks.empty();
+                     });
+}
+
+void cancel_scheduler(SchedulerState& scheduler, Error error) {
+  {
+    std::lock_guard lock(scheduler.mutex);
+    if (!scheduler.first_error) scheduler.first_error = std::move(error);
+    scheduler.cancelled = true;
+  }
+  scheduler.changed.notify_all();
+}
+
 template <typename AppendDescriptor>
 Result<StreamRecordingReport> record_prepared_sources(
     std::vector<PreparedSource> prepared,
@@ -77,25 +123,141 @@ Result<StreamRecordingReport> record_prepared_sources(
   auto writer_result = CodaWriter::create(archive_path);
   if (!writer_result) return writer_result.error();
   auto writer = std::move(*writer_result);
+
   StreamRecordingReport report;
   report.archive = archive_path;
+
+  // Feed/stream identity must be visible before any source payload can be
+  // committed. This also lets verified-prefix readers resolve labels while
+  // long-lived producers are still running.
   for (std::size_t index = 0; index < prepared.size(); ++index) {
     auto descriptor = append_descriptor(writer, index, now_ns());
     if (!descriptor) return descriptor.error();
-    auto captured = prepared[index].capture.run(
-        [&](std::span<const std::byte> bytes) -> Result<void> {
-          const auto observed = now_ns();
-          auto appended = writer.append(RecordType::source_bytes,
-                                        prepared[index].stream, observed,
-                                        observed, bytes);
-          if (!appended) return appended.error();
-          report.source_bytes += bytes.size();
-          report.source_records += 1;
-          return {};
-        });
-    if (!captured) return captured.error();
-    report.streams_recorded += 1;
   }
+
+  SchedulerState scheduler{prepared.size()};
+  std::vector<std::thread> producers;
+  producers.reserve(prepared.size());
+
+  for (std::size_t index = 0; index < prepared.size(); ++index) {
+    producers.emplace_back([&, index] {
+      auto captured = prepared[index].capture.run(
+          [&](std::span<const std::byte> bytes) -> Result<void> {
+            PendingChunk chunk;
+            try {
+              chunk.bytes.assign(bytes.begin(), bytes.end());
+            } catch (const std::bad_alloc&) {
+              return fail(ErrorCode::resource_exhausted,
+                          "capture queue allocation failed");
+            }
+            chunk.observed_ns = now_ns();
+            const auto chunk_bytes =
+                static_cast<std::uint64_t>(chunk.bytes.size());
+            if (chunk_bytes > default_pending_bytes) {
+              return fail(ErrorCode::resource_exhausted,
+                          "capture chunk exceeds pending-byte bound");
+            }
+
+            std::unique_lock lock(scheduler.mutex);
+            scheduler.changed.wait(lock, [&] {
+              return scheduler.cancelled ||
+                     (scheduler.producers[index].chunks.size() <
+                          default_pending_chunks_per_stream &&
+                      scheduler.pending_bytes <=
+                          default_pending_bytes - chunk_bytes);
+            });
+            if (scheduler.cancelled) {
+              return fail(ErrorCode::internal, "capture recording cancelled");
+            }
+            scheduler.pending_bytes += chunk_bytes;
+            scheduler.producers[index].chunks.push_back(std::move(chunk));
+            lock.unlock();
+            scheduler.changed.notify_all();
+            return {};
+          });
+
+      {
+        std::lock_guard lock(scheduler.mutex);
+        if (!captured && !scheduler.first_error && !scheduler.cancelled) {
+          scheduler.first_error = captured.error();
+          scheduler.cancelled = true;
+        }
+        scheduler.producers[index].done = true;
+      }
+      scheduler.changed.notify_all();
+    });
+  }
+
+  auto join_producers = [&] {
+    for (auto& producer : producers) {
+      if (producer.joinable()) producer.join();
+    }
+  };
+
+  std::size_t next_index = 0;
+  for (;;) {
+    PendingChunk chunk;
+    std::size_t source_index = 0;
+    bool have_chunk = false;
+    std::optional<Error> producer_error;
+
+    {
+      std::unique_lock lock(scheduler.mutex);
+      scheduler.changed.wait(lock, [&] {
+        if (scheduler.first_error) return true;
+        if (all_producers_done(scheduler)) return true;
+        return std::any_of(scheduler.producers.begin(),
+                           scheduler.producers.end(),
+                           [](const ProducerState& producer) {
+                             return !producer.chunks.empty();
+                           });
+      });
+
+      if (scheduler.first_error) {
+        producer_error = scheduler.first_error;
+      } else {
+        for (std::size_t offset = 0; offset < scheduler.producers.size();
+             ++offset) {
+          const auto candidate =
+              (next_index + offset) % scheduler.producers.size();
+          auto& state = scheduler.producers[candidate];
+          if (state.chunks.empty()) continue;
+          source_index = candidate;
+          chunk = std::move(state.chunks.front());
+          state.chunks.pop_front();
+          scheduler.pending_bytes -=
+              static_cast<std::uint64_t>(chunk.bytes.size());
+          next_index = (candidate + 1) % scheduler.producers.size();
+          have_chunk = true;
+          break;
+        }
+        if (!have_chunk && all_producers_done(scheduler)) break;
+      }
+    }
+
+    scheduler.changed.notify_all();
+
+    if (producer_error) {
+      join_producers();
+      return *producer_error;
+    }
+    if (!have_chunk) continue;
+
+    auto appended = writer.append(RecordType::source_bytes,
+                                  prepared[source_index].stream,
+                                  chunk.observed_ns, chunk.observed_ns,
+                                  chunk.bytes);
+    if (!appended) {
+      cancel_scheduler(scheduler, appended.error());
+      join_producers();
+      return appended.error();
+    }
+    report.source_bytes += chunk.bytes.size();
+    report.source_records += 1;
+  }
+
+  join_producers();
+  report.streams_recorded = prepared.size();
   auto finalized = writer.finalize();
   if (!finalized) return finalized.error();
   return report;

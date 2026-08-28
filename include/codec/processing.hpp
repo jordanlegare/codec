@@ -67,4 +67,42 @@ Result<std::vector<ProcessorOutput>> invoke_processor(
     StreamProcessor& processor, std::span<const ExtractedRecord> inputs,
     ProcessorRunLimits limits = {});
 
+// One provider-owned external representation. The payload type is profile
+// defined; the wrapper does not interpret or reclassify the bytes.
+struct ExporterOutput {
+  std::string payload_type;
+  std::vector<std::byte> payload;
+};
+
+// A validated export plus exact physical records that supported it. Supporting
+// links are derived by invoke_exporter() from the supplied RecordInfo values.
+struct ExportResult {
+  std::string payload_type;
+  std::vector<std::byte> payload;
+  std::vector<ProvenanceRecordLink> supporting_records;
+};
+
+struct ExporterRunLimits {
+  std::size_t maximum_inputs{4096};
+  std::uint64_t maximum_input_bytes{64ULL * 1024ULL * 1024ULL};
+  std::uint64_t maximum_output_bytes{64ULL * 1024ULL * 1024ULL};
+  std::size_t maximum_payload_type_bytes{256};
+};
+
+class StreamExporter {
+ public:
+  virtual ~StreamExporter() = default;
+  virtual std::string name() const = 0;
+  virtual Result<ExporterOutput> export_records(
+      std::span<const ExtractedRecord> inputs) = 0;
+};
+
+// Validates exact extracted inputs and caller resource bounds, invokes one
+// caller-supplied profile exporter, and returns its bytes unchanged with exact
+// ordered supporting record links. This function performs no archive or
+// filesystem writes.
+Result<ExportResult> invoke_exporter(
+    StreamExporter& exporter, std::span<const ExtractedRecord> inputs,
+    ExporterRunLimits limits = {});
+
 }  // namespace codec

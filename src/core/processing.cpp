@@ -112,4 +112,75 @@ Result<std::vector<ProcessorOutput>> invoke_processor(
   return std::move(*outputs);
 }
 
+Result<ExportResult> invoke_exporter(
+    StreamExporter& exporter, std::span<const ExtractedRecord> inputs,
+    ExporterRunLimits limits) {
+  if (limits.maximum_inputs == 0 || limits.maximum_input_bytes == 0 ||
+      limits.maximum_output_bytes == 0 ||
+      limits.maximum_payload_type_bytes == 0) {
+    return fail<ExportResult>(
+        ErrorCode::invalid_argument,
+        "exporter resource limits must be non-zero");
+  }
+  if (inputs.empty()) {
+    return fail<ExportResult>(ErrorCode::invalid_argument,
+                              "exporter requires at least one exact input");
+  }
+  if (inputs.size() > limits.maximum_inputs) {
+    return fail<ExportResult>(
+        ErrorCode::resource_exhausted,
+        "exporter input count exceeds the configured limit");
+  }
+
+  std::uint64_t total_input_bytes = 0;
+  for (const auto& input : inputs) {
+    if (input.payload.size() != input.record.payload_size) {
+      return fail<ExportResult>(
+          ErrorCode::invalid_argument,
+          "exporter input payload does not match its exact record size");
+    }
+    const auto input_bytes = static_cast<std::uint64_t>(input.payload.size());
+    if (input_bytes > limits.maximum_input_bytes - total_input_bytes) {
+      return fail<ExportResult>(
+          ErrorCode::resource_exhausted,
+          "exporter input bytes exceed the configured limit");
+    }
+    total_input_bytes += input_bytes;
+  }
+
+  auto output = exporter.export_records(inputs);
+  if (!output) return output.error();
+  if (output->payload_type.empty()) {
+    return fail<ExportResult>(ErrorCode::invalid_argument,
+                              "exporter payload type must be non-empty");
+  }
+  if (output->payload_type.size() > limits.maximum_payload_type_bytes) {
+    return fail<ExportResult>(
+        ErrorCode::resource_exhausted,
+        "exporter payload type exceeds the configured limit");
+  }
+  if (output->payload.size() > limits.maximum_output_bytes) {
+    return fail<ExportResult>(
+        ErrorCode::resource_exhausted,
+        "exporter output bytes exceed the configured limit");
+  }
+
+  std::vector<ProvenanceRecordLink> supporting_records;
+  supporting_records.reserve(inputs.size());
+  for (const auto& input : inputs) {
+    supporting_records.push_back(ProvenanceRecordLink{
+        .stream = input.record.stream,
+        .type = input.record.type_code(),
+        .sequence = input.record.sequence,
+        .hash = input.record.hash,
+    });
+  }
+
+  return ExportResult{
+      .payload_type = std::move(output->payload_type),
+      .payload = std::move(output->payload),
+      .supporting_records = std::move(supporting_records),
+  };
+}
+
 }  // namespace codec

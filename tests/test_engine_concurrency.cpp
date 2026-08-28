@@ -55,6 +55,25 @@ void write_fifo_once(const std::filesystem::path& path, std::string payload,
 
 }  // namespace
 
+TEST(engine_recording_queue_limits_are_explicit_and_nonzero) {
+  codec::EngineConfig valid;
+  valid.maximum_pending_chunks_per_stream = 1;
+  valid.maximum_pending_bytes = 4096;
+  EXPECT_TRUE(codec::Engine::create(valid));
+
+  auto zero_chunks = valid;
+  zero_chunks.maximum_pending_chunks_per_stream = 0;
+  auto zero_chunks_result = codec::Engine::create(zero_chunks);
+  EXPECT_FALSE(zero_chunks_result);
+  EXPECT_EQ(zero_chunks_result.error().code, codec::ErrorCode::invalid_argument);
+
+  auto zero_bytes = valid;
+  zero_bytes.maximum_pending_bytes = 0;
+  auto zero_bytes_result = codec::Engine::create(zero_bytes);
+  EXPECT_FALSE(zero_bytes_result);
+  EXPECT_EQ(zero_bytes_result.error().code, codec::ErrorCode::invalid_argument);
+}
+
 TEST(engine_records_ready_feeds_concurrently_before_first_feed_eof) {
   const auto directory = std::filesystem::temp_directory_path();
   const auto fifo_a = directory / "codec-e3-feed-a.fifo";

@@ -65,7 +65,7 @@ Result<void> validate_request(const Pcm16FlacIngestRequest& request) {
                 "FLAC audio ingest requires an audio/flac stream descriptor");
   }
   auto encoded_descriptor =
-      detail::encode_stream_descriptor(request.descriptor);
+      ::codec::detail::encode_stream_descriptor(request.descriptor);
   if (!encoded_descriptor) return encoded_descriptor.error();
 
   std::error_code inspection_error;
@@ -94,9 +94,9 @@ Result<Pcm16FlacIngestReport> ingest_pcm16_flac(
   auto valid = validate_request(request);
   if (!valid) return valid.error();
 
-  auto prepared = detail::PreparedCapture::prepare(
+  auto prepared = ::codec::detail::PreparedCapture::prepare(
       request.source_uri,
-      detail::CaptureOptions{
+      ::codec::detail::CaptureOptions{
           .chunk_bytes = request.capture_chunk_bytes,
           .maximum_bytes = request.maximum_source_bytes,
           .maximum_redirects = request.maximum_redirects,

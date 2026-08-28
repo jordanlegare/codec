@@ -34,7 +34,9 @@ void usage(std::ostream& output) {
       << "  codec inspect ARCHIVE\n"
       << "  codec verify ARCHIVE [--level full]\n"
       << "  codec list feeds ARCHIVE\n"
+      << "  codec list streams ARCHIVE\n"
       << "  codec extract ARCHIVE --feed LABEL --fidelity source-exact --output FILE\n"
+      << "  codec extract ARCHIVE --stream STREAM_ID --fidelity source-exact --output FILE\n"
       << "  codec repair ARCHIVE --output FILE\n"
       << "  codec watermark keygen --private KEY --public KEY\n"
       << "  codec watermark issue INPUT.wav --output OUTPUT.wav --statement FILE\n"
@@ -88,6 +90,43 @@ std::optional<std::uint16_t> code_value(std::string_view text) {
   } catch (...) {
     return std::nullopt;
   }
+}
+
+std::optional<std::uint8_t> hex_nibble(char value) {
+  if (value >= '0' && value <= '9') {
+    return static_cast<std::uint8_t>(value - '0');
+  }
+  if (value >= 'a' && value <= 'f') {
+    return static_cast<std::uint8_t>(value - 'a' + 10);
+  }
+  if (value >= 'A' && value <= 'F') {
+    return static_cast<std::uint8_t>(value - 'A' + 10);
+  }
+  return std::nullopt;
+}
+
+std::optional<codec::StreamId> stream_id(std::string_view text) {
+  if (text.size() != 36) return std::nullopt;
+  codec::StreamId output{};
+  std::size_t byte_index = 0;
+  for (std::size_t index = 0; index < text.size();) {
+    if (index == 8 || index == 13 || index == 18 || index == 23) {
+      if (text[index] != '-') return std::nullopt;
+      ++index;
+      continue;
+    }
+    if (byte_index >= output.bytes.size() || index + 1 >= text.size()) {
+      return std::nullopt;
+    }
+    const auto high = hex_nibble(text[index]);
+    const auto low = hex_nibble(text[index + 1]);
+    if (!high || !low) return std::nullopt;
+    output.bytes[byte_index++] =
+        static_cast<std::uint8_t>((*high << 4U) | *low);
+    index += 2;
+  }
+  if (byte_index != output.bytes.size()) return std::nullopt;
+  return output;
 }
 
 int print_error(const codec::Error& error) {
@@ -181,18 +220,34 @@ int verify_command(const Strings& arguments, bool inspect) {
 }
 
 int list_command(const Strings& arguments) {
-  if (arguments.size() < 2 || arguments.front() != "feeds") {
-    std::cerr << "codec: list supports: list feeds ARCHIVE\n";
+  if (arguments.size() < 2 ||
+      (arguments.front() != "feeds" && arguments.front() != "streams")) {
+    std::cerr << "codec: list supports: list feeds|streams ARCHIVE\n";
     return 2;
   }
   auto archive = codec::CodaArchive::open(std::string{arguments[1]});
   if (!archive) return print_error(archive.error());
-  auto feeds = archive->feeds();
-  if (!feeds) return print_error(feeds.error());
-  for (const auto& feed : *feeds) {
-    std::cout << "{\"label\":\"" << codec::detail::json_escape(feed.label)
-              << "\",\"stream_id\":\"" << codec::to_string(feed.stream)
-              << "\",\"uri\":\"" << codec::detail::json_escape(feed.uri)
+  if (arguments.front() == "feeds") {
+    auto feeds = archive->feeds();
+    if (!feeds) return print_error(feeds.error());
+    for (const auto& feed : *feeds) {
+      std::cout << "{\"label\":\"" << codec::detail::json_escape(feed.label)
+                << "\",\"stream_id\":\"" << codec::to_string(feed.stream)
+                << "\",\"uri\":\"" << codec::detail::json_escape(feed.uri)
+                << "\",\"fidelity\":\"S0\"}\n";
+    }
+    return 0;
+  }
+  auto streams = archive->streams();
+  if (!streams) return print_error(streams.error());
+  for (const auto& stream : *streams) {
+    std::cout << "{\"stream_id\":\"" << codec::to_string(stream.id)
+              << "\",\"type\":" << static_cast<std::uint16_t>(stream.type)
+              << ",\"label\":\"" << codec::detail::json_escape(stream.label)
+              << "\",\"source_id\":\""
+              << codec::detail::json_escape(stream.source_id)
+              << "\",\"payload_type\":\""
+              << codec::detail::json_escape(stream.payload_type)
               << "\",\"fidelity\":\"S0\"}\n";
   }
   return 0;
@@ -205,21 +260,54 @@ int extract_command(const Strings& arguments) {
   }
   const Strings tail(arguments.begin() + 1, arguments.end());
   const auto label = option(tail, "--feed");
+  const auto stream_text = option(tail, "--stream");
   const auto output = option(tail, "--output");
   const auto fidelity = option(tail, "--fidelity");
-  if (!label || !output || (fidelity && *fidelity != "source-exact")) {
-    std::cerr << "codec: extract requires --feed, --output, and source-exact fidelity\n";
+  if (label.has_value() == stream_text.has_value() || !output ||
+      (fidelity && *fidelity != "source-exact")) {
+    std::cerr << "codec: extract requires exactly one of --feed or --stream, "
+                 "--output, and source-exact fidelity\n";
     return 2;
+  }
+  std::optional<codec::StreamId> selected_stream;
+  if (stream_text) {
+    selected_stream = stream_id(*stream_text);
+    if (!selected_stream) {
+      std::cerr << "codec: invalid stream ID: " << *stream_text << '\n';
+      return 2;
+    }
   }
   auto archive = codec::CodaArchive::open(std::string{arguments.front()});
   if (!archive) return print_error(archive.error());
-  auto extracted = archive->extract_feed(*label);
+  if (selected_stream) {
+    const codec::RecordQuery query{
+        .stream = *selected_stream,
+        .type = codec::record_type_code(codec::RecordType::source_bytes),
+        .sequence = std::nullopt,
+        .time = std::nullopt,
+    };
+    auto source_records = archive->query_records(query);
+    if (!source_records) return print_error(source_records.error());
+    if (source_records->empty()) {
+      std::cerr << "codec: stream ID not found: "
+                << codec::to_string(*selected_stream) << '\n';
+      return 1;
+    }
+  }
+  auto extracted = selected_stream ? archive->extract_stream(*selected_stream)
+                                   : archive->extract_feed(*label);
   if (!extracted) return print_error(extracted.error());
   auto written = write_bytes(std::string{*output}, *extracted);
   if (!written) return print_error(written.error());
-  std::cout << "{\"feed\":\"" << codec::detail::json_escape(*label)
-            << "\",\"fidelity\":\"source_exact\",\"bytes\":"
-            << extracted->size() << "}\n";
+  if (selected_stream) {
+    std::cout << "{\"stream_id\":\"" << codec::to_string(*selected_stream)
+              << "\",\"fidelity\":\"source_exact\",\"bytes\":"
+              << extracted->size() << "}\n";
+  } else {
+    std::cout << "{\"feed\":\"" << codec::detail::json_escape(*label)
+              << "\",\"fidelity\":\"source_exact\",\"bytes\":"
+              << extracted->size() << "}\n";
+  }
   return 0;
 }
 

@@ -4,6 +4,7 @@ All notable changes use semantic versioning.
 
 ## Unreleased
 
+- Add generic CLI stream listing and exact S0 extraction by canonical stable `StreamId`, while preserving compatibility `list feeds` and `extract --feed` behavior without a CODA format, C ABI, or recording-format change.
 - Add typed, stable-identity C++ generic stream recording through the existing hardened URI capture path, preserving exact caller-supplied `StreamDescriptor` metadata and S0 bytes while retaining legacy `FeedSpec`, CLI, C ABI, descriptor layout, and ordering behavior.
 - Add payload-agnostic C++ `StreamAdapter` and `StreamProcessor` contracts with owned pull-based S0 records, exact extracted input batches, S1/D process identity, deterministic provider-output validation, and caller-supplied resource bounds without adding a registry, scheduler, persistence transaction, C ABI, CLI, or format change.
 - Add direct S1/D provenance queries with AND-combined truth-class, physical subject, and existential immediate-input filters, archive-order results, exact record links, verified-prefix support, and pre-scan argument validation without recursive graph traversal or a format change.

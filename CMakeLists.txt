@@ -40,6 +40,7 @@ add_library(codec_core
   src/core/stream_continuity.cpp
   src/core/stream_provenance.cpp
   src/inference/backend.cpp
+  src/transport/multiplex.cpp
   src/watermark/carrier.cpp
   src/watermark/statement.cpp
 )

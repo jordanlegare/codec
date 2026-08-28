@@ -104,6 +104,7 @@ if(CODEC_BUILD_TESTS)
     tests/test_audio_flac_export.cpp
     tests/test_audio_flac_ingest.cpp
     tests/test_audio_flac_ingest_validation.cpp
+    tests/test_audio_offline_separation.cpp
     tests/test_engine.cpp
     tests/test_processing.cpp
     tests/test_exporter.cpp

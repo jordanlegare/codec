@@ -42,17 +42,6 @@ LossTrack* find_track(std::vector<LossTrack>& tracks, const StreamId& stream,
   return nullptr;
 }
 
-const LossTrack* find_track(const std::vector<LossTrack>& tracks,
-                            const StreamId& stream,
-                            const StreamEpoch& epoch) noexcept {
-  for (const auto& track : tracks) {
-    if (track.stream == stream && same_epoch(track.epoch, epoch)) {
-      return &track;
-    }
-  }
-  return nullptr;
-}
-
 SequenceObservation make_observation(SequenceObservationKind kind,
                                      const MultiplexFrame& frame) {
   SequenceObservation observation;

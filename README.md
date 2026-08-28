@@ -72,6 +72,7 @@ implemented_v0_1:
     - deterministic sample-exact PCM16 S1 canonical state with a versioned self-contained APS1 encoding, strict decode validation, generic pcm16-record storage, and exact S0 provenance links
     - bounded preservation-first PCM16 WAV ingest that captures one owned snapshot, commits its exact S0 before profile interpretation, emits APS1 S1 with exact provenance on success, and finalizes the verified S0-only archive with an explicit profile error when interpretation fails
     - bounded finalized-archive PCM16 S1 query that returns decoded APS1 state only when exact state_exact subject/source lineage resolves to one same-stream, same-interval S0 record; unprovenanced pcm16 records remain unclassified
+    - bounded finalized-archive verified PCM16 WAV export that returns deterministic in-memory audio/wav bytes for D.3-verified S1 with exact state/source/provenance evidence and performs no archive or filesystem write
     - PCM16 RIFF/WAVE exact read/write
     - Ed25519/COSE W0 signed statements
     - W1 reference sub-20-kHz carrier/detector
@@ -181,6 +182,8 @@ For audio, `Pcm16State` is the implemented sample-exact S1 contract: non-zero sa
 `ingest_pcm16_wav` is the additive preservation-first C++ path for one bounded `audio/wav` source. It validates the request before opening the source or creating output, captures exactly once through the hardened URI boundary, appends the descriptor and byte-exact S0, and then interprets those same in-memory bytes. Successful PCM16 decoding appends deterministic `APS1` state plus `state_exact` provenance. A WAV/profile decode failure is reported in `Pcm16WavIngestReport::profile_error` while the finalized, verified S0-only archive remains a successful ingest result. Capture and archive I/O failures remain ordinary outer errors; this API does not claim filesystem transactions, automatic recovery, conversion, inference, CLI, or C ABI support.
 
 `query_verified_pcm16_states` is the additive trusted read path for finalized archives. It filters `state_exact` provenance subjects to `pcm16`, resolves the exact subject and its single direct `source_bytes` input, requires the same logical stream and authenticated interval, enforces caller result and encoded-byte bounds before payload decode, and then decodes only the verified APS1 subject. Physical `pcm16` records without matching state-exact provenance are not promoted to S1. Contradictory selected lineage fails closed rather than being silently skipped. The returned `VerifiedPcm16State` retains both exact physical records and the full provenance object used to justify the state classification.
+
+`export_verified_pcm16_wav` is the additive lossless output path for those D.3-verified states. It preserves D.3 ordering, preflights an aggregate caller output-byte limit before generating any WAV result, reads only the exact APS1 subject needed for each export, and invokes the generic exporter contract through a private Audio Profile implementation. Each result carries deterministic in-memory PCM16 RIFF/WAVE bytes, the exact APS1 support link, and the D.3 state/source/provenance evidence. The API does not write files or archives, does not classify the external WAV bytes as a new CODA S1/D record, and does not add FLAC, conversion, resampling, remixing, CLI, or C ABI export support.
 
 ## Security and scope
 

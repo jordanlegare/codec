@@ -163,7 +163,19 @@ if(CODEC_BUILD_TESTS)
   endif()
   codec_enable_warnings(codec_tests)
   codec_enable_sanitizers(codec_tests)
-  add_test(NAME codec-unit COMMAND codec_tests)
+
+  if(CODEC_ENABLE_SANITIZERS AND CODEC_HAS_ONNXRUNTIME AND
+     CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    add_test(NAME codec-unit
+      COMMAND codec_tests --exclude-prefix audio_onnx_cpu_runtime_)
+    add_test(NAME codec-onnx-runtime
+      COMMAND codec_tests --include-prefix audio_onnx_cpu_runtime_)
+    set_tests_properties(codec-onnx-runtime PROPERTIES
+      ENVIRONMENT
+        "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/tests/lsan_onnxruntime.supp:print_suppressions=1")
+  else()
+    add_test(NAME codec-unit COMMAND codec_tests)
+  endif()
 
   add_executable(codec_c_api_test tests/test_c_api.c)
   set_target_properties(codec_c_api_test PROPERTIES LINKER_LANGUAGE CXX)

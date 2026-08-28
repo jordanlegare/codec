@@ -184,12 +184,16 @@ TEST(engine_live_recording_commits_other_feed_while_first_remains_open) {
     }
     if (!saw_second_before_first_closed) std::this_thread::sleep_for(20ms);
   }
-  EXPECT_TRUE(saw_second_before_first_closed);
 
+  // Always release and join before asserting the RED condition. The test
+  // framework throws on EXPECT_* failure, and an async future destructor would
+  // otherwise wait forever for the intentionally open first feed.
   release_first.store(true, std::memory_order_relaxed);
   first_producer.join();
   second_producer.join();
   auto report = recording.get();
+
+  EXPECT_TRUE(saw_second_before_first_closed);
   EXPECT_TRUE(report);
   EXPECT_FALSE(producer_failed.load(std::memory_order_relaxed));
   if (report) {

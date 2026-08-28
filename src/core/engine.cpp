@@ -106,7 +106,11 @@ Result<StreamRecordingReport> record_prepared_sources(
 Result<Engine> Engine::create(EngineConfig config) {
   if (config.capture_chunk_bytes < 4096 ||
       config.capture_chunk_bytes > 16U * 1024U * 1024U ||
-      config.maximum_feed_bytes == 0 || config.maximum_redirects > 20) {
+      config.maximum_feed_bytes == 0 || config.maximum_redirects > 20 ||
+      config.maximum_concurrent_streams == 0 ||
+      config.maximum_concurrent_streams > 4096 ||
+      config.maximum_queued_chunks_per_stream == 0 ||
+      config.maximum_queued_chunks_per_stream > 1024) {
     return fail<Engine>(ErrorCode::invalid_argument,
                         "invalid engine capture limits");
   }
@@ -121,6 +125,10 @@ Result<StreamRecordingReport> Engine::record_streams(
   if (streams.empty()) {
     return fail<StreamRecordingReport>(ErrorCode::invalid_argument,
                                        "at least one stream is required");
+  }
+  if (streams.size() > config_.maximum_concurrent_streams) {
+    return fail<StreamRecordingReport>(ErrorCode::resource_exhausted,
+                                       "stream count exceeds the concurrent recording limit");
   }
   std::set<StreamId> ids;
   for (const auto& stream : streams) {
@@ -156,6 +164,10 @@ Result<RecordingReport> Engine::record(
   if (feeds.empty()) {
     return fail<RecordingReport>(ErrorCode::invalid_argument,
                                  "at least one feed is required");
+  }
+  if (feeds.size() > config_.maximum_concurrent_streams) {
+    return fail<RecordingReport>(ErrorCode::resource_exhausted,
+                                 "feed count exceeds the concurrent recording limit");
   }
   std::set<std::string> labels;
   for (const auto& feed : feeds) {

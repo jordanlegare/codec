@@ -23,6 +23,7 @@ add_library(codec_core
   src/audio/pcm16_flac_export.cpp
   src/audio/pcm16_flac_ingest.cpp
   src/audio/pcm16_ingest.cpp
+  src/audio/separation_model_bundle.cpp
   src/audio/pcm16_state.cpp
   src/audio/pcm16_state_reader.cpp
   src/audio/pcm16_wav_export.cpp

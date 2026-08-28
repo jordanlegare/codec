@@ -1,4 +1,5 @@
 #include <codec/profiles/audio.hpp>
+#include <codec/recovery.hpp>
 #include <codec/transport.hpp>
 
 #include <cstddef>
@@ -40,6 +41,8 @@ int main() {
 
   codec::MultiplexFrame multiplex;
   multiplex.stream = codec::derive_stream_id("package-consumer/mux");
+  multiplex.sequence = 4;
+  multiplex.epoch = {.connection = 2, .format = 1};
   multiplex.clock.source_timebase_numerator = 1;
   multiplex.clock.source_timebase_denominator = 1;
   multiplex.payload = {std::byte{0x42}};
@@ -50,6 +53,35 @@ int main() {
   if (!decoded_multiplex || decoded_multiplex->size() != 1 ||
       decoded_multiplex->front().stream != multiplex.stream ||
       !decoder.finish()) {
+    return 1;
+  }
+
+  codec::SequenceLossObserver loss_observer;
+  auto sequence_observation = loss_observer.observe(decoded_multiplex->front());
+  if (!sequence_observation ||
+      sequence_observation->kind != codec::SequenceObservationKind::baseline) {
+    return 1;
+  }
+
+  codec::RecoveryGroupTracker recovery_groups;
+  codec::RecoveryGroupDescriptor recovery_descriptor;
+  recovery_descriptor.key.stream = multiplex.stream;
+  recovery_descriptor.key.epoch = multiplex.epoch;
+  recovery_descriptor.key.group_sequence = 1;
+  recovery_descriptor.first_sequence = multiplex.sequence;
+  recovery_descriptor.source_count = 1;
+  if (!recovery_groups.begin(recovery_descriptor)) return 1;
+  auto recovery_observation =
+      recovery_groups.observe(decoded_multiplex->front());
+  if (!recovery_observation ||
+      recovery_observation->kind !=
+          codec::RecoveryGroupFrameKind::first_observation) {
+    return 1;
+  }
+  auto recovery_report = recovery_groups.seal(recovery_descriptor.key);
+  if (!recovery_report ||
+      recovery_report->state != codec::RecoveryGroupState::sealed_complete ||
+      !recovery_report->missing_ranges.empty()) {
     return 1;
   }
 

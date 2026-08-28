@@ -18,6 +18,15 @@ grep -q '"label":"news"' "$test_dir/feeds.jsonl"
   --fidelity source-exact --output "$test_dir/extracted.bin"
 cmp "$test_dir/input.bin" "$test_dir/extracted.bin"
 
+if "$codec_bin" extract "$test_dir/session.coda" \
+    --stream 00000000-0000-0000-0000-000000000001 \
+    --fidelity source-exact --output "$test_dir/missing.bin" \
+    > "$test_dir/missing.stdout" 2> "$test_dir/missing.stderr"; then
+  echo "missing stream ID unexpectedly succeeded" >&2
+  exit 1
+fi
+grep -q 'stream ID not found' "$test_dir/missing.stderr"
+
 "$codec_bin" list streams "$test_dir/session.coda" > "$test_dir/streams.jsonl"
 grep -q '"label":"news"' "$test_dir/streams.jsonl"
 stream_id=$(python3 - "$test_dir/streams.jsonl" <<'PY'

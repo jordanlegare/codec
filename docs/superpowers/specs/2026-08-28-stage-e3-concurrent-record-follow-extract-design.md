@@ -75,7 +75,7 @@ struct EngineConfig {
 
 Both new limits must be nonzero. The aggregate pending-byte bound applies across all producers. Queue limits are resource/backpressure controls, not scale claims.
 
-No new overload is required: `Engine::record()` and `Engine::record_streams()` adopt concurrent capture when more than one prepared source is present while preserving the same synchronous call contract.
+No new overload is required: `Engine::record()` and `record_streams()` adopt concurrent capture when more than one prepared source is present while preserving the same synchronous call contract.
 
 ### Follow extraction helper
 
@@ -106,12 +106,15 @@ Semantics:
 - selects only `RecordType::source_bytes` for the exact stream;
 - selects archive record sequences `>= cursor.next_archive_sequence`;
 - preserves archive order;
-- bounds result count and aggregate payload bytes;
-- advances the cursor to one past the greatest inspected committed archive sequence, not merely one past the greatest selected source record;
-- reports whether a valid `final_index` is visible in the verified prefix;
-- returns no partial batch on corruption/resource failure.
+- bounds each returned page by selected-record count and aggregate selected payload bytes;
+- treats `maximum_records` and `maximum_bytes` as pagination limits, not as an error merely because more selected records are already committed;
+- when the next selected record would exceed a page limit after at least one selected record has been accepted, returns the current page and leaves the cursor at or before that unreturned selected record so a later call can return it;
+- if the first pending selected record by itself exceeds `maximum_bytes`, returns `resource_exhausted` because no legal page can make progress;
+- advances the cursor to one past the greatest committed archive sequence actually inspected before the page boundary, not merely one past the greatest selected source record;
+- reports `finalized=true` only if a valid committed `final_index` is actually inspected in that successful page; a page that ends earlier reports false so a later call can observe finalization;
+- returns no partial batch on corruption or an actual resource failure.
 
-Advancing by inspected archive sequence prevents rescanning unrelated interleaved streams indefinitely.
+Advancing by inspected archive sequence prevents rescanning unrelated interleaved streams indefinitely, while stopping before an unreturned selected record prevents pagination from skipping source bytes.
 
 A label-resolution helper is not required: CLI can resolve a label to `FeedInfo.stream` from `archive.feeds(verified_prefix)` and then use the stream helper. Duplicate matching labels in one verified prefix are treated as archive corruption/ambiguity rather than arbitrary selection.
 
@@ -241,9 +244,9 @@ Because E.3 recording commits all descriptors before producer start, a reader st
 
 ### Exactly-once emission
 
-The cursor is an archive-sequence cursor. Each poll queries records in `[cursor.next_archive_sequence, +inf)` over the current verified prefix. After a successful batch, the cursor advances past every committed record inspected in that prefix, including unrelated streams.
+The cursor is an archive-sequence cursor. Each poll queries records in `[cursor.next_archive_sequence, +inf)` over the current verified prefix. After a successful page, the cursor advances past every committed record actually inspected before that page's boundary, including unrelated streams, but never past an unreturned selected source record.
 
-Therefore interleaving does not cause duplicate output or unbounded rescans.
+Therefore interleaving does not cause duplicate output or unbounded rescans, and bounded pagination cannot skip selected S0 bytes.
 
 ## Existing behavior preserved
 
@@ -282,9 +285,10 @@ Prove:
 3. returns only exact selected-stream `source_bytes`;
 4. cursor advances across unrelated interleaved records;
 5. repeated calls emit every selected record exactly once;
-6. record and byte bounds are transactional;
-7. finalization is reported only when a valid committed final index is visible;
-8. committed-prefix corruption fails closed.
+6. record and aggregate-byte limits paginate without skipping the first unreturned selected record;
+7. a single pending selected record larger than `maximum_bytes` returns `resource_exhausted` without pretending pagination can make progress;
+8. finalization is reported only when a valid committed final index is actually inspected;
+9. committed-prefix corruption fails closed.
 
 ### CLI integration tests
 
@@ -308,7 +312,8 @@ Full GCC, Clang, package-consumer, C API, CLI integration, AI-contract, and sani
 ## Error mapping
 
 - invalid zero queue/follow bounds: `invalid_argument`;
-- pending-memory/record bounds exceeded where waiting cannot make progress: `resource_exhausted`;
+- recording pending-memory exhaustion where waiting cannot make progress, or a first pending selected follow record individually larger than `maximum_bytes`: `resource_exhausted`;
+- ordinary follow `maximum_records` / aggregate-page-byte exhaustion after at least one selected record: successful paginated batch, not an error;
 - capture provider failure: preserve existing provider error;
 - archive mutation/read failures: preserve existing archive error classes;
 - malformed committed archive semantics: `archive_corrupt`;

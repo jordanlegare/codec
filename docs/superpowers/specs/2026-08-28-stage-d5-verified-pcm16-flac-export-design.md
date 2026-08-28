@@ -111,11 +111,11 @@ Unlike D.4 WAV, exact FLAC byte identity is not a cross-libFLAC-version contract
 
 Add libFLAC as a required native dependency for `codec_core`.
 
-CMake must discover the installed libFLAC package and link its canonical imported target. The repository CI image must install `libflac-dev` before configure. The installed `codec-config.cmake` must rediscover the same dependency before importing `codec-targets.cmake`, so an external `find_package(codec 0.1 CONFIG REQUIRED)` consumer remains valid.
+CMake must discover the installed libFLAC package and link its canonical imported target `FLAC::FLAC`. The repository CI image must install `libflac-dev` before configure. The installed `codec-config.cmake` must rediscover FLAC before importing `codec-targets.cmake`, so an external `find_package(codec 0.1 CONFIG REQUIRED)` consumer remains valid.
 
 Do not vendor libFLAC, shell out to the `flac` executable, or introduce FFmpeg.
 
-If the CI distribution's packaged libFLAC CMake target name differs from the upstream target, add a narrow CMake compatibility shim inside CODEC's build/config files rather than leaking that difference into source code.
+If the CI distribution's packaged libFLAC CMake package requires an extra dependency such as `Threads`, resolve that dependency in CODEC's CMake/config layer rather than leaking it into source code.
 
 ## Resource limits and failure semantics
 
@@ -126,7 +126,7 @@ If the CI distribution's packaged libFLAC CMake target name differs from the ups
 - Callback refusal caused by the byte limit returns `ErrorCode::resource_exhausted`.
 - Malformed APS1 propagates D.3's `ErrorCode::decode` before FLAC encoding.
 - Contradictory provenance propagates D.3 archive-integrity errors.
-- libFLAC setup/init/process/finish/verify failures use `ErrorCode::encode` if available in the current error enum; otherwise use the repository's existing closest deterministic codec failure code and document the mapping in tests.
+- libFLAC allocation, setup, init, process, finish, or verify failures return `ErrorCode::internal`, because CODEC's current public `ErrorCode` enum has no encode-specific member and D.5 does not broaden that generic API.
 - No failure writes to the archive or filesystem.
 
 ## Validation and tests

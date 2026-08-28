@@ -109,25 +109,34 @@ Result<WavPcm16> decode_wav_pcm16(std::span<const std::byte> data) {
   return output;
 }
 
-}  // namespace detail
-
-Result<WavPcm16> WavPcm16::read(const std::filesystem::path& path) {
-  auto file = detail::read_file(path, 1024ULL * 1024ULL * 1024ULL);
-  if (!file) return file.error();
-  return detail::decode_wav_pcm16(*file);
+Result<std::size_t> encoded_wav_pcm16_size(std::uint32_t sample_rate,
+                                           std::uint16_t channels,
+                                           std::size_t sample_count) {
+  if (channels == 0 || sample_rate == 0 || sample_count % channels != 0) {
+    return fail<std::size_t>(
+        ErrorCode::invalid_argument,
+        "PCM16 audio requires a rate, channels, and complete frames");
+  }
+  constexpr auto sample_bytes = sizeof(std::int16_t);
+  constexpr auto riff_payload_limit =
+      static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max() -
+                               36U);
+  if (sample_count > riff_payload_limit / sample_bytes) {
+    return fail<std::size_t>(ErrorCode::resource_exhausted,
+                             "WAV exceeds the RIFF 32-bit size limit");
+  }
+  return std::size_t{44} + sample_count * sample_bytes;
 }
 
-Result<void> WavPcm16::write(const std::filesystem::path& path) const {
-  if (channels == 0 || sample_rate == 0 || samples.size() % channels != 0) {
-    return fail(ErrorCode::invalid_argument,
-                "PCM16 audio requires a rate, channels, and complete frames");
-  }
+Result<std::vector<std::byte>> encode_wav_pcm16(
+    std::uint32_t sample_rate, std::uint16_t channels,
+    std::span<const std::int16_t> samples) {
+  auto encoded_size =
+      encoded_wav_pcm16_size(sample_rate, channels, samples.size());
+  if (!encoded_size) return encoded_size.error();
+
   const auto data_bytes = samples.size() * sizeof(std::int16_t);
-  if (data_bytes > std::numeric_limits<std::uint32_t>::max() - 36U) {
-    return fail(ErrorCode::resource_exhausted,
-                "WAV exceeds the RIFF 32-bit size limit");
-  }
-  std::vector<std::byte> output(44 + data_bytes);
+  std::vector<std::byte> output(*encoded_size);
   std::memcpy(output.data(), "RIFF", 4);
   put32(output, 4, static_cast<std::uint32_t>(36 + data_bytes));
   std::memcpy(output.data() + 8, "WAVEfmt ", 8);
@@ -144,7 +153,21 @@ Result<void> WavPcm16::write(const std::filesystem::path& path) const {
     put16(output, 44 + index * 2,
           static_cast<std::uint16_t>(samples[index]));
   }
-  return detail::write_file(path, output);
+  return output;
+}
+
+}  // namespace detail
+
+Result<WavPcm16> WavPcm16::read(const std::filesystem::path& path) {
+  auto file = detail::read_file(path, 1024ULL * 1024ULL * 1024ULL);
+  if (!file) return file.error();
+  return detail::decode_wav_pcm16(*file);
+}
+
+Result<void> WavPcm16::write(const std::filesystem::path& path) const {
+  auto encoded = detail::encode_wav_pcm16(sample_rate, channels, samples);
+  if (!encoded) return encoded.error();
+  return detail::write_file(path, *encoded);
 }
 
 }  // namespace codec

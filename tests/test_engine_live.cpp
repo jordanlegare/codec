@@ -34,6 +34,10 @@ bool write_all(int fd, std::string_view text) {
   return true;
 }
 
+std::string as_string(std::span<const std::byte> bytes) {
+  return {reinterpret_cast<const char*>(bytes.data()), bytes.size()};
+}
+
 }  // namespace
 
 TEST(engine_live_recording_rejects_invalid_concurrency_bounds) {
@@ -185,9 +189,6 @@ TEST(engine_live_recording_commits_other_feed_while_first_remains_open) {
     if (!saw_second_before_first_closed) std::this_thread::sleep_for(20ms);
   }
 
-  // Always release and join before asserting the RED condition. The test
-  // framework throws on EXPECT_* failure, and an async future destructor would
-  // otherwise wait forever for the intentionally open first feed.
   release_first.store(true, std::memory_order_relaxed);
   first_producer.join();
   second_producer.join();
@@ -223,5 +224,136 @@ TEST(engine_live_recording_commits_other_feed_while_first_remains_open) {
 
   std::filesystem::remove(first_fifo);
   std::filesystem::remove(second_fifo);
+  std::filesystem::remove(archive_path);
+}
+
+TEST(engine_live_recording_preserves_each_finite_feed_exactly) {
+  const auto first_path = live_path("finite-first.bin");
+  const auto second_path = live_path("finite-second.bin");
+  const auto archive_path = live_path("finite.coda");
+  std::filesystem::remove(first_path);
+  std::filesystem::remove(second_path);
+  std::filesystem::remove(archive_path);
+
+  const std::string first_bytes(9000, 'A');
+  std::string second_bytes(11000, 'B');
+  for (std::size_t index = 0; index < second_bytes.size(); index += 97) {
+    second_bytes[index] = 'C';
+  }
+  {
+    std::ofstream first(first_path, std::ios::binary | std::ios::trunc);
+    first.write(first_bytes.data(), static_cast<std::streamsize>(first_bytes.size()));
+    std::ofstream second(second_path, std::ios::binary | std::ios::trunc);
+    second.write(second_bytes.data(),
+                 static_cast<std::streamsize>(second_bytes.size()));
+  }
+
+  codec::EngineConfig config;
+  config.capture_chunk_bytes = 4096;
+  config.maximum_queued_chunks_per_stream = 1;
+  auto engine = codec::Engine::create(config);
+  EXPECT_TRUE(engine);
+  if (!engine) return;
+
+  auto report = engine->record(
+      {codec::FeedSpec{.uri = first_path.string(), .label = "finite-first"},
+       codec::FeedSpec{.uri = second_path.string(), .label = "finite-second"}},
+      archive_path);
+  EXPECT_TRUE(report);
+  if (report) {
+    EXPECT_EQ(report->feeds_recorded, std::size_t{2});
+    EXPECT_EQ(report->source_bytes,
+              static_cast<std::uint64_t>(first_bytes.size() + second_bytes.size()));
+  }
+
+  auto archive = codec::CodaArchive::open(archive_path);
+  EXPECT_TRUE(archive);
+  if (archive) {
+    auto first = archive->extract_feed("finite-first");
+    auto second = archive->extract_feed("finite-second");
+    EXPECT_TRUE(first);
+    EXPECT_TRUE(second);
+    if (first) EXPECT_EQ(as_string(*first), first_bytes);
+    if (second) EXPECT_EQ(as_string(*second), second_bytes);
+  }
+
+  std::filesystem::remove(first_path);
+  std::filesystem::remove(second_path);
+  std::filesystem::remove(archive_path);
+}
+
+TEST(engine_live_recording_preserves_first_capture_error_and_prefix) {
+  using namespace std::chrono_literals;
+
+  const auto oversized_path = live_path("oversized.bin");
+  const auto peer_fifo = live_path("failure-peer.fifo");
+  const auto archive_path = live_path("failure.coda");
+  std::filesystem::remove(oversized_path);
+  std::filesystem::remove(peer_fifo);
+  std::filesystem::remove(archive_path);
+  {
+    std::ofstream oversized(oversized_path, std::ios::binary | std::ios::trunc);
+    oversized << std::string(4096, 'X');
+  }
+  EXPECT_EQ(::mkfifo(peer_fifo.c_str(), 0600), 0);
+
+  std::atomic_bool release_peer{false};
+  std::atomic_bool peer_failed{false};
+  std::thread peer([&] {
+    const auto fd = ::open(peer_fifo.c_str(), O_WRONLY | O_CLOEXEC);
+    if (fd < 0) {
+      peer_failed.store(true, std::memory_order_relaxed);
+      return;
+    }
+    while (!release_peer.load(std::memory_order_relaxed)) {
+      std::this_thread::sleep_for(10ms);
+    }
+    ::close(fd);
+  });
+
+  codec::EngineConfig config;
+  config.capture_chunk_bytes = 4096;
+  config.maximum_feed_bytes = 8;
+  config.maximum_queued_chunks_per_stream = 1;
+  auto engine = codec::Engine::create(config);
+  EXPECT_TRUE(engine);
+  if (!engine) {
+    release_peer.store(true, std::memory_order_relaxed);
+    peer.join();
+    return;
+  }
+
+  auto result = engine->record(
+      {codec::FeedSpec{.uri = oversized_path.string(), .label = "oversized"},
+       codec::FeedSpec{.uri = peer_fifo.string(), .label = "peer"}},
+      archive_path);
+  release_peer.store(true, std::memory_order_relaxed);
+  peer.join();
+
+  EXPECT_FALSE(result);
+  if (!result) {
+    EXPECT_EQ(result.error().code, codec::ErrorCode::resource_exhausted);
+  }
+  EXPECT_FALSE(peer_failed.load(std::memory_order_relaxed));
+
+  auto archive = codec::CodaArchive::open(archive_path);
+  EXPECT_TRUE(archive);
+  if (archive) {
+    const auto verification = archive->verify();
+    EXPECT_FALSE(verification.finalized);
+    auto records =
+        archive->records(codec::ArchiveReadPolicy::verified_prefix);
+    EXPECT_TRUE(records);
+    if (records) {
+      const auto descriptors = std::count_if(
+          records->begin(), records->end(), [](const codec::RecordInfo& record) {
+            return record.type == codec::RecordType::feed_descriptor;
+          });
+      EXPECT_EQ(descriptors, std::ptrdiff_t{2});
+    }
+  }
+
+  std::filesystem::remove(oversized_path);
+  std::filesystem::remove(peer_fifo);
   std::filesystem::remove(archive_path);
 }

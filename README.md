@@ -61,6 +61,7 @@ implemented_v0_1:
     - AND-combined C++ direct-provenance queries over S1/D truth class plus physical subject and immediate-input filters, preserving sidecar order and exact record links
     - explicit append/extract/repair round trips for unknown 16-bit development-profile record type codes without payload interpretation
     - AND-combined C++ physical record queries over exact stream/raw type and half-open archive-sequence/envelope-time ranges, plus boundary-preserving per-record exact payload extraction
+    - pull-based C++ StreamAdapter S0 and bounded batch StreamProcessor S1/D contracts with interval, truth, process-metadata, and resource validation; registration, scheduling, and automatic persistence remain external
     - C++ API, C ABI, CLI
   audio_profile:
     - PCM16 RIFF/WAVE exact read/write

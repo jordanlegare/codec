@@ -20,6 +20,7 @@ add_library(codec_core
   src/capture/capture.cpp
   src/core/engine.cpp
   src/core/feed_descriptor.cpp
+  src/core/processing.cpp
   src/core/sha256.cpp
   src/core/stream_continuity.cpp
   src/core/stream_provenance.cpp
@@ -88,6 +89,7 @@ if(CODEC_BUILD_TESTS)
     tests/test_main.cpp
     tests/test_archive.cpp
     tests/test_engine.cpp
+    tests/test_processing.cpp
     tests/test_stream.cpp
     tests/test_statement.cpp
     tests/test_watermark.cpp

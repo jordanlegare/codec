@@ -18,7 +18,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build libssl-dev libcurl4-openssl-dev
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build libssl-dev libcurl4-openssl-dev libflac-dev
       - name: Select compiler
         run: |
           if [ "${{ matrix.compiler }}" = clang ]; then
@@ -42,7 +42,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build libssl-dev libcurl4-openssl-dev
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build libssl-dev libcurl4-openssl-dev libflac-dev
       - name: Configure
         run: cmake -S . -B build-san -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCODEC_WARNINGS_AS_ERRORS=ON -DCODEC_ENABLE_SANITIZERS=ON
       - name: Build

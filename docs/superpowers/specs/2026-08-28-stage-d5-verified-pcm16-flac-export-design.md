@@ -111,11 +111,16 @@ Unlike D.4 WAV, exact FLAC byte identity is not a cross-libFLAC-version contract
 
 Add libFLAC as a required native dependency for `codec_core`.
 
-CMake must discover the installed libFLAC package and link its canonical imported target `FLAC::FLAC`. The repository CI image must install `libflac-dev` before configure. The installed `codec-config.cmake` must rediscover FLAC before importing `codec-targets.cmake`, so an external `find_package(codec 0.1 CONFIG REQUIRED)` consumer remains valid.
+Ubuntu 24.04's `libflac-dev` package provides headers, libraries, and `flac.pc` but does not provide `FLACConfig.cmake`. The proven CODEC build boundary therefore uses CMake `FindPkgConfig`:
 
-Do not vendor libFLAC, shell out to the `flac` executable, or introduce FFmpeg.
+```cmake
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(FLAC REQUIRED IMPORTED_TARGET flac)
+```
 
-If the CI distribution's packaged libFLAC CMake package requires an extra dependency such as `Threads`, resolve that dependency in CODEC's CMake/config layer rather than leaking it into source code.
+Production and direct libFLAC tests link the imported `PkgConfig::FLAC` target. The repository CI image installs `libflac-dev` before configure. The installed `codec-config.cmake` must call `find_dependency(PkgConfig)` and recreate `PkgConfig::FLAC` with the same `pkg_check_modules` call before importing `codec-targets.cmake`. CI must configure, build, link, and run a separate installed-package consumer through `find_package(codec 0.1 CONFIG REQUIRED)`.
+
+Do not vendor libFLAC, shell out to the `flac` executable, introduce FFmpeg, or depend on a distro-specific nonexistent FLAC CMake package.
 
 ## Resource limits and failure semantics
 
@@ -158,10 +163,10 @@ Required proofs:
    - a limit smaller than one produced FLAC stream is `resource_exhausted`;
    - multiple selected states with an aggregate limit that cannot fit all results return `resource_exhausted` and no partial vector.
 
-6. **Compatibility**
+6. **Compatibility and packaging**
    - D.4 WAV byte identity test remains unchanged and green;
    - existing archive, Audio Profile, Engine, CLI, C ABI, watermark, processing/exporter, and inference capability tests remain green;
-   - installed package consumer still configures, links, and runs with the FLAC dependency present.
+   - installed package consumer configures, builds, links, and runs through `find_package(codec 0.1 CONFIG REQUIRED)` with the exported `PkgConfig::FLAC` dependency recreated by CODEC's package config.
 
 7. **Toolchain**
    - warnings-as-errors GCC and Clang builds pass;

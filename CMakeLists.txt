@@ -18,6 +18,7 @@ add_library(codec_core
   src/audio/pcm16_ingest.cpp
   src/audio/pcm16_state.cpp
   src/audio/pcm16_state_reader.cpp
+  src/audio/pcm16_wav_export.cpp
   src/audio/wav.cpp
   src/capi/codec_c.cpp
   src/capture/capture.cpp

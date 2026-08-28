@@ -360,6 +360,11 @@ separate_verified_pcm16_offline(
   results.reserve(states->size());
 
   for (auto& verified : *states) {
+    if (remaining_bytes == 0) {
+      return fail<std::vector<OfflinePcm16Separation>>(
+          ErrorCode::resource_exhausted,
+          "offline PCM16 outputs exhausted the aggregate byte limit");
+    }
     auto payload = archive.read_payload(verified.state_record);
     if (!payload) return payload.error();
     const std::vector<ExtractedRecord> inputs{

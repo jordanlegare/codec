@@ -93,6 +93,7 @@ if(CODEC_BUILD_TESTS)
     tests/test_archive.cpp
     tests/test_audio_profile.cpp
     tests/test_audio_state_reader.cpp
+    tests/test_audio_export.cpp
     tests/test_engine.cpp
     tests/test_processing.cpp
     tests/test_exporter.cpp

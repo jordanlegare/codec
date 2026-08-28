@@ -100,6 +100,7 @@ if(CODEC_BUILD_TESTS)
     tests/test_audio_state_reader.cpp
     tests/test_audio_export.cpp
     tests/test_audio_flac_export.cpp
+    tests/test_audio_flac_ingest.cpp
     tests/test_engine.cpp
     tests/test_processing.cpp
     tests/test_exporter.cpp

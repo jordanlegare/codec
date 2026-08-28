@@ -457,7 +457,8 @@ Result<RecoveryGroupReport> RecoveryGroupTracker::status(
   auto valid_limits = validate_group_limits(impl_->limits);
   if (!valid_limits) return valid_limits.error();
 
-  const auto* group = find_group(impl_->groups, key);
+  const auto& groups = impl_->groups;
+  const auto* group = find_group(groups, key);
   if (!group) {
     return fail<RecoveryGroupReport>(ErrorCode::invalid_argument,
                                      "recovery-group key was not found");

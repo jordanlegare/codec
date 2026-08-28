@@ -88,6 +88,7 @@ if(CODEC_BUILD_TESTS)
   add_executable(codec_tests
     tests/test_main.cpp
     tests/test_archive.cpp
+    tests/test_audio_profile.cpp
     tests/test_engine.cpp
     tests/test_processing.cpp
     tests/test_exporter.cpp

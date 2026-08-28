@@ -70,6 +70,7 @@ implemented_v0_1:
   audio_profile:
     - explicit C++ profile facade at codec/profiles/audio.hpp in codec::profiles::audio, forwarding the exact existing WAV/PCM, watermark, and separation types/functions while root-level codec::* audio APIs remain compatible
     - deterministic sample-exact PCM16 S1 canonical state with a versioned self-contained APS1 encoding, strict decode validation, generic pcm16-record storage, and exact S0 provenance links
+    - bounded preservation-first PCM16 WAV ingest that captures one owned snapshot, commits its exact S0 before profile interpretation, emits APS1 S1 with exact provenance on success, and finalizes the verified S0-only archive with an explicit profile error when interpretation fails
     - PCM16 RIFF/WAVE exact read/write
     - Ed25519/COSE W0 signed statements
     - W1 reference sub-20-kHz carrier/detector
@@ -175,6 +176,8 @@ Audio is the first implemented profile, not CODEC core. PCM/WAV, sample rate/cha
 The canonical additive C++ profile entry point is `<codec/profiles/audio.hpp>` under `codec::profiles::audio`. It aliases/imports the existing WAV/PCM, watermark, and separation surface rather than moving ABI-bearing symbols; existing root-level `codec::*` audio headers and names remain the v0.1 compatibility surface.
 
 For audio, `Pcm16State` is the implemented sample-exact S1 contract: non-zero sample rate and channel count, complete interleaved frames, and exact signed 16-bit samples. `encode_pcm16_state` and `decode_pcm16_state` use the deterministic versioned `APS1` payload. A `pcm16` record is only S1 when a `state_exact` provenance sidecar links it to its exact S0 input; the record tag alone does not make that claim. Resampling, remixing, channel-layout interpretation, floating-point PCM, FLAC, enhancement, concealment, separation, embeddings, and inferred labels remain outside this milestone or D-class. CODEC-generated watermark derivatives must not mutate preserved S0/S1 truth.
+
+`ingest_pcm16_wav` is the additive preservation-first C++ path for one bounded `audio/wav` source. It validates the request before opening the source or creating output, captures exactly once through the hardened URI boundary, appends the descriptor and byte-exact S0, and then interprets those same in-memory bytes. Successful PCM16 decoding appends deterministic `APS1` state plus `state_exact` provenance. A WAV/profile decode failure is reported in `Pcm16WavIngestReport::profile_error` while the finalized, verified S0-only archive remains a successful ingest result. Capture and archive I/O failures remain ordinary outer errors; this API does not claim filesystem transactions, automatic recovery, conversion, inference, CLI, or C ABI support.
 
 ## Security and scope
 

@@ -2,6 +2,7 @@
 
 #include <codec/audio.hpp>
 #include <codec/inference.hpp>
+#include <codec/profiles/audio_ingest.hpp>
 #include <codec/statement.hpp>
 #include <codec/watermark.hpp>
 

@@ -1,6 +1,7 @@
 #include <codec/audio.hpp>
 
 #include "../core/internal.hpp"
+#include "wav_codec.hpp"
 
 #include <array>
 #include <cstring>
@@ -48,10 +49,9 @@ bool fourcc(std::span<const std::byte> data, std::size_t offset,
 
 }  // namespace
 
-Result<WavPcm16> WavPcm16::read(const std::filesystem::path& path) {
-  auto file = detail::read_file(path, 1024ULL * 1024ULL * 1024ULL);
-  if (!file) return file.error();
-  const auto data = std::span<const std::byte>{*file};
+namespace detail {
+
+Result<WavPcm16> decode_wav_pcm16(std::span<const std::byte> data) {
   if (data.size() < 44 || !fourcc(data, 0, "RIFF") ||
       !fourcc(data, 8, "WAVE")) {
     return fail<WavPcm16>(ErrorCode::decode,
@@ -109,6 +109,14 @@ Result<WavPcm16> WavPcm16::read(const std::filesystem::path& path) {
   return output;
 }
 
+}  // namespace detail
+
+Result<WavPcm16> WavPcm16::read(const std::filesystem::path& path) {
+  auto file = detail::read_file(path, 1024ULL * 1024ULL * 1024ULL);
+  if (!file) return file.error();
+  return detail::decode_wav_pcm16(*file);
+}
+
 Result<void> WavPcm16::write(const std::filesystem::path& path) const {
   if (channels == 0 || sample_rate == 0 || samples.size() % channels != 0) {
     return fail(ErrorCode::invalid_argument,
@@ -140,4 +148,3 @@ Result<void> WavPcm16::write(const std::filesystem::path& path) const {
 }
 
 }  // namespace codec
-

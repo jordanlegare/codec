@@ -7,8 +7,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace audio_profile = codec::profiles::audio;
@@ -33,6 +37,86 @@ codec::WavPcm16 exact_wav() {
       .sample_rate = 48000,
       .channels = 2,
       .samples = {-32768, -1, 1, 32767},
+  };
+}
+
+std::vector<std::byte> pcm16_wav_fixture() {
+  return {
+      std::byte{0x52}, std::byte{0x49}, std::byte{0x46}, std::byte{0x46},
+      std::byte{0x36}, std::byte{0x00}, std::byte{0x00}, std::byte{0x00},
+      std::byte{0x57}, std::byte{0x41}, std::byte{0x56}, std::byte{0x45},
+      std::byte{0x66}, std::byte{0x6d}, std::byte{0x74}, std::byte{0x20},
+      std::byte{0x10}, std::byte{0x00}, std::byte{0x00}, std::byte{0x00},
+      std::byte{0x01}, std::byte{0x00}, std::byte{0x02}, std::byte{0x00},
+      std::byte{0x80}, std::byte{0xbb}, std::byte{0x00}, std::byte{0x00},
+      std::byte{0x00}, std::byte{0xee}, std::byte{0x02}, std::byte{0x00},
+      std::byte{0x04}, std::byte{0x00}, std::byte{0x10}, std::byte{0x00},
+      std::byte{0x4a}, std::byte{0x55}, std::byte{0x4e}, std::byte{0x4b},
+      std::byte{0x01}, std::byte{0x00}, std::byte{0x00}, std::byte{0x00},
+      std::byte{0x7a}, std::byte{0x00},
+      std::byte{0x64}, std::byte{0x61}, std::byte{0x74}, std::byte{0x61},
+      std::byte{0x08}, std::byte{0x00}, std::byte{0x00}, std::byte{0x00},
+      std::byte{0x00}, std::byte{0x80}, std::byte{0xff}, std::byte{0xff},
+      std::byte{0x01}, std::byte{0x00}, std::byte{0xff}, std::byte{0x7f},
+  };
+}
+
+void write_bytes(const std::filesystem::path& path,
+                 const std::vector<std::byte>& bytes) {
+  std::ofstream output(path, std::ios::binary | std::ios::trunc);
+  output.write(reinterpret_cast<const char*>(bytes.data()),
+               static_cast<std::streamsize>(bytes.size()));
+}
+
+std::vector<std::byte> read_bytes(const std::filesystem::path& path) {
+  std::ifstream input(path, std::ios::binary | std::ios::ate);
+  const auto end = input.tellg();
+  if (end < 0) return {};
+  std::vector<std::byte> bytes(static_cast<std::size_t>(end));
+  input.seekg(0);
+  if (!bytes.empty()) {
+    input.read(reinterpret_cast<char*>(bytes.data()),
+               static_cast<std::streamsize>(bytes.size()));
+  }
+  return bytes;
+}
+
+codec::StreamId audio_stream_id() {
+  codec::StreamId stream{};
+  for (std::size_t index = 0; index < stream.bytes.size(); ++index) {
+    stream.bytes[index] = static_cast<std::uint8_t>(0xd2U + index);
+  }
+  return stream;
+}
+
+std::vector<std::byte> text_bytes(std::string_view text) {
+  std::vector<std::byte> bytes;
+  bytes.reserve(text.size());
+  for (const unsigned char ch : text) {
+    bytes.push_back(static_cast<std::byte>(ch));
+  }
+  return bytes;
+}
+
+audio_profile::Pcm16WavIngestRequest ingest_request(
+    const std::filesystem::path& source,
+    const std::filesystem::path& archive) {
+  return audio_profile::Pcm16WavIngestRequest{
+      .source_uri = source.string(),
+      .archive_path = archive,
+      .descriptor = codec::StreamDescriptor{
+          .id = audio_stream_id(),
+          .type = codec::StreamType::audio,
+          .label = "bounded-ingest",
+          .source_id = "fixture/audio-d2-bounds",
+          .payload_type = "audio/wav",
+      },
+      .start_ns = 500,
+      .end_ns = 600,
+      .capture_chunk_bytes = 4096,
+      .maximum_source_bytes = 1024,
+      .maximum_redirects = 5,
+      .deny_private_network = true,
   };
 }
 
@@ -288,4 +372,270 @@ TEST(audio_pcm16_s1_storage_round_trips_state_and_exact_lineage) {
   EXPECT_TRUE(exact_source);
   if (exact_source) EXPECT_EQ(*exact_source, source_payload);
   std::filesystem::remove(path);
+}
+
+TEST(audio_pcm16_wav_ingest_preserves_one_snapshot_and_proves_s1) {
+  const auto directory = std::filesystem::temp_directory_path();
+  const auto source_path = directory / "codec-test-audio-d2-success.wav";
+  const auto archive_path = directory / "codec-test-audio-d2-success.coda";
+  std::filesystem::remove(source_path);
+  std::filesystem::remove(archive_path);
+  const auto source_bytes = pcm16_wav_fixture();
+  write_bytes(source_path, source_bytes);
+  const auto stream = audio_stream_id();
+
+  const audio_profile::Pcm16WavIngestRequest request{
+      .source_uri = source_path.string(),
+      .archive_path = archive_path,
+      .descriptor = codec::StreamDescriptor{
+          .id = stream,
+          .type = codec::StreamType::audio,
+          .label = "literal-pcm16",
+          .source_id = "fixture/audio-d2",
+          .payload_type = "audio/wav",
+      },
+      .start_ns = 100,
+      .end_ns = 200,
+      .capture_chunk_bytes = 4096,
+      .maximum_source_bytes = 1024,
+      .maximum_redirects = 5,
+      .deny_private_network = true,
+  };
+  auto report = audio_profile::ingest_pcm16_wav(request);
+  EXPECT_TRUE(report);
+  if (!report) return;
+  EXPECT_TRUE(report->state_exact());
+  EXPECT_TRUE(report->state.has_value());
+  EXPECT_TRUE(report->provenance.has_value());
+  EXPECT_FALSE(report->profile_error.has_value());
+  EXPECT_EQ(report->archive_path, archive_path);
+  EXPECT_EQ(report->descriptor.sequence, std::uint64_t{0});
+  EXPECT_EQ(report->source.sequence, std::uint64_t{1});
+  EXPECT_EQ(report->state->sequence, std::uint64_t{2});
+  EXPECT_EQ(report->provenance->sequence, std::uint64_t{3});
+
+  auto archive = codec::CodaArchive::open(archive_path);
+  EXPECT_TRUE(archive);
+  if (!archive) return;
+  const auto verification = archive->verify();
+  EXPECT_TRUE(verification.ok);
+  EXPECT_TRUE(verification.finalized);
+  auto streams = archive->streams();
+  EXPECT_TRUE(streams);
+  if (streams) {
+    EXPECT_EQ(streams->size(), std::size_t{1});
+    EXPECT_EQ(streams->front().id, request.descriptor.id);
+    EXPECT_EQ(streams->front().type, request.descriptor.type);
+    EXPECT_EQ(streams->front().label, request.descriptor.label);
+    EXPECT_EQ(streams->front().source_id, request.descriptor.source_id);
+    EXPECT_EQ(streams->front().payload_type,
+              request.descriptor.payload_type);
+  }
+
+  auto exact_source = archive->extract_stream(
+      stream, codec::RecordType::source_bytes);
+  EXPECT_TRUE(exact_source);
+  if (exact_source) EXPECT_EQ(*exact_source, source_bytes);
+  auto encoded_state = archive->extract_stream(
+      stream, codec::RecordType::pcm16);
+  EXPECT_TRUE(encoded_state);
+  if (!encoded_state) return;
+  auto state = audio_profile::decode_pcm16_state(*encoded_state);
+  EXPECT_TRUE(state);
+  if (state) {
+    EXPECT_EQ(state->sample_rate, std::uint32_t{48000});
+    EXPECT_EQ(state->channels, std::uint16_t{2});
+    EXPECT_EQ(state->samples,
+              (std::vector<std::int16_t>{-32768, -1, 1, 32767}));
+  }
+
+  auto proofs = archive->query_provenance(codec::ProvenanceQuery{
+      .subject_truth = codec::TruthClass::state_exact,
+      .subject = codec::RecordQuery{
+          .stream = stream,
+          .type = codec::record_type_code(codec::RecordType::pcm16),
+          .sequence = std::nullopt,
+          .time = std::nullopt,
+      },
+      .direct_input = codec::RecordQuery{
+          .stream = stream,
+          .type = codec::record_type_code(codec::RecordType::source_bytes),
+          .sequence = std::nullopt,
+          .time = std::nullopt,
+      },
+  });
+  EXPECT_TRUE(proofs);
+  if (!proofs) return;
+  EXPECT_EQ(proofs->size(), std::size_t{1});
+  const auto& proof = proofs->front();
+  EXPECT_EQ(proof.subject_truth, codec::TruthClass::state_exact);
+  EXPECT_EQ(proof.subject.stream, report->state->stream);
+  EXPECT_EQ(proof.subject.type, report->state->type_code());
+  EXPECT_EQ(proof.subject.sequence, report->state->sequence);
+  EXPECT_EQ(proof.subject.hash, report->state->hash);
+  EXPECT_EQ(proof.inputs.size(), std::size_t{1});
+  EXPECT_EQ(proof.inputs.front().stream, report->source.stream);
+  EXPECT_EQ(proof.inputs.front().type, report->source.type_code());
+  EXPECT_EQ(proof.inputs.front().sequence, report->source.sequence);
+  EXPECT_EQ(proof.inputs.front().hash, report->source.hash);
+  EXPECT_EQ(proof.process.operation,
+            std::string{"audio.pcm16.canonicalize"});
+  EXPECT_EQ(proof.process.implementation_id,
+            std::string{"codec-audio-profile"});
+  EXPECT_EQ(proof.process.implementation_version, std::string{"1"});
+  EXPECT_EQ(proof.process.created_utc_ns, std::int64_t{200});
+
+  std::filesystem::remove(source_path);
+  std::filesystem::remove(archive_path);
+}
+
+TEST(audio_pcm16_wav_ingest_finalizes_s0_when_profile_decode_fails) {
+  const auto directory = std::filesystem::temp_directory_path();
+  const auto source_path = directory / "codec-test-audio-d2-invalid.bin";
+  const auto archive_path = directory / "codec-test-audio-d2-invalid.coda";
+  std::filesystem::remove(source_path);
+  std::filesystem::remove(archive_path);
+  const auto source_bytes =
+      text_bytes("not a PCM16 WAV; preserve exactly");
+  write_bytes(source_path, source_bytes);
+  const auto stream = audio_stream_id();
+  const audio_profile::Pcm16WavIngestRequest request{
+      .source_uri = source_path.string(),
+      .archive_path = archive_path,
+      .descriptor = codec::StreamDescriptor{
+          .id = stream,
+          .type = codec::StreamType::audio,
+          .label = "invalid-but-preserved",
+          .source_id = "fixture/audio-d2-invalid",
+          .payload_type = "audio/wav",
+      },
+      .start_ns = 300,
+      .end_ns = 400,
+      .capture_chunk_bytes = 4096,
+      .maximum_source_bytes = 1024,
+      .maximum_redirects = 5,
+      .deny_private_network = true,
+  };
+
+  auto report = audio_profile::ingest_pcm16_wav(request);
+  EXPECT_TRUE(report);
+  if (report) {
+    EXPECT_FALSE(report->state_exact());
+    EXPECT_FALSE(report->state.has_value());
+    EXPECT_FALSE(report->provenance.has_value());
+    EXPECT_TRUE(report->profile_error.has_value());
+    if (report->profile_error) {
+      EXPECT_EQ(report->profile_error->code, codec::ErrorCode::decode);
+    }
+  }
+
+  auto archive = codec::CodaArchive::open(archive_path);
+  EXPECT_TRUE(archive);
+  if (!archive) return;
+  const auto verification = archive->verify();
+  EXPECT_TRUE(verification.ok);
+  EXPECT_TRUE(verification.finalized);
+  auto exact_source = archive->extract_stream(
+      stream, codec::RecordType::source_bytes);
+  EXPECT_TRUE(exact_source);
+  if (exact_source) EXPECT_EQ(*exact_source, source_bytes);
+  auto pcm = archive->query_records(codec::RecordQuery{
+      .stream = stream,
+      .type = codec::record_type_code(codec::RecordType::pcm16),
+      .sequence = std::nullopt,
+      .time = std::nullopt,
+  });
+  EXPECT_TRUE(pcm);
+  if (pcm) EXPECT_TRUE(pcm->empty());
+  auto proofs = archive->provenance();
+  EXPECT_TRUE(proofs);
+  if (proofs) EXPECT_TRUE(proofs->empty());
+
+  std::filesystem::remove(source_path);
+  std::filesystem::remove(archive_path);
+}
+
+TEST(audio_pcm16_wav_ingest_rejects_invalid_or_unbounded_requests_before_output) {
+  const auto directory = std::filesystem::temp_directory_path();
+  const auto source_path = directory / "codec-test-audio-d2-bounds.wav";
+  std::filesystem::remove(source_path);
+  const auto source_bytes = pcm16_wav_fixture();
+  write_bytes(source_path, source_bytes);
+  std::size_t rejection_index = 0;
+  const auto reject_without_output =
+      [&](audio_profile::Pcm16WavIngestRequest request) {
+    request.archive_path =
+        directory / ("codec-test-audio-d2-rejected-" +
+                     std::to_string(rejection_index++) + ".coda");
+    std::filesystem::remove(request.archive_path);
+    auto rejected = audio_profile::ingest_pcm16_wav(request);
+    EXPECT_FALSE(rejected);
+    EXPECT_FALSE(std::filesystem::exists(request.archive_path));
+  };
+
+  auto invalid = ingest_request(source_path, {});
+  invalid.source_uri.clear();
+  reject_without_output(invalid);
+
+  invalid = ingest_request(source_path, {});
+  invalid.end_ns = invalid.start_ns - 1;
+  reject_without_output(invalid);
+
+  invalid = ingest_request(source_path, {});
+  invalid.capture_chunk_bytes = 4095;
+  reject_without_output(invalid);
+
+  invalid = ingest_request(source_path, {});
+  invalid.capture_chunk_bytes = 16U * 1024U * 1024U + 1U;
+  reject_without_output(invalid);
+
+  invalid = ingest_request(source_path, {});
+  invalid.maximum_source_bytes = 0;
+  reject_without_output(invalid);
+
+  invalid = ingest_request(source_path, {});
+  invalid.maximum_redirects = 21;
+  reject_without_output(invalid);
+
+  invalid = ingest_request(source_path, {});
+  invalid.descriptor.type = codec::StreamType::telemetry;
+  reject_without_output(invalid);
+
+  invalid = ingest_request(source_path, {});
+  invalid.descriptor.payload_type = "application/octet-stream";
+  reject_without_output(invalid);
+
+  invalid = ingest_request(source_path, {});
+  invalid.descriptor.source_id.clear();
+  reject_without_output(invalid);
+
+  invalid = ingest_request(source_path, {});
+  invalid.maximum_source_bytes = source_bytes.size() - 1;
+  reject_without_output(invalid);
+
+  auto empty_archive = ingest_request(source_path, {});
+  auto empty_rejected = audio_profile::ingest_pcm16_wav(empty_archive);
+  EXPECT_FALSE(empty_rejected);
+
+  auto directory_archive = ingest_request(source_path, directory / "");
+  auto directory_rejected =
+      audio_profile::ingest_pcm16_wav(directory_archive);
+  EXPECT_FALSE(directory_rejected);
+  EXPECT_TRUE(std::filesystem::is_directory(directory));
+
+  const auto collision_path =
+      directory / "codec-test-audio-d2-collision.coda";
+  const auto sentinel = text_bytes("existing output survives");
+  std::filesystem::remove(collision_path);
+  write_bytes(collision_path, sentinel);
+  auto collision = audio_profile::ingest_pcm16_wav(
+      ingest_request(source_path, collision_path));
+  EXPECT_FALSE(collision);
+  if (!collision) {
+    EXPECT_EQ(collision.error().code, codec::ErrorCode::archive_io);
+  }
+  EXPECT_EQ(read_bytes(collision_path), sentinel);
+
+  std::filesystem::remove(source_path);
+  std::filesystem::remove(collision_path);
 }

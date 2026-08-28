@@ -101,6 +101,7 @@ if(CODEC_BUILD_TESTS)
     tests/test_main.cpp
     tests/test_archive.cpp
     tests/test_audio_model_bundle.cpp
+    tests/test_audio_onnx_cpu_runtime.cpp
     tests/test_audio_profile.cpp
     tests/test_audio_state_reader.cpp
     tests/test_audio_export.cpp

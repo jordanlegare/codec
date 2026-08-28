@@ -4,6 +4,7 @@ All notable changes use semantic versioning.
 
 ## Unreleased
 
+- Add a bounded caller-supplied C++ `StreamExporter` boundary that transforms exact extracted record batches into typed external bytes, validates input/output/payload-type limits, preserves provider errors, and returns exact ordered physical support links without archive/filesystem writes, a CODA format change, CLI export, or C ABI export.
 - Add generic CLI stream listing and exact S0 extraction by canonical stable `StreamId`, while preserving compatibility `list feeds` and `extract --feed` behavior without a CODA format, C ABI, or recording-format change.
 - Add typed, stable-identity C++ generic stream recording through the existing hardened URI capture path, preserving exact caller-supplied `StreamDescriptor` metadata and S0 bytes while retaining legacy `FeedSpec`, CLI, C ABI, descriptor layout, and ordering behavior.
 - Add payload-agnostic C++ `StreamAdapter` and `StreamProcessor` contracts with owned pull-based S0 records, exact extracted input batches, S1/D process identity, deterministic provider-output validation, and caller-supplied resource bounds without adding a registry, scheduler, persistence transaction, C ABI, CLI, or format change.

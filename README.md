@@ -45,6 +45,7 @@ core_vocabulary:
   - StreamProvenance
   - StreamAdapter
   - StreamProcessor
+  - StreamExporter
   - StreamInference
   - StreamExtraction
 
@@ -62,6 +63,7 @@ implemented_v0_1:
     - explicit append/extract/repair round trips for unknown 16-bit development-profile record type codes without payload interpretation
     - AND-combined C++ physical record queries over exact stream/raw type and half-open archive-sequence/envelope-time ranges, plus boundary-preserving per-record exact payload extraction
     - pull-based C++ StreamAdapter S0 and bounded batch StreamProcessor S1/D contracts with interval, truth, process-metadata, and resource validation; registration, scheduling, and automatic persistence remain external
+    - bounded caller-supplied C++ StreamExporter contract for typed external representations from exact extracted record batches, with input/output/payload-type limits and exact ordered physical support links; registry, automatic query, persistence, CLI, and C ABI export remain external
     - typed C++ generic stream recording with caller-owned stable StreamId and exact StreamDescriptor persistence through the existing hardened URI capture path; FeedSpec recording remains compatible
     - generic CLI stream listing and exact S0 extraction by stable StreamId; legacy feed list/extract remains available
     - C++ API, C ABI, CLI
@@ -76,7 +78,7 @@ implemented_v0_1:
     - no bundled neural model/runtime; incompatible model returns model_incompatible
 
 planned_not_implemented:
-  - generalized Stream* CLI recording/processing, C ABI, and profile API migration beyond generic C++ recording plus CLI list/extract
+  - generalized Stream* CLI recording/processing/export, C ABI, and profile API migration beyond generic C++ recording, CLI list/extract, and caller-supplied exporter invocation
   - persisted generic policy tags
   - generalized S1 canonical-state implementations beyond audio semantics
   - video, telemetry, sensor, document/event, network/system profiles

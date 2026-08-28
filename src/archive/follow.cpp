@@ -28,6 +28,20 @@ Result<SourceExactFollowBatch> extract_stream_source_exact_prefix(
   for (const auto& record : *record_list) {
     if (record.sequence < cursor.next_archive_sequence) continue;
 
+    const bool selected_source =
+        record.stream == stream && record.type == RecordType::source_bytes;
+    if (selected_source) {
+      if (selected.size() == maximum_records) break;
+      if (record.payload_size > maximum_bytes - selected_bytes) {
+        if (selected.empty()) {
+          return fail<SourceExactFollowBatch>(
+              ErrorCode::resource_exhausted,
+              "follow extraction byte limit is smaller than the next source record");
+        }
+        break;
+      }
+    }
+
     if (record.sequence == (std::numeric_limits<std::uint64_t>::max)()) {
       return fail<SourceExactFollowBatch>(
           ErrorCode::resource_exhausted,
@@ -39,21 +53,13 @@ Result<SourceExactFollowBatch> extract_stream_source_exact_prefix(
       finalized = true;
       continue;
     }
-    if (record.stream != stream || record.type != RecordType::source_bytes) {
-      continue;
-    }
-    if (selected.size() == maximum_records) {
-      return fail<SourceExactFollowBatch>(
-          ErrorCode::resource_exhausted,
-          "follow extraction record limit exceeded");
-    }
-    if (record.payload_size > maximum_bytes - selected_bytes) {
-      return fail<SourceExactFollowBatch>(
-          ErrorCode::resource_exhausted,
-          "follow extraction byte limit exceeded");
-    }
+    if (!selected_source) continue;
+
     selected_bytes += record.payload_size;
     selected.push_back(record);
+    if (selected.size() == maximum_records || selected_bytes == maximum_bytes) {
+      break;
+    }
   }
 
   SourceExactFollowBatch output;

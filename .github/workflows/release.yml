@@ -21,6 +21,11 @@ jobs:
           set -euo pipefail
           version="${GITHUB_REF_NAME#release/v}"
           test "$version" != "$GITHUB_REF_NAME"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+
+          git fetch --no-tags origin main
+          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+
           grep -Fq "project(CODEC VERSION $version LANGUAGES C CXX)" CMakeLists.txt
           grep -Fq "  version: $version" README.md
           grep -Fq "## $version —" CHANGELOG.md

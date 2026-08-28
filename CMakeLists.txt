@@ -19,6 +19,7 @@ pkg_check_modules(FLAC REQUIRED IMPORTED_TARGET flac)
 
 add_library(codec_core
   src/archive/archive.cpp
+  src/archive/follow.cpp
   src/audio/flac_decoder.cpp
   src/audio/flac_encoder.cpp
   src/audio/offline_pcm16_separation.cpp
@@ -136,6 +137,7 @@ if(CODEC_BUILD_TESTS)
   add_executable(codec_tests
     tests/test_main.cpp
     tests/test_archive.cpp
+    tests/test_archive_follow.cpp
     tests/test_audio_model_bundle.cpp
     tests/test_audio_onnx_cpu_runtime.cpp
     tests/test_audio_profile.cpp
@@ -146,6 +148,7 @@ if(CODEC_BUILD_TESTS)
     tests/test_audio_flac_ingest_validation.cpp
     tests/test_audio_offline_separation.cpp
     tests/test_engine.cpp
+    tests/test_engine_concurrency.cpp
     tests/test_processing.cpp
     tests/test_exporter.cpp
     tests/test_stream.cpp

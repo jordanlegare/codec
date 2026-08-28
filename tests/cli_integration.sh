@@ -3,7 +3,21 @@ set -euo pipefail
 
 codec_bin=${1:?codec binary path required}
 test_dir=$(mktemp -d)
-trap 'rm -rf "$test_dir"' EXIT
+record_pid=
+feed_a_pid=
+feed_b_pid=
+follow_pid=
+cleanup() {
+  touch "$test_dir/release-live" 2>/dev/null || true
+  for pid in "$follow_pid" "$record_pid" "$feed_a_pid" "$feed_b_pid"; do
+    if [ -n "$pid" ]; then
+      kill "$pid" 2>/dev/null || true
+      wait "$pid" 2>/dev/null || true
+    fi
+  done
+  rm -rf "$test_dir"
+}
+trap cleanup EXIT
 
 printf 'internet audio source bytes\n' > "$test_dir/input.bin"
 "$codec_bin" capabilities > "$test_dir/capabilities.json"
@@ -45,6 +59,80 @@ if "$codec_bin" extract "$test_dir/session.coda" --stream not-a-stream-id \
   exit 1
 fi
 grep -q 'invalid stream ID' "$test_dir/invalid.stderr"
+
+# E.3: follow a selected feed from a still-growing, concurrently multiplexed
+# archive. Both FIFO writers keep their source open until the test confirms
+# that LABEL1 bytes have already been emitted by the follower.
+mkfifo "$test_dir/live-a.fifo" "$test_dir/live-b.fifo"
+(
+  exec 3>"$test_dir/live-a.fifo"
+  printf 'alpha-live\n' >&3
+  touch "$test_dir/a-written"
+  while [ ! -e "$test_dir/release-live" ]; do sleep 0.02; done
+  exec 3>&-
+) &
+feed_a_pid=$!
+(
+  exec 4>"$test_dir/live-b.fifo"
+  printf 'beta-live\n' >&4
+  touch "$test_dir/b-written"
+  while [ ! -e "$test_dir/release-live" ]; do sleep 0.02; done
+  exec 4>&-
+) &
+feed_b_pid=$!
+
+"$codec_bin" record --archive "$test_dir/live.coda" \
+  --feed "LABEL1=$test_dir/live-a.fifo" \
+  --feed "LABEL2=$test_dir/live-b.fifo" \
+  > "$test_dir/live-record.json" 2> "$test_dir/live-record.err" &
+record_pid=$!
+
+for _ in $(seq 1 200); do
+  if [ -e "$test_dir/a-written" ] && [ -e "$test_dir/b-written" ] &&
+     [ -e "$test_dir/live.coda" ]; then
+    break
+  fi
+  sleep 0.01
+done
+[ -e "$test_dir/a-written" ]
+[ -e "$test_dir/b-written" ]
+
+"$codec_bin" extract "$test_dir/live.coda" --feed LABEL1 \
+  --fidelity source-exact --follow --output "$test_dir/live-alpha.bin" \
+  > "$test_dir/live-follow.json" 2> "$test_dir/live-follow.err" &
+follow_pid=$!
+
+saw_alpha=0
+for _ in $(seq 1 100); do
+  if [ -e "$test_dir/live-alpha.bin" ] &&
+     grep -q 'alpha-live' "$test_dir/live-alpha.bin"; then
+    saw_alpha=1
+    break
+  fi
+  if ! kill -0 "$follow_pid" 2>/dev/null; then
+    break
+  fi
+  sleep 0.01
+done
+if [ "$saw_alpha" -ne 1 ]; then
+  echo "follow extraction did not emit LABEL1 before archive finalization" >&2
+  cat "$test_dir/live-follow.err" >&2 || true
+  exit 1
+fi
+if grep -q 'beta-live' "$test_dir/live-alpha.bin"; then
+  echo "follow extraction emitted bytes from LABEL2" >&2
+  exit 1
+fi
+
+# The follower must still be waiting because both producer FIFOs remain open.
+kill -0 "$follow_pid"
+touch "$test_dir/release-live"
+wait "$feed_a_pid"; feed_a_pid=
+wait "$feed_b_pid"; feed_b_pid=
+wait "$record_pid"; record_pid=
+wait "$follow_pid"; follow_pid=
+printf 'alpha-live\n' > "$test_dir/expected-alpha.bin"
+cmp "$test_dir/expected-alpha.bin" "$test_dir/live-alpha.bin"
 
 cp "$test_dir/session.coda" "$test_dir/damaged.coda"
 python3 - "$test_dir/damaged.coda" <<'PY'

@@ -1,4 +1,5 @@
 #include <codec/archive.hpp>
+#include <codec/archive_follow.hpp>
 #include <codec/audio.hpp>
 #include <codec/engine.hpp>
 #include <codec/statement.hpp>
@@ -19,6 +20,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -35,8 +37,8 @@ void usage(std::ostream& output) {
       << "  codec verify ARCHIVE [--level full]\n"
       << "  codec list feeds ARCHIVE\n"
       << "  codec list streams ARCHIVE\n"
-      << "  codec extract ARCHIVE --feed LABEL --fidelity source-exact --output FILE\n"
-      << "  codec extract ARCHIVE --stream STREAM_ID --fidelity source-exact --output FILE\n"
+      << "  codec extract ARCHIVE --feed LABEL --fidelity source-exact [--follow] --output FILE\n"
+      << "  codec extract ARCHIVE --stream STREAM_ID --fidelity source-exact [--follow] --output FILE\n"
       << "  codec repair ARCHIVE --output FILE\n"
       << "  codec watermark keygen --private KEY --public KEY\n"
       << "  codec watermark issue INPUT.wav --output OUTPUT.wav --statement FILE\n"
@@ -253,6 +255,119 @@ int list_command(const Strings& arguments) {
   return 0;
 }
 
+int follow_extract(const codec::CodaArchive& archive,
+                   const std::optional<std::string_view>& label,
+                   std::optional<codec::StreamId> selected_stream,
+                   const std::filesystem::path& output_path) {
+  using namespace std::chrono_literals;
+
+  // Legacy feed labels are descriptor metadata. E.3 record commits all feed
+  // descriptors before producer start, but polling remains valid for archives
+  // written by other compatible producers where the descriptor may appear later.
+  if (label) {
+    for (;;) {
+      auto feeds = archive.feeds(codec::ArchiveReadPolicy::verified_prefix);
+      if (!feeds) return print_error(feeds.error());
+      std::optional<codec::StreamId> match;
+      for (const auto& feed : *feeds) {
+        if (feed.label != *label) continue;
+        if (match) {
+          std::cerr << "codec: archive_corrupt: duplicate feed label: "
+                    << *label << '\n';
+          return 1;
+        }
+        match = feed.stream;
+      }
+      if (match) {
+        selected_stream = *match;
+        break;
+      }
+      auto records = archive.records(codec::ArchiveReadPolicy::verified_prefix);
+      if (!records) return print_error(records.error());
+      const bool finalized = std::any_of(
+          records->begin(), records->end(), [](const codec::RecordInfo& record) {
+            return record.type == codec::RecordType::final_index;
+          });
+      if (finalized) {
+        std::cerr << "codec: feed label not found: " << *label << '\n';
+        return 1;
+      }
+      std::this_thread::sleep_for(50ms);
+    }
+  }
+
+  if (!selected_stream) {
+    std::cerr << "codec: extract follow could not resolve a stream\n";
+    return 1;
+  }
+
+  std::ofstream output(output_path, std::ios::binary | std::ios::trunc);
+  if (!output) {
+    std::cerr << "codec: archive_io: cannot open output: "
+              << output_path.string() << '\n';
+    return 1;
+  }
+
+  codec::SourceExactCursor cursor{};
+  std::uint64_t total_bytes = 0;
+  bool observed_stream = false;
+  for (;;) {
+    auto batch = codec::extract_stream_source_exact_prefix(
+        archive, *selected_stream, cursor);
+    if (!batch) return print_error(batch.error());
+    cursor = batch->cursor;
+
+    for (const auto& extracted : batch->records) {
+      observed_stream = true;
+      if (!extracted.payload.empty()) {
+        output.write(reinterpret_cast<const char*>(extracted.payload.data()),
+                     static_cast<std::streamsize>(extracted.payload.size()));
+        if (!output) {
+          std::cerr << "codec: archive_io: cannot write follow output\n";
+          return 1;
+        }
+      }
+      total_bytes += extracted.payload.size();
+    }
+    if (!batch->records.empty()) {
+      output.flush();
+      if (!output) {
+        std::cerr << "codec: archive_io: cannot flush follow output\n";
+        return 1;
+      }
+    }
+
+    if (batch->finalized) {
+      if (!observed_stream) {
+        auto streams = archive.streams(codec::ArchiveReadPolicy::verified_prefix);
+        if (!streams) return print_error(streams.error());
+        const bool declared = std::any_of(
+            streams->begin(), streams->end(), [&](const auto& descriptor) {
+              return descriptor.id == *selected_stream;
+            });
+        if (!declared) {
+          std::cerr << "codec: stream ID not found: "
+                    << codec::to_string(*selected_stream) << '\n';
+          return 1;
+        }
+      }
+      if (label) {
+        std::cout << "{\"feed\":\"" << codec::detail::json_escape(*label)
+                  << "\",\"fidelity\":\"source_exact\",\"bytes\":"
+                  << total_bytes << ",\"follow\":true}\n";
+      } else {
+        std::cout << "{\"stream_id\":\""
+                  << codec::to_string(*selected_stream)
+                  << "\",\"fidelity\":\"source_exact\",\"bytes\":"
+                  << total_bytes << ",\"follow\":true}\n";
+      }
+      return 0;
+    }
+
+    if (batch->records.empty()) std::this_thread::sleep_for(50ms);
+  }
+}
+
 int extract_command(const Strings& arguments) {
   if (arguments.empty()) {
     std::cerr << "codec: extract requires an archive\n";
@@ -263,6 +378,7 @@ int extract_command(const Strings& arguments) {
   const auto stream_text = option(tail, "--stream");
   const auto output = option(tail, "--output");
   const auto fidelity = option(tail, "--fidelity");
+  const bool follow = flag(tail, "--follow");
   if (label.has_value() == stream_text.has_value() || !output ||
       (fidelity && *fidelity != "source-exact")) {
     std::cerr << "codec: extract requires exactly one of --feed or --stream, "
@@ -279,6 +395,12 @@ int extract_command(const Strings& arguments) {
   }
   auto archive = codec::CodaArchive::open(std::string{arguments.front()});
   if (!archive) return print_error(archive.error());
+
+  if (follow) {
+    return follow_extract(*archive, label, selected_stream,
+                          std::filesystem::path{std::string{*output}});
+  }
+
   if (selected_stream) {
     const codec::RecordQuery query{
         .stream = *selected_stream,

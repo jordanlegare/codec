@@ -136,7 +136,7 @@ Result<std::vector<std::byte>> encode_wav_pcm16(
   if (!encoded_size) return encoded_size.error();
 
   const auto data_bytes = samples.size() * sizeof(std::int16_t);
-  std::vector<std::byte> output(*encoded_size);
+  std::vector<std::byte> output(44 + data_bytes);
   std::memcpy(output.data(), "RIFF", 4);
   put32(output, 4, static_cast<std::uint32_t>(36 + data_bytes));
   std::memcpy(output.data() + 8, "WAVEfmt ", 8);

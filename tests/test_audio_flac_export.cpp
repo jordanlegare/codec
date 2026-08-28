@@ -4,6 +4,7 @@
 
 #include <FLAC/stream_decoder.h>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -187,13 +188,19 @@ void decoder_error(const FLAC__StreamDecoder*, FLAC__StreamDecoderErrorStatus,
   static_cast<DecoderState*>(client_data)->ok = false;
 }
 
-std::optional<DecodedFlac> decode_flac(std::span<const std::byte> input) {
+[[maybe_unused]] std::optional<DecodedFlac> decode_flac(
+    std::span<const std::byte> input) {
   using DecoderPtr =
       std::unique_ptr<FLAC__StreamDecoder, decltype(&FLAC__stream_decoder_delete)>;
   DecoderPtr decoder{FLAC__stream_decoder_new(), &FLAC__stream_decoder_delete};
   if (!decoder) return std::nullopt;
 
-  DecoderState state{.input = input};
+  DecoderState state{
+      .input = input,
+      .cursor = 0,
+      .decoded = {},
+      .ok = true,
+  };
   const auto init = FLAC__stream_decoder_init_stream(
       decoder.get(), decoder_read, nullptr, nullptr, nullptr, nullptr,
       decoder_write, decoder_metadata, decoder_error, &state);

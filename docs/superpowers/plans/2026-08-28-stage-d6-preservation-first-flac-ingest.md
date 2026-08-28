@@ -21,6 +21,14 @@
 - Profile decode/resource failure after S0 commit finalizes a verified S0-only archive and is reported in `profile_error`.
 - No resampling, remixing, dither, gain, normalization, floating PCM, FFmpeg, CLI, C ABI, inference, identity, CODA layout, or Stage D completion change.
 
+## Execution record
+
+- Accepted RED: head `a470e9beb4252cec1f9fb2f59eb091beb1643ba9`, CI #98 / `33168843144`. libFLAC discovery and existing production compilation succeeded; the new test failed specifically because `Pcm16FlacIngestRequest` and `ingest_pcm16_flac` were absent.
+- First implementation candidate: head `b76122f5c1ca78fcaa56baae6b4a99ed4c44a4bc`, CI #103 / `33169026361`. This is not GREEN: GCC found that `detail::` inside `codec::profiles::audio` resolved to the profile-private detail namespace rather than generic `codec::detail` for descriptor/capture helpers.
+- Namespace correction: generic helpers are explicitly qualified as `::codec::detail`; the profile-private FLAC decoder remains `codec::profiles::audio::detail::decode_flac_pcm16`.
+- First full GREEN: head `9f2d69b2d312286666aefa77df2bf66ade6eee55`, CI #104 / `33169097456`. GCC and Clang build/test/install/package-consumer and sanitizer build/test all succeeded.
+- Post-GREEN plan audit found missing explicit tests for several already-implemented pre-capture validation branches. `tests/test_audio_flac_ingest_validation.cpp` was added to cover non-audio descriptor, inverted interval, invalid capture chunk, zero source bound, and excessive redirects before the final exact-head CI.
+
 ---
 
 ### Task 1: Establish the D.6 RED contract
@@ -33,13 +41,13 @@
 - Consumes: existing `codec::profiles::audio::query_verified_pcm16_states`, `export_verified_pcm16_flac`, archive APIs, and libFLAC test linkage already present through CODEC.
 - Produces test expectations for `Pcm16FlacIngestRequest`, `Pcm16FlacIngestReport`, and `ingest_pcm16_flac(...)`.
 
-- [ ] **Step 1: Add a deterministic test-local native FLAC encoder fixture**
+- [x] **Step 1: Add a deterministic test-local native FLAC encoder fixture**
 
-In `tests/test_audio_flac_ingest.cpp`, use libFLAC's stream encoder callbacks over a byte vector. Parameterize bits-per-sample so the fixture can create both 16-bit and unsupported 24-bit native FLAC without filesystem I/O. For 16-bit fixtures, promote signed `std::int16_t` samples directly to `FLAC__int32` and encode interleaved frames.
+In `tests/test_audio_flac_ingest.cpp`, use libFLAC's stream encoder support to produce deterministic native test fixtures. Parameterize bits-per-sample so the fixture can create both 16-bit and unsupported 24-bit native FLAC. For 16-bit fixtures, promote signed values directly to `FLAC__int32` and encode interleaved frames.
 
-- [ ] **Step 2: Add the happy-path preservation/trust test**
+- [x] **Step 2: Add the happy-path preservation/trust test**
 
-Construct an `audio/flac` `StreamDescriptor`, create deterministic PCM16 samples, encode native FLAC with the fixture, write those bytes to a temporary source file, and call the wished-for API:
+Construct an `audio/flac` `StreamDescriptor`, create deterministic PCM16 samples, encode native FLAC with the fixture, write those bytes to a temporary source file, and call:
 
 ```cpp
 codec::profiles::audio::Pcm16FlacIngestRequest request{
@@ -53,15 +61,15 @@ codec::profiles::audio::Pcm16FlacIngestRequest request{
 auto report = codec::profiles::audio::ingest_pcm16_flac(request);
 ```
 
-Assert `state_exact()`, finalized archive verification, exact `source_bytes` payload equality with the input FLAC bytes, and D.3 verified state equality for sample rate/channels/samples and same-stream/same-interval lineage.
+The test asserts `state_exact()`, finalized archive verification, exact S0 payload equality, and D.3 verified state equality for sample rate/channels/samples and lineage.
 
-- [ ] **Step 3: Add round-trip integration coverage**
+- [x] **Step 3: Add round-trip integration coverage**
 
-From the D.6 archive, call `export_verified_pcm16_flac()` and independently decode the returned FLAC with a test-local libFLAC decoder or compare through D.3 state. Prove decoded PCM equality; explicitly do not assert source/export FLAC byte identity.
+The D.6 archive is exported through `export_verified_pcm16_flac()` and independently decoded with libFLAC to prove exact PCM equality. No source/export FLAC byte identity is asserted.
 
-- [ ] **Step 4: Add preservation-first profile failure cases**
+- [x] **Step 4: Add preservation-first profile failure cases**
 
-Cover:
+Coverage includes:
 
 ```text
 native magic + malformed body -> finalized verified S0-only, profile_error=decode
@@ -69,19 +77,19 @@ native magic + malformed body -> finalized verified S0-only, profile_error=decod
 OggS-prefixed input -> finalized verified S0-only, profile_error=decode
 ```
 
-For every case assert exact S0 payload bytes, no state, no provenance.
+Each case asserts exact preserved S0 and no state/provenance.
 
-- [ ] **Step 5: Add decoded-output resource tests**
+- [x] **Step 5: Add decoded-output resource tests**
 
-Encode a valid compressed 16-bit FLAC whose decoded PCM is larger than a small `maximum_decoded_pcm_bytes`; expect a successful ingest report with exact S0 and `profile_error.code == resource_exhausted`. Set `maximum_decoded_pcm_bytes = 0`; expect outer `invalid_argument` before archive creation.
+A valid compressed 16-bit FLAC whose decoded PCM exceeds `maximum_decoded_pcm_bytes` yields a successful S0-only ingest report with `resource_exhausted`; zero decoded bound is rejected before archive creation.
 
-- [ ] **Step 6: Add request validation cases**
+- [x] **Step 6: Add request validation cases**
 
-Assert pre-capture outer failure for non-audio descriptor, non-`audio/flac` payload type, inverted interval, invalid chunk, zero source bound, excessive redirects, and pre-existing archive output.
+Coverage proves pre-capture outer failure for non-audio descriptor, non-`audio/flac` payload type, inverted interval, invalid chunk, zero source bound, excessive redirects, zero decoded bound, and pre-existing archive output.
 
-- [ ] **Step 7: Register the test and establish RED**
+- [x] **Step 7: Register the test and establish RED**
 
-Add `tests/test_audio_flac_ingest.cpp` to `codec_tests`, commit tests only, open a draft PR, and require CI to reach the new test and fail specifically because `Pcm16FlacIngestRequest` / `ingest_pcm16_flac` are absent. Test-fixture/build failures must be corrected before accepting RED.
+Accepted RED is head `a470e9beb4252cec1f9fb2f59eb091beb1643ba9`, CI #98 / `33168843144`.
 
 ---
 
@@ -104,50 +112,25 @@ Result<Pcm16State> decode_flac_pcm16(
 }
 ```
 
-- [ ] **Step 1: Define the private decoder header**
+- [x] **Step 1: Define the private decoder header**
 
-Include only CODEC PCM/result definitions plus `<cstdint>` and `<span>`. Keep `<FLAC/...>` headers out of the public include tree.
+The libFLAC C API remains private; no FLAC decoder header is exposed in CODEC's public include tree.
 
-- [ ] **Step 2: Implement read-only in-memory decoder callbacks**
+- [x] **Step 2: Implement read-only in-memory decoder callbacks**
 
-Maintain:
+The decoder owns a source span/cursor, decoded PCM, independent decoded-byte limit, and failure/exhaustion state. Read/seek/tell/length/eof callbacks operate only on the owned source snapshot.
 
-```cpp
-struct DecoderState {
-  std::span<const std::byte> source;
-  std::size_t offset{};
-  std::uint64_t maximum_decoded_pcm_bytes{};
-  Pcm16State pcm;
-  bool saw_streaminfo{false};
-  bool decode_failed{false};
-  bool exhausted{false};
-};
-```
+- [x] **Step 3: Validate STREAMINFO and decoded frame geometry**
 
-Implement libFLAC read/seek/tell/length/eof callbacks over `source`. Reject impossible offsets and never mutate source bytes.
+STREAMINFO requires non-zero sample rate/channels and exactly 16 bits per sample. Frame geometry must remain consistent. Decoded growth is checked with overflow-safe exact two-bytes-per-sample accounting, and each `FLAC__int32` is range-checked before conversion to `std::int16_t`.
 
-- [ ] **Step 3: Validate STREAMINFO and decoded frame geometry**
+- [x] **Step 4: Initialize and run libFLAC with integrity checking**
 
-The metadata callback must require non-zero sample rate/channels and exactly 16 bits per sample. Record sample rate/channels once. The frame callback must require 16-bit samples and geometry consistent with STREAMINFO.
+The implementation requires native `fLaC`, enables `FLAC__stream_decoder_set_md5_checking`, processes metadata and stream data, and finishes the decoder. Decoded bound/allocation exhaustion maps to `resource_exhausted`; malformed/unsupported/integrity/geometry failure maps to `decode`.
 
-Before appending each decoded block, compute:
+- [x] **Step 5: Register the production source and compile**
 
-```text
-new_samples = blocksize * channels
-new_pcm_bytes = (existing_samples + new_samples) * 2
-```
-
-with overflow-safe arithmetic. If the configured byte limit would be exceeded, set `exhausted=true` and abort. Range-check every `FLAC__int32` before conversion to `std::int16_t`.
-
-- [ ] **Step 4: Initialize and run libFLAC with integrity checking**
-
-Before initialization require `source` to begin with `fLaC` and `maximum_decoded_pcm_bytes != 0`. Allocate the decoder with RAII, enable `FLAC__stream_decoder_set_md5_checking(decoder, true)`, call `FLAC__stream_decoder_init_stream`, `FLAC__stream_decoder_process_until_end_of_stream`, and `FLAC__stream_decoder_finish`.
-
-Return `resource_exhausted` when decoded bound/allocation exhaustion is recorded; otherwise return `decode` for malformed, unsupported, callback, process, finish/MD5, or geometry failure.
-
-- [ ] **Step 5: Register the production source and compile**
-
-Add `src/audio/flac_decoder.cpp` to `codec_core`. Run the focused test build; public ingest tests may still fail because Task 3 is absent, but the decoder must compile warning-free under GCC/Clang.
+`src/audio/flac_decoder.cpp` is registered in `codec_core` and compiled warning-free on the first full GREEN head after the namespace correction.
 
 ---
 
@@ -162,31 +145,29 @@ Add `src/audio/flac_decoder.cpp` to `codec_core`. Run the focused test build; pu
 - Consumes: Task 2 `detail::decode_flac_pcm16`, existing `PreparedCapture`, `CodaWriter`, `encode_pcm16_state`.
 - Produces the exact D.6 public API from the spec.
 
-- [ ] **Step 1: Add public request/report declarations**
+- [x] **Step 1: Add public request/report declarations**
 
-Add `Pcm16FlacIngestRequest`, `Pcm16FlacIngestReport::state_exact()`, and `ingest_pcm16_flac(...)` exactly as specified. Do not change D.2 WAV signatures or add root aliases.
+`Pcm16FlacIngestRequest`, `Pcm16FlacIngestReport::state_exact()`, and `ingest_pcm16_flac(...)` are profile-only additions. D.2 WAV signatures remain unchanged and no root alias is added.
 
-- [ ] **Step 2: Implement pre-capture validation**
+- [x] **Step 2: Implement pre-capture validation**
 
-Mirror D.2 bounds exactly for source URI, archive path, interval, capture chunk (`4096..16 MiB`), redirects (`<=20`), source byte limit, descriptor encoding, and existing output refusal. Additionally require `maximum_decoded_pcm_bytes != 0`, representable by `size_t`, `StreamType::audio`, and payload type `audio/flac`.
+D.2 capture bounds are preserved and D.6 additionally validates the decoded PCM bound plus exact `StreamType::audio` / `audio/flac` descriptor semantics before capture.
 
-- [ ] **Step 3: Capture one owned source snapshot**
+- [x] **Step 3: Capture one owned source snapshot**
 
-Use `detail::PreparedCapture::prepare` with the request's capture/network limits and append callback bytes into one vector using overflow-safe checks against `maximum_source_bytes`. Do not decode during capture and do not read the source again.
+D.6 uses `::codec::detail::PreparedCapture` with the request's source/network bounds and builds one owned snapshot without decoding during capture or re-reading the source.
 
-- [ ] **Step 4: Commit S0 before decoding**
+- [x] **Step 4: Commit S0 before decoding**
 
-After capture succeeds, create `CodaWriter`, append the exact descriptor, then append exact `RecordType::source_bytes` over the caller's stream and interval. Construct the report before profile interpretation.
+After capture, D.6 appends the descriptor and exact `source_bytes` record before invoking the private FLAC decoder.
 
-- [ ] **Step 5: Implement S0-only profile failure finalization**
+- [x] **Step 5: Implement S0-only profile failure finalization**
 
-Create a local `finish_source_only(Error)` closure identical in transaction meaning to D.2: finalize writer, store the profile error, and return the successful report.
+Any post-S0 decoder/profile error finalizes the archive, stores `profile_error`, and returns the successful preservation report.
 
-Call `detail::decode_flac_pcm16(source_bytes, maximum_decoded_pcm_bytes)`. On any decoder error, return through `finish_source_only`.
+- [x] **Step 6: Append APS1 and exact provenance on success**
 
-- [ ] **Step 6: Append APS1 and exact provenance on success**
-
-Encode with `encode_pcm16_state`, append `RecordType::pcm16` on the same stream/interval, then append provenance:
+Successful decoded PCM is encoded with existing APS1 and appended as `pcm16`; exact provenance uses:
 
 ```cpp
 ProvenanceProcess{
@@ -197,11 +178,11 @@ ProvenanceProcess{
 };
 ```
 
-with exactly the S0 source record as input and `TruthClass::state_exact`. Finalize, populate state/provenance, return.
+with exactly the committed FLAC S0 record as the direct input and `TruthClass::state_exact`.
 
-- [ ] **Step 7: Run D.6 and full tests**
+- [x] **Step 7: Run D.6 and full tests**
 
-Require the new test to pass plus unchanged D.2/D.3/D.4/D.5, archive, CLI, C ABI, watermark, processing/exporter, inference capability, AI contract, and package consumer tests.
+First full GREEN is head `9f2d69b2d312286666aefa77df2bf66ade6eee55`, CI #104 / `33169097456`; final exact-head verification follows after documentation and validation-coverage completion.
 
 ---
 
@@ -213,13 +194,13 @@ Require the new test to pass plus unchanged D.2/D.3/D.4/D.5, archive, CLI, C ABI
 - Modify: `docs/superpowers/plans/2026-08-28-stage-d6-preservation-first-flac-ingest.md` only to record factual execution discoveries.
 - Modify spec only if runtime/CI proves a factual detail needs correction.
 
-- [ ] **Step 1: Update README current Audio Profile status**
+- [x] **Step 1: Update README current Audio Profile status**
 
-State that native PCM16 FLAC ingest now preserves exact FLAC S0 before decoding to APS1 S1; malformed/native-unsupported/Ogg input remains S0-only with profile error. Keep APS1 canonical and retain explicit non-claims for broader conversion/inference.
+README now states that native PCM16 FLAC ingest preserves exact FLAC S0 before decoding to APS1 S1 and that malformed/unsupported/Ogg/over-limit profile input remains S0-only with explicit profile error.
 
-- [ ] **Step 2: Update CHANGELOG Unreleased**
+- [x] **Step 2: Update CHANGELOG Unreleased**
 
-Record the profile-only FLAC ingest API, exact S0-first transaction, decoded PCM bound, native 16-bit limitation, and D.3/D.5 round-trip proof.
+CHANGELOG records the profile-only FLAC ingest API, exact S0-first transaction, decoded PCM bound, native 16-bit limitation, and D.3/D.5 round-trip proof.
 
 - [ ] **Step 3: Run final exact-head CI**
 

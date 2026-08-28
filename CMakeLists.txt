@@ -19,6 +19,7 @@ add_library(codec_core
   src/archive/archive.cpp
   src/audio/flac_decoder.cpp
   src/audio/flac_encoder.cpp
+  src/audio/offline_pcm16_separation.cpp
   src/audio/pcm16_flac_export.cpp
   src/audio/pcm16_flac_ingest.cpp
   src/audio/pcm16_ingest.cpp
@@ -104,6 +105,7 @@ if(CODEC_BUILD_TESTS)
     tests/test_audio_flac_export.cpp
     tests/test_audio_flac_ingest.cpp
     tests/test_audio_flac_ingest_validation.cpp
+    tests/test_audio_offline_separation.cpp
     tests/test_engine.cpp
     tests/test_processing.cpp
     tests/test_exporter.cpp

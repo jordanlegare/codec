@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <span>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -113,6 +114,61 @@ TEST(audio_state_reader_returns_only_verified_d1_state) {
   EXPECT_EQ(states->front().provenance.inputs.front().sequence,
             fixture.source.sequence);
   std::filesystem::remove(fixture.path);
+}
+
+TEST(audio_state_reader_consumes_actual_d2_ingest_output) {
+  const auto wav_path = test_path("d2-source.wav");
+  const auto archive_path = test_path("d2-output.coda");
+  std::filesystem::remove(wav_path);
+  std::filesystem::remove(archive_path);
+  const auto stream = stream_id("d3-d2-integration");
+
+  const codec::WavPcm16 wav{
+      .sample_rate = sample_state().sample_rate,
+      .channels = sample_state().channels,
+      .samples = sample_state().samples,
+  };
+  EXPECT_TRUE(wav.write(wav_path));
+
+  const codec::profiles::audio::Pcm16WavIngestRequest request{
+      .source_uri = wav_path.string(),
+      .archive_path = archive_path,
+      .descriptor = codec::StreamDescriptor{
+          .id = stream,
+          .type = codec::StreamType::audio,
+          .label = "D.3 D.2 integration",
+          .source_id = "fixture",
+          .payload_type = "audio/wav",
+      },
+      .start_ns = 100,
+      .end_ns = 200,
+  };
+  auto report = codec::profiles::audio::ingest_pcm16_wav(request);
+  EXPECT_TRUE(report);
+  EXPECT_TRUE(report->state_exact());
+
+  auto archive = codec::CodaArchive::open(archive_path);
+  EXPECT_TRUE(archive);
+  const codec::profiles::audio::Pcm16StateQuery query{
+      .stream = stream,
+      .time = codec::RecordTimeRange{.begin_ns = 100, .end_ns = 200},
+      .maximum_results = 1,
+      .maximum_encoded_bytes = 1024 * 1024,
+  };
+  auto states = codec::profiles::audio::query_verified_pcm16_states(*archive,
+                                                                     query);
+  EXPECT_TRUE(states);
+  EXPECT_EQ(states->size(), std::size_t{1});
+  EXPECT_EQ(states->front().state.samples, sample_state().samples);
+  EXPECT_EQ(states->front().source_record.sequence, report->source.sequence);
+  EXPECT_EQ(states->front().source_record.hash, report->source.hash);
+  EXPECT_EQ(states->front().state_record.sequence, report->state->sequence);
+  EXPECT_EQ(states->front().state_record.hash, report->state->hash);
+  EXPECT_EQ(states->front().provenance.process.operation,
+            std::string{"audio.pcm16.canonicalize"});
+
+  std::filesystem::remove(archive_path);
+  std::filesystem::remove(wav_path);
 }
 
 TEST(audio_state_reader_does_not_promote_unprovenanced_pcm16) {

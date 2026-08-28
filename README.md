@@ -69,6 +69,7 @@ implemented_v0_1:
     - C++ API, C ABI, CLI
   audio_profile:
     - explicit C++ profile facade at codec/profiles/audio.hpp in codec::profiles::audio, forwarding the exact existing WAV/PCM, watermark, and separation types/functions while root-level codec::* audio APIs remain compatible
+    - deterministic sample-exact PCM16 S1 canonical state with a versioned self-contained APS1 encoding, strict decode validation, generic pcm16-record storage, and exact S0 provenance links
     - PCM16 RIFF/WAVE exact read/write
     - Ed25519/COSE W0 signed statements
     - W1 reference sub-20-kHz carrier/detector
@@ -81,7 +82,7 @@ implemented_v0_1:
 planned_not_implemented:
   - generalized Stream* CLI recording/processing/export and C ABI migration; profile API migration beyond the explicit Audio Stream Profile facade
   - persisted generic policy tags
-  - generalized S1 canonical-state implementations beyond audio semantics
+  - generalized S1 canonical-state implementations beyond deterministic audio PCM16
   - video, telemetry, sensor, document/event, network/system profiles
   - production neural separation/diarization/identity models
   - recovery/FEC profile
@@ -173,7 +174,7 @@ Audio is the first implemented profile, not CODEC core. PCM/WAV, sample rate/cha
 
 The canonical additive C++ profile entry point is `<codec/profiles/audio.hpp>` under `codec::profiles::audio`. It aliases/imports the existing WAV/PCM, watermark, and separation surface rather than moving ABI-bearing symbols; existing root-level `codec::*` audio headers and names remain the v0.1 compatibility surface.
 
-For audio, S1 may mean sample-exact canonical integer PCM. Resampling, enhancement, concealment, separation, embeddings, and inferred labels remain D-class. CODEC-generated watermark derivatives must not mutate preserved S0/S1 truth.
+For audio, `Pcm16State` is the implemented sample-exact S1 contract: non-zero sample rate and channel count, complete interleaved frames, and exact signed 16-bit samples. `encode_pcm16_state` and `decode_pcm16_state` use the deterministic versioned `APS1` payload. A `pcm16` record is only S1 when a `state_exact` provenance sidecar links it to its exact S0 input; the record tag alone does not make that claim. Resampling, remixing, channel-layout interpretation, floating-point PCM, FLAC, enhancement, concealment, separation, embeddings, and inferred labels remain outside this milestone or D-class. CODEC-generated watermark derivatives must not mutate preserved S0/S1 truth.
 
 ## Security and scope
 

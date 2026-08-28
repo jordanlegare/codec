@@ -177,6 +177,20 @@ SHA-256 `c3fddc4f139a045b0c4902c57410f0694f1c2fdf9b6939fbe38b1aeae7cd14ba`,
 and configures CODEC with its extracted root. The archive and binary are not
 committed or installed by CODEC.
 
+Leak-enabled sanitizer CI keeps `ASAN_OPTIONS=detect_leaks=1` globally. The
+released ONNX Runtime 1.29.0 Linux CPU binary leaves small process-lifetime
+allocations created specifically during dynamic loading; CI #118 observed
+720 bytes in 18 allocations, each allocation stack passing through `dlopen()`
+inside D.9 `DynamicLibrary::open()`, after all D.9 functional tests had passed.
+To avoid masking CODEC leaks, sanitizer CTest isolates only
+`audio_onnx_cpu_runtime_*` into `codec-onnx-runtime` and applies
+`tests/lsan_onnxruntime.supp` with the single rule `leak:dlopen` to that process.
+The ordinary `codec-unit`, C API, CLI integration, and AI-contract tests remain
+unsuppressed. Allocations made later by CODEC or ONNX Runtime that do not have
+`dlopen()` in their allocation stack remain visible to LeakSanitizer. This is a
+CI/test-harness accommodation for third-party loader lifetime behavior; it does
+not alter production ownership or runtime behavior.
+
 ## Truth and capability effects
 
 - **S0:** unchanged.
@@ -214,7 +228,9 @@ prove:
 6. installed consumers see the additive factory without ONNX types or a new
    link-time ONNX dependency; and
 7. all existing Release, sanitizer, capability, package, and unavailable-default
-   tests remain green.
+   tests remain green. Sanitizer proof must keep global leak detection enabled,
+   isolate the ONNX runtime tests, and permit only the documented `dlopen()`
+   loader-lifetime suppression in that isolated process.
 
 ## Non-claims
 

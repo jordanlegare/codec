@@ -1,0 +1,10 @@
+# ONNX Runtime 1.29.0 released Linux CPU binaries retain small process-lifetime
+# allocations made from their dynamic-loader initialization path. PR #23 CI
+# demonstrated 720 bytes / 18 allocations whose allocation stacks all pass
+# through dlopen() from D.9 DynamicLibrary::open().
+#
+# This suppression is intentionally applied only to the isolated
+# codec-onnx-runtime CTest process in sanitizer builds. It does not disable
+# leak detection and does not suppress allocations made later by CODEC or ONNX
+# Runtime unless their allocation stack itself contains dlopen().
+leak:dlopen

@@ -82,6 +82,60 @@ Result<void> validate_frame_metadata(const MultiplexFrame& frame) {
   return {};
 }
 
+Result<std::uint64_t> validate_wire_header(
+    std::span<const std::byte> bytes, const MultiplexLimits& limits) {
+  if (bytes.size() < header_size) {
+    return fail<std::uint64_t>(ErrorCode::protocol,
+                               "multiplex frame header is incomplete");
+  }
+  if (!std::equal(frame_magic.begin(), frame_magic.end(), bytes.begin())) {
+    return fail<std::uint64_t>(ErrorCode::protocol,
+                               "invalid multiplex frame magic");
+  }
+  if (get_le<std::uint16_t>(bytes, 4) != multiplex_frame_version) {
+    return fail<std::uint64_t>(ErrorCode::protocol,
+                               "unsupported multiplex frame version");
+  }
+  if (get_le<std::uint16_t>(bytes, 6) != 0) {
+    return fail<std::uint64_t>(ErrorCode::protocol,
+                               "unsupported multiplex frame flags");
+  }
+  if (get_le<std::uint32_t>(bytes, 8) != header_size) {
+    return fail<std::uint64_t>(ErrorCode::protocol,
+                               "invalid multiplex frame header size");
+  }
+
+  const auto total_size = get_le<std::uint64_t>(bytes, 12);
+  const auto payload_size = get_le<std::uint64_t>(bytes, 124);
+  if (total_size < header_size) {
+    return fail<std::uint64_t>(ErrorCode::protocol,
+                               "multiplex frame size is smaller than header");
+  }
+  if (payload_size != total_size - header_size) {
+    return fail<std::uint64_t>(ErrorCode::protocol,
+                               "inconsistent multiplex frame lengths");
+  }
+  if (payload_size > limits.maximum_payload_bytes ||
+      total_size > limits.maximum_buffered_bytes ||
+      total_size > std::numeric_limits<std::size_t>::max()) {
+    return fail<std::uint64_t>(ErrorCode::resource_exhausted,
+                               "multiplex frame exceeds configured limits");
+  }
+
+  const auto start_ns = get_le<std::int64_t>(bytes, 60);
+  const auto end_ns = get_le<std::int64_t>(bytes, 68);
+  if (end_ns < start_ns) {
+    return fail<std::uint64_t>(ErrorCode::protocol,
+                               "multiplex frame interval is inverted");
+  }
+  if (get_le<std::int64_t>(bytes, 108) <= 0 ||
+      get_le<std::int64_t>(bytes, 116) <= 0) {
+    return fail<std::uint64_t>(ErrorCode::protocol,
+                               "multiplex frame timebase is invalid");
+  }
+  return total_size;
+}
+
 Result<std::vector<std::byte>> frame_hash_input(
     std::span<const std::byte> header_prefix,
     std::span<const std::byte> payload) {
@@ -111,54 +165,11 @@ bool digest_matches(std::span<const std::byte> header,
 
 Result<MultiplexFrame> decode_complete_frame(
     std::span<const std::byte> bytes, const MultiplexLimits& limits) {
-  if (bytes.size() < header_size) {
-    return fail<MultiplexFrame>(ErrorCode::protocol,
-                                "multiplex frame header is incomplete");
-  }
-  if (!std::equal(frame_magic.begin(), frame_magic.end(), bytes.begin())) {
-    return fail<MultiplexFrame>(ErrorCode::protocol,
-                                "invalid multiplex frame magic");
-  }
-  if (get_le<std::uint16_t>(bytes, 4) != multiplex_frame_version) {
-    return fail<MultiplexFrame>(ErrorCode::protocol,
-                                "unsupported multiplex frame version");
-  }
-  if (get_le<std::uint16_t>(bytes, 6) != 0) {
-    return fail<MultiplexFrame>(ErrorCode::protocol,
-                                "unsupported multiplex frame flags");
-  }
-  if (get_le<std::uint32_t>(bytes, 8) != header_size) {
-    return fail<MultiplexFrame>(ErrorCode::protocol,
-                                "invalid multiplex frame header size");
-  }
-
-  const auto total_size = get_le<std::uint64_t>(bytes, 12);
-  const auto payload_size = get_le<std::uint64_t>(bytes, 124);
-  if (total_size < header_size || payload_size != total_size - header_size) {
-    return fail<MultiplexFrame>(ErrorCode::protocol,
-                                "inconsistent multiplex frame lengths");
-  }
-  if (payload_size > limits.maximum_payload_bytes ||
-      total_size > limits.maximum_buffered_bytes) {
-    return fail<MultiplexFrame>(ErrorCode::resource_exhausted,
-                                "multiplex frame exceeds configured limits");
-  }
-  if (total_size != bytes.size()) {
+  auto validated_size = validate_wire_header(bytes, limits);
+  if (!validated_size) return validated_size.error();
+  if (*validated_size != bytes.size()) {
     return fail<MultiplexFrame>(ErrorCode::protocol,
                                 "multiplex frame size does not match input");
-  }
-
-  const auto start_ns = get_le<std::int64_t>(bytes, 60);
-  const auto end_ns = get_le<std::int64_t>(bytes, 68);
-  const auto timebase_numerator = get_le<std::int64_t>(bytes, 108);
-  const auto timebase_denominator = get_le<std::int64_t>(bytes, 116);
-  if (end_ns < start_ns) {
-    return fail<MultiplexFrame>(ErrorCode::protocol,
-                                "multiplex frame interval is inverted");
-  }
-  if (timebase_numerator <= 0 || timebase_denominator <= 0) {
-    return fail<MultiplexFrame>(ErrorCode::protocol,
-                                "multiplex frame timebase is invalid");
   }
 
   const auto payload = bytes.subspan(header_size);
@@ -178,15 +189,15 @@ Result<MultiplexFrame> decode_complete_frame(
   frame.sequence = get_le<std::uint64_t>(bytes, 36);
   frame.epoch.connection = get_le<std::uint64_t>(bytes, 44);
   frame.epoch.format = get_le<std::uint64_t>(bytes, 52);
-  frame.start_ns = start_ns;
-  frame.end_ns = end_ns;
+  frame.start_ns = get_le<std::int64_t>(bytes, 60);
+  frame.end_ns = get_le<std::int64_t>(bytes, 68);
   frame.clock.monotonic_ns = get_le<std::int64_t>(bytes, 76);
   frame.clock.observed_utc_ns = get_le<std::int64_t>(bytes, 84);
   frame.clock.observed_utc_uncertainty_ns =
       get_le<std::uint64_t>(bytes, 92);
   frame.clock.source_timestamp = get_le<std::int64_t>(bytes, 100);
-  frame.clock.source_timebase_numerator = timebase_numerator;
-  frame.clock.source_timebase_denominator = timebase_denominator;
+  frame.clock.source_timebase_numerator = get_le<std::int64_t>(bytes, 108);
+  frame.clock.source_timebase_denominator = get_le<std::int64_t>(bytes, 116);
   try {
     frame.payload.assign(payload.begin(), payload.end());
   } catch (const std::bad_alloc&) {
@@ -324,20 +335,13 @@ Result<std::vector<MultiplexFrame>> MultiplexDecoder::push(
 
       const auto view =
           std::span<const std::byte>{impl_->buffer}.subspan(consumed);
-      const auto total_size = get_le<std::uint64_t>(view, 12);
-      if (total_size > impl_->limits.maximum_buffered_bytes) {
+      auto validated_size = validate_wire_header(view.first(header_size),
+                                                 impl_->limits);
+      if (!validated_size) {
         impl_->failed = true;
-        return fail<std::vector<MultiplexFrame>>(
-            ErrorCode::resource_exhausted,
-            "multiplex frame exceeds decoder buffer limit");
+        return validated_size.error();
       }
-      if (total_size > std::numeric_limits<std::size_t>::max()) {
-        impl_->failed = true;
-        return fail<std::vector<MultiplexFrame>>(
-            ErrorCode::resource_exhausted,
-            "multiplex frame is not addressable");
-      }
-      const auto frame_size = static_cast<std::size_t>(total_size);
+      const auto frame_size = static_cast<std::size_t>(*validated_size);
       if (remaining < frame_size) break;
 
       auto decoded = decode_complete_frame(view.first(frame_size),

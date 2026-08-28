@@ -1,6 +1,7 @@
 #include "test.hpp"
 
 #include <codec/archive.hpp>
+#include <codec/archive_follow.hpp>
 
 #include <cstddef>
 #include <cstdint>

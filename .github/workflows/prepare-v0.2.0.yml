@@ -38,64 +38,8 @@ jobs:
           path.write_text(text)
           PY
 
-          cat > .github/workflows/release.yml <<'YAML'
-          name: Release
-
-          on:
-            push:
-              branches:
-                - 'release/v*'
-
-          permissions:
-            contents: write
-
-          jobs:
-            publish:
-              runs-on: ubuntu-latest
-              steps:
-                - uses: actions/checkout@v4
-                  with:
-                    fetch-depth: 0
-                - name: Validate release metadata
-                  shell: bash
-                  run: |
-                    set -euo pipefail
-                    version="${GITHUB_REF_NAME#release/v}"
-                    test "$version" != "$GITHUB_REF_NAME"
-                    grep -Fq "project(CODEC VERSION $version LANGUAGES C CXX)" CMakeLists.txt
-                    grep -Fq "  version: $version" README.md
-                    grep -Fq "## $version —" CHANGELOG.md
-                    if git ls-remote --exit-code --tags origin "refs/tags/v$version" >/dev/null 2>&1; then
-                      echo "tag v$version already exists" >&2
-                      exit 1
-                    fi
-                    python3 - "$version" <<'PY'
-                    import re
-                    import sys
-                    from pathlib import Path
-                    version = sys.argv[1]
-                    text = Path('CHANGELOG.md').read_text()
-                    match = re.search(rf'^## {re.escape(version)} — .*?\n\n(.*?)(?=^## )', text, re.M | re.S)
-                    if not match:
-                        raise SystemExit(f'cannot extract changelog notes for {version}')
-                    Path('release-notes.md').write_text(match.group(1).rstrip() + '\n')
-                    PY
-                - name: Publish GitHub release
-                  env:
-                    GH_TOKEN: ${{ github.token }}
-                  run: |
-                    set -euo pipefail
-                    version="${GITHUB_REF_NAME#release/v}"
-                    gh release create "v$version" \
-                      --target "$GITHUB_SHA" \
-                      --title "CODEC v$version" \
-                      --notes-file release-notes.md
-          YAML
-
-          rm .github/workflows/prepare-v0.2.0.yml
-
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add CMakeLists.txt README.md CHANGELOG.md .github/workflows/release.yml .github/workflows/prepare-v0.2.0.yml
-          git commit -m 'Release: prepare v0.2.0'
+          git add CMakeLists.txt README.md CHANGELOG.md
+          git commit -m 'Release: prepare v0.2.0 metadata'
           git push origin HEAD:automation/release-v0.2.0

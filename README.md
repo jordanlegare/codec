@@ -218,3 +218,5 @@ Before changing CODEC, use [`AI_WORKSHEET.md`](AI_WORKSHEET.md). Preserve the in
 - [`AGENTS.md`](AGENTS.md) — cold-start instructions for repository-aware agents.
 - [`AI_WORKSHEET.md`](AI_WORKSHEET.md) — canonical AI work loop and merge gate.
 - [`docs/superpowers/specs/2026-08-18-generalized-coda-direction-design.md`](docs/superpowers/specs/2026-08-18-generalized-coda-direction-design.md) — full stream-first architecture and rationale.
+- [`CHANGELOG.md`](CHANGELOG.md) — released changes.
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — contribution basics.

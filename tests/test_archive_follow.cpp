@@ -97,6 +97,66 @@ TEST(archive_follow_cursor_skips_already_inspected_interleaved_records) {
   std::filesystem::remove(path);
 }
 
+TEST(archive_follow_paginates_record_and_byte_bounds_without_skipping) {
+  const auto path = follow_path("paging.coda");
+  std::filesystem::remove(path);
+  const auto a = follow_stream(7);
+  const auto b = follow_stream(80);
+  auto writer = std::move(*codec::CodaWriter::create(path));
+  EXPECT_TRUE(writer.append(codec::RecordType::source_bytes, b, 0, 0,
+                            follow_bytes("ignored")));
+  EXPECT_TRUE(writer.append(codec::RecordType::source_bytes, a, 1, 1,
+                            follow_bytes("one")));
+  EXPECT_TRUE(writer.append(codec::RecordType::source_bytes, b, 2, 2,
+                            follow_bytes("ignored2")));
+  EXPECT_TRUE(writer.append(codec::RecordType::source_bytes, a, 3, 3,
+                            follow_bytes("two")));
+  EXPECT_TRUE(writer.append(codec::RecordType::source_bytes, a, 4, 4,
+                            follow_bytes("three")));
+
+  auto archive = codec::CodaArchive::open(path);
+  EXPECT_TRUE(archive);
+
+  auto first = codec::extract_stream_source_exact_prefix(*archive, a, {}, 1, 64);
+  EXPECT_TRUE(first);
+  EXPECT_EQ(first->records.size(), std::size_t{1});
+  EXPECT_EQ(first->records[0].payload, follow_bytes("one"));
+  EXPECT_EQ(first->cursor.next_archive_sequence, std::uint64_t{2});
+
+  auto second = codec::extract_stream_source_exact_prefix(
+      *archive, a, first->cursor, 8, 3);
+  EXPECT_TRUE(second);
+  EXPECT_EQ(second->records.size(), std::size_t{1});
+  EXPECT_EQ(second->records[0].payload, follow_bytes("two"));
+  EXPECT_EQ(second->cursor.next_archive_sequence, std::uint64_t{4});
+
+  auto third = codec::extract_stream_source_exact_prefix(
+      *archive, a, second->cursor, 8, 64);
+  EXPECT_TRUE(third);
+  EXPECT_EQ(third->records.size(), std::size_t{1});
+  EXPECT_EQ(third->records[0].payload, follow_bytes("three"));
+  EXPECT_EQ(third->cursor.next_archive_sequence, std::uint64_t{5});
+
+  std::filesystem::remove(path);
+}
+
+TEST(archive_follow_rejects_single_record_larger_than_byte_bound) {
+  const auto path = follow_path("oversized-record.coda");
+  std::filesystem::remove(path);
+  const auto a = follow_stream(8);
+  auto writer = std::move(*codec::CodaWriter::create(path));
+  EXPECT_TRUE(writer.append(codec::RecordType::source_bytes, a, 1, 1,
+                            follow_bytes("oversized")));
+  auto archive = codec::CodaArchive::open(path);
+  EXPECT_TRUE(archive);
+
+  auto result = codec::extract_stream_source_exact_prefix(*archive, a, {}, 8, 3);
+  EXPECT_FALSE(result);
+  EXPECT_EQ(result.error().code, codec::ErrorCode::resource_exhausted);
+
+  std::filesystem::remove(path);
+}
+
 TEST(archive_follow_reports_finalization_after_last_selected_batch) {
   const auto path = follow_path("finalized.coda");
   std::filesystem::remove(path);

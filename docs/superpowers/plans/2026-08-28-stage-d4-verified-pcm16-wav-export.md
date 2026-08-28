@@ -323,7 +323,7 @@ auto result = invoke_exporter(
 if (!result) return result.error();
 ```
 
-D.3 already proved `query.maximum_encoded_bytes` non-zero; `invoke_exporter()` independently revalidates state payload size/hash and returns one exact support link.
+D.3 already proved `query.maximum_encoded_bytes` non-zero; `CodaArchive::read_payload()` verifies the exact state record/trailer hash, while `invoke_exporter()` independently revalidates the state payload size/resource bounds and returns one exact support link.
 
 - [ ] **Step 6: Return the exporter bytes with full D.3 evidence.**
 

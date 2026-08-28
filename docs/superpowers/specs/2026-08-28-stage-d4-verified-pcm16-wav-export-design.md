@@ -188,8 +188,10 @@ implementation file. Its contract is deliberately narrow:
 
 The high-level D.4 wrapper obtains the exact state payload from
 `VerifiedPcm16State::state_record`, constructs one exact `ExtractedRecord`, and
-calls `invoke_exporter()` with one-input limits. C.5 therefore validates record
-payload ownership/hash/size and returns the exact state support link.
+calls `invoke_exporter()` with one-input limits. `CodaArchive::read_payload()`
+verifies the exact record/trailer hash before returning those bytes;
+`invoke_exporter()` then validates the input payload size and resource limits
+and returns the exact state support link.
 
 The wrapper does not read the full S0 source payload merely to manufacture an
 additional exporter support link. Exact S0 lineage is already retained in the

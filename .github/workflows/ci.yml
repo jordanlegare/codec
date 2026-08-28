@@ -36,6 +36,11 @@ jobs:
         run: ctest --test-dir build --output-on-failure
       - name: Install package
         run: cmake --install build --prefix "$RUNNER_TEMP/codec-install"
+      - name: Test installed package consumer
+        run: |
+          cmake -S tests/package_consumer -B package-consumer -G Ninja -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/codec-install"
+          cmake --build package-consumer --parallel
+          ./package-consumer/codec_package_consumer
 
   sanitizers:
     runs-on: ubuntu-latest

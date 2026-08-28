@@ -136,22 +136,27 @@ Result<std::vector<std::byte>> encode_wav_pcm16(
   if (!encoded_size) return encoded_size.error();
 
   const auto data_bytes = samples.size() * sizeof(std::int16_t);
-  std::vector<std::byte> output(44 + data_bytes);
-  std::memcpy(output.data(), "RIFF", 4);
-  put32(output, 4, static_cast<std::uint32_t>(36 + data_bytes));
-  std::memcpy(output.data() + 8, "WAVEfmt ", 8);
-  put32(output, 16, 16);
-  put16(output, 20, 1);
-  put16(output, 22, channels);
-  put32(output, 24, sample_rate);
-  put32(output, 28, sample_rate * channels * 2U);
-  put16(output, 32, static_cast<std::uint16_t>(channels * 2U));
-  put16(output, 34, 16);
-  std::memcpy(output.data() + 36, "data", 4);
-  put32(output, 40, static_cast<std::uint32_t>(data_bytes));
-  for (std::size_t index = 0; index < samples.size(); ++index) {
-    put16(output, 44 + index * 2,
-          static_cast<std::uint16_t>(samples[index]));
+  std::array<std::byte, 44> header{};
+  std::memcpy(header.data(), "RIFF", 4);
+  put32(header, 4, static_cast<std::uint32_t>(36 + data_bytes));
+  std::memcpy(header.data() + 8, "WAVEfmt ", 8);
+  put32(header, 16, 16);
+  put16(header, 20, 1);
+  put16(header, 22, channels);
+  put32(header, 24, sample_rate);
+  put32(header, 28, sample_rate * channels * 2U);
+  put16(header, 32, static_cast<std::uint16_t>(channels * 2U));
+  put16(header, 34, 16);
+  std::memcpy(header.data() + 36, "data", 4);
+  put32(header, 40, static_cast<std::uint32_t>(data_bytes));
+
+  std::vector<std::byte> output;
+  output.reserve(*encoded_size);
+  output.insert(output.end(), header.begin(), header.end());
+  for (const auto sample : samples) {
+    const auto value = static_cast<std::uint16_t>(sample);
+    output.push_back(static_cast<std::byte>(value & 0xffU));
+    output.push_back(static_cast<std::byte>((value >> 8U) & 0xffU));
   }
   return output;
 }

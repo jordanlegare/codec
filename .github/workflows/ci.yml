@@ -18,7 +18,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build libssl-dev libcurl4-openssl-dev libflac-dev
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build curl ca-certificates libssl-dev libcurl4-openssl-dev libflac-dev
+      - name: Fetch pinned ONNX Runtime CPU
+        env:
+          ORT_VERSION: 1.29.0
+          ORT_SHA256: c3fddc4f139a045b0c4902c57410f0694f1c2fdf9b6939fbe38b1aeae7cd14ba
+        run: |
+          archive="$RUNNER_TEMP/onnxruntime-linux-x64-$ORT_VERSION.tgz"
+          root="$RUNNER_TEMP/onnxruntime-linux-x64-$ORT_VERSION"
+          curl --fail --location --retry 3 --output "$archive" \
+            "https://github.com/microsoft/onnxruntime/releases/download/v$ORT_VERSION/onnxruntime-linux-x64-$ORT_VERSION.tgz"
+          printf '%s  %s\n' "$ORT_SHA256" "$archive" | sha256sum --check --strict
+          tar --no-same-owner -xzf "$archive" -C "$RUNNER_TEMP"
+          echo "CODEC_ONNXRUNTIME_ROOT=$root" >> "$GITHUB_ENV"
       - name: Select compiler
         run: |
           if [ "${{ matrix.compiler }}" = clang ]; then
@@ -29,7 +41,7 @@ jobs:
             echo "CXX=g++" >> "$GITHUB_ENV"
           fi
       - name: Configure
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCODEC_WARNINGS_AS_ERRORS=ON
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCODEC_WARNINGS_AS_ERRORS=ON -DCODEC_ONNXRUNTIME_ROOT="$CODEC_ONNXRUNTIME_ROOT"
       - name: Build
         run: cmake --build build --parallel
       - name: Test
@@ -47,9 +59,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build libssl-dev libcurl4-openssl-dev libflac-dev
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build curl ca-certificates libssl-dev libcurl4-openssl-dev libflac-dev
+      - name: Fetch pinned ONNX Runtime CPU
+        env:
+          ORT_VERSION: 1.29.0
+          ORT_SHA256: c3fddc4f139a045b0c4902c57410f0694f1c2fdf9b6939fbe38b1aeae7cd14ba
+        run: |
+          archive="$RUNNER_TEMP/onnxruntime-linux-x64-$ORT_VERSION.tgz"
+          root="$RUNNER_TEMP/onnxruntime-linux-x64-$ORT_VERSION"
+          curl --fail --location --retry 3 --output "$archive" \
+            "https://github.com/microsoft/onnxruntime/releases/download/v$ORT_VERSION/onnxruntime-linux-x64-$ORT_VERSION.tgz"
+          printf '%s  %s\n' "$ORT_SHA256" "$archive" | sha256sum --check --strict
+          tar --no-same-owner -xzf "$archive" -C "$RUNNER_TEMP"
+          echo "CODEC_ONNXRUNTIME_ROOT=$root" >> "$GITHUB_ENV"
       - name: Configure
-        run: cmake -S . -B build-san -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCODEC_WARNINGS_AS_ERRORS=ON -DCODEC_ENABLE_SANITIZERS=ON
+        run: cmake -S . -B build-san -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCODEC_WARNINGS_AS_ERRORS=ON -DCODEC_ENABLE_SANITIZERS=ON -DCODEC_ONNXRUNTIME_ROOT="$CODEC_ONNXRUNTIME_ROOT"
       - name: Build
         run: cmake --build build-san --parallel
       - name: Test

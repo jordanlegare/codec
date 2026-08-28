@@ -420,6 +420,30 @@ TEST(audio_onnx_cpu_runtime_enforces_options_requests_and_resource_bounds) {
   EXPECT_FALSE(invalid);
   if (!invalid) EXPECT_EQ(invalid.error().code, codec::ErrorCode::invalid_argument);
 
+  options = runtime_options();
+  options.inter_op_threads = 65;
+  invalid = audio_profile::create_onnx_cpu_separation_backend(bundle, options);
+  EXPECT_FALSE(invalid);
+  if (!invalid) EXPECT_EQ(invalid.error().code, codec::ErrorCode::invalid_argument);
+
+  options = runtime_options();
+  options.limits.maximum_input_frames = 0;
+  invalid = audio_profile::create_onnx_cpu_separation_backend(bundle, options);
+  EXPECT_FALSE(invalid);
+  if (!invalid) EXPECT_EQ(invalid.error().code, codec::ErrorCode::invalid_argument);
+
+  options = runtime_options();
+  options.limits.maximum_output_samples = 0;
+  invalid = audio_profile::create_onnx_cpu_separation_backend(bundle, options);
+  EXPECT_FALSE(invalid);
+  if (!invalid) EXPECT_EQ(invalid.error().code, codec::ErrorCode::invalid_argument);
+
+  options = runtime_options();
+  options.runtime_library = std::string{"bad\0library", 11};
+  invalid = audio_profile::create_onnx_cpu_separation_backend(bundle, options);
+  EXPECT_FALSE(invalid);
+  if (!invalid) EXPECT_EQ(invalid.error().code, codec::ErrorCode::invalid_argument);
+
   auto backend = audio_profile::create_onnx_cpu_separation_backend(
       bundle, runtime_options());
   EXPECT_TRUE(backend);
@@ -439,6 +463,25 @@ TEST(audio_onnx_cpu_runtime_enforces_options_requests_and_resource_bounds) {
 
   request = separation_request(bundle);
   request.maximum_sources = 0;
+  result = (*backend)->separate(request);
+  EXPECT_FALSE(result);
+  if (!result) EXPECT_EQ(result.error().code, codec::ErrorCode::invalid_argument);
+
+  request = separation_request(bundle);
+  request.maximum_sources = 65;
+  result = (*backend)->separate(request);
+  EXPECT_FALSE(result);
+  if (!result) EXPECT_EQ(result.error().code, codec::ErrorCode::invalid_argument);
+
+  request = separation_request(bundle);
+  request.mixture.samples.clear();
+  result = (*backend)->separate(request);
+  EXPECT_FALSE(result);
+  if (!result) EXPECT_EQ(result.error().code, codec::ErrorCode::invalid_argument);
+
+  request = separation_request(bundle);
+  request.mixture.channels = 2;
+  request.mixture.samples.pop_back();
   result = (*backend)->separate(request);
   EXPECT_FALSE(result);
   if (!result) EXPECT_EQ(result.error().code, codec::ErrorCode::invalid_argument);

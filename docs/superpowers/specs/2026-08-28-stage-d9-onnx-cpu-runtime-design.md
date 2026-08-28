@@ -111,9 +111,10 @@ The accepted graph contract is exactly:
 - manifest-declared, distinct tensor names;
 - float32 input rank 3 `[batch, channel, sample]`;
 - float32 output rank 4 `[batch, source, channel, sample]`;
-- batch dimension fixed to 1 or dynamic;
-- channel and sample dimensions equal the manifest values or dynamic;
-- fixed source dimension between 1 and `maximum_sources`, or dynamic.
+- input batch dimension fixed to 1 or dynamic;
+- input channel and sample dimensions equal the manifest values or are dynamic;
+- output dimensions are fixed to batch 1, a source count between 1 and
+  `maximum_sources`, the manifest channel count, and `window_samples`.
 
 No extra graph input, initializer exposed as input, output, element type, rank,
 or incompatible fixed dimension is accepted.
@@ -145,9 +146,11 @@ widely and saturated to PCM16. The backend reports RMS sample-domain error of
 `mixture - (stems + residual)`; D.7 independently recomputes its own metrics.
 
 Preflight checked arithmetic enforces maximum input frames, maximum windows,
-and one aggregate output-sample budget covering all stems plus the residual.
-It also rejects any required `size_t` or ONNX tensor-element overflow before
-allocation.
+and one aggregate CODEC-owned output-sample budget covering all stems plus the
+residual. It also rejects any required `size_t` or declared input/output tensor
+element overflow before CODEC allocation. These limits do not sandbox the
+authorized ONNX graph or impose a hard quota on ONNX Runtime's internal
+intermediate allocations.
 
 ## Failure mapping
 
@@ -220,7 +223,8 @@ perceptual transparency, trained source taxonomy, signatures/trust, licensing
 validity, model download/update, GPU/provider selection, cancellation, live
 streaming, latency/throughput/scale, automatic CODA persistence, identity
 fusion/diarization, CLI or C ABI inference, a default neural capability, frozen
-CODA v1, or completion of Stage D.
+CODA v1, or completion of Stage D. It does not sandbox a caller-authorized
+model or hard-limit ONNX Runtime's internal graph allocations.
 
 The next dependency after D.9 is a separately bounded streaming/runtime
 orchestration gate; production model qualification remains independent.

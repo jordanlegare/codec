@@ -179,3 +179,11 @@ For audio, S1 may mean sample-exact canonical integer PCM. Resampling, enhanceme
 ## Contribution rule
 
 Before changing CODEC, use [`AI_WORKSHEET.md`](AI_WORKSHEET.md). Preserve the invariants above, add tests for new exactness/archive claims, keep current-status claims synchronized with code, and prefer generic stream primitives over profile-specific coupling.
+
+## References
+
+- [`AGENTS.md`](AGENTS.md) — cold-start instructions for repository-aware agents.
+- [`AI_WORKSHEET.md`](AI_WORKSHEET.md) — canonical AI work loop and merge gate.
+- [`docs/superpowers/specs/2026-08-18-generalized-coda-direction-design.md`](docs/superpowers/specs/2026-08-18-generalized-coda-direction-design.md) — full stream-first architecture and rationale.
+- [`CHANGELOG.md`](CHANGELOG.md) — released changes.
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — contribution basics.

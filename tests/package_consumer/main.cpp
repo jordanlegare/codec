@@ -1,4 +1,5 @@
 #include <codec/profiles/audio.hpp>
+#include <codec/transport.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -36,6 +37,22 @@ int main() {
       .channels = 2,
       .samples = {0, 0},
   };
+
+  codec::MultiplexFrame multiplex;
+  multiplex.stream = codec::derive_stream_id("package-consumer/mux");
+  multiplex.clock.source_timebase_numerator = 1;
+  multiplex.clock.source_timebase_denominator = 1;
+  multiplex.payload = {std::byte{0x42}};
+  auto encoded_multiplex = codec::encode_multiplex_frame(multiplex);
+  if (!encoded_multiplex) return 1;
+  codec::MultiplexDecoder decoder;
+  auto decoded_multiplex = decoder.push(*encoded_multiplex);
+  if (!decoded_multiplex || decoded_multiplex->size() != 1 ||
+      decoded_multiplex->front().stream != multiplex.stream ||
+      !decoder.finish()) {
+    return 1;
+  }
+
   return limits.maximum_output_bytes == 0 ||
                  offline.maximum_sources == 0 ||
                  offline_limits.maximum_output_bytes == 0 ||

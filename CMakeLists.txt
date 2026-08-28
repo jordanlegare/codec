@@ -40,6 +40,7 @@ add_library(codec_core
   src/core/stream_continuity.cpp
   src/core/stream_provenance.cpp
   src/inference/backend.cpp
+  src/transport/multiplex.cpp
   src/watermark/carrier.cpp
   src/watermark/statement.cpp
 )
@@ -148,6 +149,7 @@ if(CODEC_BUILD_TESTS)
     tests/test_exporter.cpp
     tests/test_stream.cpp
     tests/test_statement.cpp
+    tests/test_transport_multiplex.cpp
     tests/test_watermark.cpp
   )
   set_target_properties(codec_tests PROPERTIES

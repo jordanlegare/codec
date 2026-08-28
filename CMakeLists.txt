@@ -136,6 +136,7 @@ if(CODEC_BUILD_TESTS)
   add_executable(codec_tests
     tests/test_main.cpp
     tests/test_archive.cpp
+    tests/test_archive_follow.cpp
     tests/test_audio_model_bundle.cpp
     tests/test_audio_onnx_cpu_runtime.cpp
     tests/test_audio_profile.cpp

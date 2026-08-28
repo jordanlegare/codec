@@ -76,6 +76,7 @@ implemented_v0_1:
     - bounded finalized-archive verified PCM16 WAV export that returns deterministic in-memory audio/wav bytes for D.3-verified S1 with exact state/source/provenance evidence and performs no archive or filesystem write
     - bounded finalized-archive verified PCM16 FLAC export that emits native in-memory audio/flac only for D.3-verified S1, enables libFLAC verification, proves sample-exact decode round trips, retains exact state/source/provenance evidence, and keeps APS1 as the canonical S1 identity
     - bounded offline PCM16 separation orchestration over explicit intervals and D.3-verified S1 using a caller-supplied backend, returning D-class APS1 stems plus mandatory residual with exact S1 support, model/runtime/configuration identity, and independent reconstruction metrics without archive mutation or a bundled-neural-runtime claim
+    - bounded deterministic AMB1 Audio separation ModelBundle encoding and strict in-memory decoding with canonical manifest metadata, exact opaque ONNX-byte SHA-256 verification, whole-bundle identity, and no filesystem/archive persistence or model execution
     - PCM16 RIFF/WAVE exact read/write
     - Ed25519/COSE W0 signed statements
     - W1 reference sub-20-kHz carrier/detector
@@ -83,7 +84,8 @@ implemented_v0_1:
     - identity candidates and explicit non-authoritative stateless fusion
   inference:
     - backend boundary exists
-    - no bundled neural model/runtime; incompatible model returns model_incompatible
+    - bounded structural AMB1 separation-bundle loader exists
+    - no compatible neural runtime or production model is bundled; the default backend returns model_incompatible
 
 planned_not_implemented:
   - generalized Stream* CLI recording/processing/export and C ABI migration; profile API migration beyond the explicit Audio Stream Profile facade
@@ -193,6 +195,8 @@ For audio, `Pcm16State` is the implemented sample-exact S1 contract: non-zero sa
 `export_verified_pcm16_flac` is the additive native-FLAC output path for the same D.3-verified states. It uses libFLAC through a private Audio Profile encoder, keeps streamable-subset mode and encoder verification enabled, preserves the exact APS1 sample rate, channels, interleaving, frame/sample values, and retains the exact APS1 support link plus D.3 state/source/provenance evidence. Output is bounded in memory and returned as `audio/flac`; the API performs no archive, filesystem, or network write. Independent libFLAC decoder coverage proves sample-exact PCM round trips. The FLAC bitstream is an external representation rather than a new canonical S1: APS1 remains the S1 identity, and CODEC does not claim byte-for-byte stability across different compatible libFLAC versions. This path does not add FFmpeg/general media conversion, resampling, remixing, CLI or C ABI FLAC export, or neural inference.
 
 `separate_verified_pcm16_offline` is the additive bounded offline processing path over an explicit interval of D.3-verified PCM16 S1. It invokes one caller-supplied `SeparationBackend` per selected state through the generic processor validator, requires bounded and geometry-compatible stems plus a mandatory residual, and returns each APS1-encoded output explicitly as D with exact physical S1 support and the full verified S1-to-S0 lineage. Every run retains backend/provider identity, a backend-reported SHA-256 model identity, a deterministic request-configuration hash, typed role metadata, and independently computed maximum-absolute and RMS sample-domain reconstruction error alongside the backend metric. Results are caller-persistable but this function does not write or mutate an archive. The default backend remains explicitly `model_incompatible`; this orchestration does not bundle a neural model/runtime, make neural/GPU capabilities available, add streaming/latency/quality claims, or perform identity fusion.
+
+`encode_separation_model_bundle` and `decode_separation_model_bundle` implement the additive in-memory AMB1 structural and integrity boundary for Audio separation models. AMB1 deterministically binds bounded printable manifest identity, license and quality-domain metadata, exact sample/framing/source geometry, causal behavior, and distinct tensor names to opaque ONNX bytes by SHA-256; strict decode rejects unknown flags, noncanonical lengths, malformed metadata, truncation, trailing bytes, and model-hash mismatch before returning owned verified bytes plus whole-bundle identity. Version 1 fixes float32 input `[batch, channel, sample]`, float32 output `[batch, source, channel, sample]`, signed PCM16 divided by 32768.0, and source-waveform output semantics so a later runtime has one unambiguous compatibility target. The bundle hashes prove byte identity only: this API does not parse or execute ONNX, authenticate a signer, validate licensing or quality, load a provider, access a filesystem/network/archive, or make neural/GPU capabilities available.
 
 ## Security and scope
 

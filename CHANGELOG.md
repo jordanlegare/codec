@@ -4,6 +4,7 @@ All notable changes use semantic versioning.
 
 ## Unreleased
 
+- Add an explicit additive C++ Audio Stream Profile facade at `codec/profiles/audio.hpp` / `codec::profiles::audio`, forwarding the exact existing WAV/PCM, watermark, and separation types/functions while preserving root-level `codec::*` source/ABI compatibility and making no CODA, CLI, C ABI, or audio-behavior change.
 - Add a bounded caller-supplied C++ `StreamExporter` boundary that transforms exact extracted record batches into typed external bytes, validates input/output/payload-type limits, preserves provider errors, and returns exact ordered physical support links without archive/filesystem writes, a CODA format change, CLI export, or C ABI export.
 - Add generic CLI stream listing and exact S0 extraction by canonical stable `StreamId`, while preserving compatibility `list feeds` and `extract --feed` behavior without a CODA format, C ABI, or recording-format change.
 - Add typed, stable-identity C++ generic stream recording through the existing hardened URI capture path, preserving exact caller-supplied `StreamDescriptor` metadata and S0 bytes while retaining legacy `FeedSpec`, CLI, C ABI, descriptor layout, and ordering behavior.

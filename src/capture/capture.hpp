@@ -2,6 +2,7 @@
 
 #include <codec/result.hpp>
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -37,7 +38,8 @@ class PreparedCapture {
   PreparedCapture& operator=(PreparedCapture&& other) noexcept;
   ~PreparedCapture();
 
-  Result<CaptureReport> run(const ByteSink& sink);
+  Result<CaptureReport> run(const ByteSink& sink,
+                            const std::atomic_bool* cancelled = nullptr);
 
  private:
   PreparedCapture(std::string uri, CaptureOptions options, int descriptor,

@@ -19,6 +19,7 @@ pkg_check_modules(FLAC REQUIRED IMPORTED_TARGET flac)
 
 add_library(codec_core
   src/archive/archive.cpp
+  src/archive/follow.cpp
   src/audio/flac_decoder.cpp
   src/audio/flac_encoder.cpp
   src/audio/offline_pcm16_separation.cpp

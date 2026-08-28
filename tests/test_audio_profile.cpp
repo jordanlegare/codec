@@ -31,7 +31,7 @@ TEST(audio_profile_facade_uses_existing_audio_implementation) {
   EXPECT_EQ(audio.frames(), 2U);
   EXPECT_EQ(std::string(audio_profile::carrier_band_name(
                 audio_profile::CarrierBand::w1)),
-            std::string("w1"));
+            std::string("W1"));
 
   auto backend = audio_profile::default_separation_backend();
   EXPECT_TRUE(static_cast<bool>(backend));

@@ -63,6 +63,7 @@ implemented_v0_1:
     - AND-combined C++ physical record queries over exact stream/raw type and half-open archive-sequence/envelope-time ranges, plus boundary-preserving per-record exact payload extraction
     - pull-based C++ StreamAdapter S0 and bounded batch StreamProcessor S1/D contracts with interval, truth, process-metadata, and resource validation; registration, scheduling, and automatic persistence remain external
     - typed C++ generic stream recording with caller-owned stable StreamId and exact StreamDescriptor persistence through the existing hardened URI capture path; FeedSpec recording remains compatible
+    - generic CLI stream listing and exact S0 extraction by stable StreamId; legacy feed list/extract remains available
     - C++ API, C ABI, CLI
   audio_profile:
     - PCM16 RIFF/WAVE exact read/write
@@ -75,7 +76,7 @@ implemented_v0_1:
     - no bundled neural model/runtime; incompatible model returns model_incompatible
 
 planned_not_implemented:
-  - generalized Stream* CLI, C ABI, and profile API migration beyond generic C++ recording
+  - generalized Stream* CLI recording/processing, C ABI, and profile API migration beyond generic C++ recording plus CLI list/extract
   - persisted generic policy tags
   - generalized S1 canonical-state implementations beyond audio semantics
   - video, telemetry, sensor, document/event, network/system profiles
@@ -178,11 +179,3 @@ For audio, S1 may mean sample-exact canonical integer PCM. Resampling, enhanceme
 ## Contribution rule
 
 Before changing CODEC, use [`AI_WORKSHEET.md`](AI_WORKSHEET.md). Preserve the invariants above, add tests for new exactness/archive claims, keep current-status claims synchronized with code, and prefer generic stream primitives over profile-specific coupling.
-
-## References
-
-- [`AGENTS.md`](AGENTS.md) — cold-start instructions for repository-aware agents.
-- [`AI_WORKSHEET.md`](AI_WORKSHEET.md) — canonical AI work loop and merge gate.
-- [`docs/superpowers/specs/2026-08-18-generalized-coda-direction-design.md`](docs/superpowers/specs/2026-08-18-generalized-coda-direction-design.md) — full stream-first architecture and rationale.
-- [`CHANGELOG.md`](CHANGELOG.md) — released changes.
-- [`CONTRIBUTING.md`](CONTRIBUTING.md) — contribution basics.

@@ -1,3 +1,4 @@
+#include <codec/engine.hpp>
 #include <codec/profiles/audio.hpp>
 #include <codec/recovery.hpp>
 #include <codec/transport.hpp>
@@ -84,6 +85,12 @@ int main() {
       !recovery_report->missing_ranges.empty()) {
     return 1;
   }
+
+  codec::EngineConfig engine_config;
+  engine_config.maximum_concurrent_streams = 8;
+  engine_config.maximum_queued_chunks_per_stream = 2;
+  auto engine = codec::Engine::create(engine_config);
+  if (!engine) return 1;
 
   return limits.maximum_output_bytes == 0 ||
                  offline.maximum_sources == 0 ||

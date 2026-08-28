@@ -1,9 +1,14 @@
+#include <codec/archive.hpp>
+#include <codec/archive_follow.hpp>
 #include <codec/profiles/audio.hpp>
 #include <codec/recovery.hpp>
 #include <codec/transport.hpp>
 
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
+#include <utility>
+#include <vector>
 
 int main() {
   const codec::profiles::audio::Pcm16FlacExportLimits limits{};
@@ -84,6 +89,30 @@ int main() {
       !recovery_report->missing_ranges.empty()) {
     return 1;
   }
+
+  const auto follow_path =
+      std::filesystem::temp_directory_path() / "codec-package-consumer-follow.coda";
+  std::filesystem::remove(follow_path);
+  auto writer_result = codec::CodaWriter::create(follow_path);
+  if (!writer_result) return 1;
+  auto writer = std::move(*writer_result);
+  const auto follow_stream = codec::derive_stream_id("package-consumer/follow");
+  const std::vector<std::byte> follow_payload{std::byte{0x11}, std::byte{0x22}};
+  if (!writer.append(codec::RecordType::source_bytes, follow_stream, 1, 1,
+                     follow_payload)) {
+    return 1;
+  }
+  auto follow_archive = codec::CodaArchive::open(follow_path);
+  if (!follow_archive) return 1;
+  const codec::SourceExactCursor initial_cursor{};
+  auto follow_batch = codec::extract_stream_source_exact_prefix(
+      *follow_archive, follow_stream, initial_cursor, 1, 1024);
+  if (!follow_batch || follow_batch->records.size() != 1 ||
+      follow_batch->records.front().payload != follow_payload ||
+      follow_batch->cursor.next_archive_sequence != 1 || follow_batch->finalized) {
+    return 1;
+  }
+  std::filesystem::remove(follow_path);
 
   return limits.maximum_output_bytes == 0 ||
                  offline.maximum_sources == 0 ||

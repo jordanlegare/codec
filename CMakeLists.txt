@@ -12,6 +12,7 @@ option(CODEC_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSan
 
 find_package(OpenSSL 3.0 REQUIRED COMPONENTS Crypto)
 find_package(CURL REQUIRED)
+find_package(FLAC CONFIG REQUIRED)
 
 add_library(codec_core
   src/archive/archive.cpp
@@ -95,6 +96,7 @@ if(CODEC_BUILD_TESTS)
     tests/test_audio_profile.cpp
     tests/test_audio_state_reader.cpp
     tests/test_audio_export.cpp
+    tests/test_audio_flac_export.cpp
     tests/test_engine.cpp
     tests/test_processing.cpp
     tests/test_exporter.cpp
@@ -108,7 +110,7 @@ if(CODEC_BUILD_TESTS)
     CXX_EXTENSIONS NO
   )
   target_include_directories(codec_tests PRIVATE tests)
-  target_link_libraries(codec_tests PRIVATE codec::codec)
+  target_link_libraries(codec_tests PRIVATE codec::codec FLAC::FLAC)
   codec_enable_warnings(codec_tests)
   codec_enable_sanitizers(codec_tests)
   add_test(NAME codec-unit COMMAND codec_tests)

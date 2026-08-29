@@ -21,13 +21,17 @@ void append_u64(std::vector<std::byte>& out, std::uint64_t value) {
 
 }  // namespace
 
-ProvenanceRecordLink distributed_exact_link(const ExtractedRecord& input) {
+ProvenanceRecordLink distributed_exact_link(const RecordInfo& record) {
   return ProvenanceRecordLink{
-      .stream = input.record.stream,
-      .type = input.record.type_code(),
-      .sequence = input.record.sequence,
-      .hash = input.record.hash,
+      .stream = record.stream,
+      .type = record.type_code(),
+      .sequence = record.sequence,
+      .hash = record.hash,
   };
+}
+
+ProvenanceRecordLink distributed_exact_link(const ExtractedRecord& input) {
+  return distributed_exact_link(input.record);
 }
 
 Sha256 distributed_partition_identity(

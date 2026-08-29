@@ -6,51 +6,51 @@ Canonical work loop for ChatGPT, Codex, and other agentic contributors.
 
 > Read `README.md` first. Read deeper design docs only when the task touches their subject. Do not reread large historical plans unless they are directly relevant.
 
-## Active work record — Stage E.4
+## Active work record — Stage E.5
 
 ```yaml
-task: Add bounded deterministic single-erasure XOR repair symbols and exact CMX1 frame recovery over explicit E.2 recovery groups.
+task: Add bounded streaming repair orchestration that joins CMX1 frames, E.2 loss/recovery-group tracking, and E.4 XRF1 exact single-erasure recovery.
 base_ref: origin/main
-base_head_sha: bd8a15ec3e3306b0fbe415064b128fb2e313f6f4
-work_branch: automation/stage-e4-xor-recovery
+base_head_sha: bb982291131ec6a385fb6b1fc102d9aaaa33b87b
+work_branch: automation/stage-e5-streaming-repair
 current_version: 0.2.0
-active_roadmap_stage: E — transport/recovery profile; E.1 multiplexing, E.2 loss/group semantics, and E.3 concurrent recording/follow extraction are integrated; the next unmet gate is a concrete bounded repair-symbol/FEC implementation.
+active_roadmap_stage: E — generic CMX1 multiplexing, E.2 loss/group semantics, concurrent local recording/follow extraction, and validated XRF1 single-erasure recovery are integrated; the remaining explicit Stage E gate is bounded streaming repair orchestration with exact verification.
 continuity_evidence:
-  - git_head: bd8a15ec3e3306b0fbe415064b128fb2e313f6f4
-  - open_prs: stale draft E.3 PR 26 only; no E.4 work
-  - exact_head_ci: CI 194 / 33215219199 completed success on the exact base
-  - roadmap_issue: issue 10 records E.3 complete and release v0.2.0 at the exact base
+  - git_head: main at bb982291131ec6a385fb6b1fc102d9aaaa33b87b, the merged Stage E.4 commit
+  - open_prs: stale draft E.3 PR 26 only; no E.5 work exists
+  - exact_head_ci: E.4 PR head 1aaf6c7320f75c2d0c8ddf7d00d88f197b5dae16 has successful CI runs 196 and 197; the merge commit exposes no pull-request workflow run or combined status
+  - roadmap_issue: issue 10 is the single exact-title CODEC v1.0 roadmap execution log
 roadmap_issue_title: CODEC v1.0 roadmap execution log
 scope: recovery
 touched_truth_classes: []
 current_behavior_verified_from: [code, tests, cli, changelog]
-new_capability_claim: CODEC can generate a bounded versioned XOR repair symbol for one explicit CMX1 recovery group and exactly reconstruct and verify one missing encoded frame from all remaining group members.
+new_capability_claim: A caller can run a bounded in-memory repair session over explicit recovery groups, tolerate bounded frame reordering/duplicates/late arrivals, defer output until XRF1 commitment plus CMX1 integrity and exact membership verify, and reconstruct only one explicitly sealed erasure.
 change_class: generic_stream_abstraction
 ```
 
 ```text
-BEFORE: E.2 can seal exact missing source-sequence ranges but implements no repair symbol, parity generation, or reconstruction; E.1 CMX1 bytes are only framed, decoded, and integrity-checked.
-AFTER: A caller can create and decode one bounded XRF1 XOR symbol for an exact E.2 group and reconstruct one known missing CMX1 frame only after its encoded length, committed SHA-256, CMX1 integrity, and group membership all verify.
+BEFORE: E.1 decodes CMX1 frames, E.2 observes loss and explicit recovery groups, and E.4 verifies one XRF1 single-erasure reconstruction, but callers must coordinate those primitives themselves and no streaming session gates frame release on the combined evidence.
+AFTER: A bounded StreamingRepairSession accepts complete CMX1 and XRF1 wire objects for registered groups, tracks reorder/duplicate/late arrival state, emits only committed and verified members, and invokes E.4 recovery only after E.2 sealing proves exactly one missing source slot.
 ```
 
 ```yaml
 proof:
-  regression_test: tests/test_transport_xor_recovery.cpp plus all existing tests
-  exactness_test: recover one omitted variable-length CMX1 frame byte-for-byte and compare every decoded field and deterministic re-encoding
-  compatibility_test: E.1 CMX1 and CODA formats remain byte-identical; installed C++ package consumer exercises the additive header
-  failure_path_test: malformed/noncanonical/corrupt XRF1, invalid groups, duplicate/wrong members, zero or multiple erasures, hash mismatch, truncation/trailing bytes, and all caller bounds fail closed without partial recovery
-  security_test: SHA-256 is documented and tested as integrity-only, never authentication
-  benchmark: n/a — no performance or scale claim
+  regression_test: tests/test_transport_streaming_repair.cpp plus all existing tests
+  exactness_test: emitted observed/recovered encoded CMX1 bytes equal deterministic source encodings; recovered output matches the exact missing source member
+  compatibility_test: CMX1, XRF1, E.2 tracker, CODA, C ABI, CLI, and installed package behavior remain compatible; installed C++ package consumer exercises the additive session API
+  failure_path_test: corrupt/noncanonical CMX1 or XRF1, commitment conflict, wrong membership, conflicting duplicate, zero/multiple erasures, post-seal new members, and session byte/group limits fail closed without unverified emission
+  security_test: SHA-256 remains integrity-only; no authentication, authorization, network transport, or automatic CODA persistence is introduced
+  benchmark: n/a — no performance, latency, scale, or measured loss-tolerance claim
 ```
 
 Invariant decisions:
 
-- [x] S0/S1/D semantics remain unchanged; transport repair returns verified encoded data rather than creating a truth-class record.
-- [x] CMX1 and CODA bytes remain unchanged; XRF1 is an additive independent repair-symbol format.
-- [x] One symbol is scoped to one exact `StreamId` and connection/format epoch through `RecoveryGroupDescriptor`.
-- [x] Recovery is limited to exactly one known erasure and never claims multi-erasure or bit-error correction.
-- [x] All source counts, encoded-frame bytes, metadata tables, parity bytes, aggregate working bytes, and decode outputs are caller bounded.
-- [x] No network provider, retransmission, automatic archive persistence, authentication, scale claim, or Stage E completion is introduced.
+- [x] S0/S1/D semantics remain unchanged; streaming repair emits verified transport frames and does not classify or persist truth records.
+- [x] CMX1, XRF1, E.2, and CODA wire/storage formats remain unchanged; E.5 is additive orchestration.
+- [x] Reordering/duplicate tolerance is bounded by explicit group/source-slot and aggregate encoded-byte limits.
+- [x] A source member is emitted only after exact XRF1 length/SHA-256 commitment, complete CMX1 integrity, and exact stream/epoch/sequence membership verify.
+- [x] Recovery is attempted only for a sealed group with exactly one known missing source slot and still uses E.4's exact verification primitive.
+- [x] No sockets, retransmission/ARQ, automatic CODA persistence, authentication, multi-erasure correction, CLI/C ABI expansion, or scale claim is introduced.
 
 ## 0. Work record
 

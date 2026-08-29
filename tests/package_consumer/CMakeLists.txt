@@ -13,3 +13,10 @@ target_link_libraries(codec_package_remote_consumer PRIVATE codec::codec)
 add_custom_command(TARGET codec_package_remote_consumer POST_BUILD
   COMMAND $<TARGET_FILE:codec_package_remote_consumer>
   VERBATIM)
+
+add_executable(codec_package_remote_wire_consumer remote_wire.cpp)
+target_compile_features(codec_package_remote_wire_consumer PRIVATE cxx_std_20)
+target_link_libraries(codec_package_remote_wire_consumer PRIVATE codec::codec)
+add_custom_command(TARGET codec_package_remote_wire_consumer POST_BUILD
+  COMMAND $<TARGET_FILE:codec_package_remote_wire_consumer>
+  VERBATIM)

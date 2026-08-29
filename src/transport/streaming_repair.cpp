@@ -165,14 +165,6 @@ SessionGroup* find_group(std::vector<SessionGroup>& groups,
   return nullptr;
 }
 
-const SessionGroup* find_group(const std::vector<SessionGroup>& groups,
-                               const RecoveryGroupKey& key) noexcept {
-  for (const auto& group : groups) {
-    if (group.descriptor.key == key) return &group;
-  }
-  return nullptr;
-}
-
 SessionGroup* find_group_for_frame(std::vector<SessionGroup>& groups,
                                    const MultiplexFrame& frame) noexcept {
   for (auto& group : groups) {

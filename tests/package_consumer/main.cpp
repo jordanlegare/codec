@@ -3,6 +3,7 @@
 #include <codec/profiles/audio.hpp>
 #include <codec/recovery.hpp>
 #include <codec/transport.hpp>
+#include <codec/xor_recovery.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -87,6 +88,32 @@ int main() {
   if (!recovery_report ||
       recovery_report->state != codec::RecoveryGroupState::sealed_complete ||
       !recovery_report->missing_ranges.empty()) {
+    return 1;
+  }
+
+  auto xor_second = multiplex;
+  xor_second.sequence = multiplex.sequence + 1;
+  xor_second.payload = {std::byte{0x99}, std::byte{0x01}};
+  codec::RecoveryGroupDescriptor xor_descriptor;
+  xor_descriptor.key.stream = multiplex.stream;
+  xor_descriptor.key.epoch = multiplex.epoch;
+  xor_descriptor.key.group_sequence = 2;
+  xor_descriptor.first_sequence = multiplex.sequence;
+  xor_descriptor.source_count = 2;
+  const std::vector<codec::MultiplexFrame> xor_frames{multiplex, xor_second};
+  auto xor_symbol =
+      codec::create_xor_repair_symbol(xor_descriptor, xor_frames);
+  if (!xor_symbol) return 1;
+  auto xor_wire = codec::encode_xor_repair_symbol(*xor_symbol);
+  if (!xor_wire) return 1;
+  auto decoded_xor_symbol = codec::decode_xor_repair_symbol(*xor_wire);
+  if (!decoded_xor_symbol) return 1;
+  const std::vector<codec::MultiplexFrame> xor_observed{multiplex};
+  auto xor_recovered = codec::recover_xor_single_erasure(
+      *decoded_xor_symbol, xor_observed);
+  if (!xor_recovered ||
+      xor_recovered->frame.sequence != xor_second.sequence ||
+      xor_recovered->frame.payload != xor_second.payload) {
     return 1;
   }
 

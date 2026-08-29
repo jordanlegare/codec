@@ -42,6 +42,7 @@ add_library(codec_core
   src/core/stream_provenance.cpp
   src/distributed/identity.cpp
   src/distributed/partition.cpp
+  src/distributed/retrieval.cpp
   src/distributed/worker.cpp
   src/inference/backend.cpp
   src/transport/multiplex.cpp

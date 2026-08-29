@@ -42,6 +42,7 @@ add_library(codec_core
   src/core/stream_provenance.cpp
   src/distributed/identity.cpp
   src/distributed/partition.cpp
+  src/distributed/retrieval.cpp
   src/distributed/worker.cpp
   src/inference/backend.cpp
   src/transport/multiplex.cpp
@@ -155,6 +156,7 @@ if(CODEC_BUILD_TESTS)
     tests/test_engine.cpp
     tests/test_engine_concurrency.cpp
     tests/test_distributed_partition.cpp
+    tests/test_distributed_retrieval.cpp
     tests/test_distributed_worker.cpp
     tests/test_processing.cpp
     tests/test_exporter.cpp

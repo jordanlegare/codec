@@ -20,6 +20,28 @@
 
 namespace {
 
+class PackageObjectStore final : public codec::ObjectStoreBackend {
+ public:
+  std::string name() const override { return "package-object-store"; }
+
+  codec::Result<std::vector<std::byte>> read_range(
+      const codec::ObjectStoreObjectRef& object,
+      std::uint64_t offset,
+      std::uint64_t length) override {
+    const auto size = static_cast<std::uint64_t>(bytes_.size());
+    if (object.store != "package" || object.key != "records" ||
+        object.version != "v1" || offset > size || length > size - offset) {
+      return codec::fail<std::vector<std::byte>>(
+          codec::ErrorCode::network, "package object range unavailable");
+    }
+    const auto begin = bytes_.begin() + static_cast<std::ptrdiff_t>(offset);
+    const auto end = begin + static_cast<std::ptrdiff_t>(length);
+    return std::vector<std::byte>{begin, end};
+  }
+
+  std::vector<std::byte> bytes_;
+};
+
 class PackageDistributedProcessor final : public codec::StreamProcessor {
  public:
   std::string name() const override { return "package-distributed"; }
@@ -204,11 +226,45 @@ int main() {
     return 1;
   }
 
+  PackageObjectStore object_store;
+  object_store.bytes_ = {std::byte{0x10}, std::byte{0x20}, std::byte{0x21}};
+  const codec::ObjectStoreObjectRef object_ref{
+      .store = "package", .key = "records", .version = "v1"};
+  const std::vector<codec::DistributedRecordLocation> locations{
+      codec::DistributedRecordLocation{
+          .record = partition_input_a.record,
+          .object = object_ref,
+          .offset = 0,
+          .length = partition_input_a.record.payload_size,
+      },
+      codec::DistributedRecordLocation{
+          .record = partition_input_b.record,
+          .object = object_ref,
+          .offset = 1,
+          .length = partition_input_b.record.payload_size,
+      },
+  };
+  auto retrieved = codec::retrieve_partition_records(
+      object_store, partitions->front(), locations);
+  if (!retrieved ||
+      retrieved->partition_identity != partitions->front().identity ||
+      retrieved->stream != partitions->front().stream ||
+      retrieved->backend_name != "package-object-store" ||
+      retrieved->records.size() != 2 ||
+      retrieved->records[0].record.sequence != partition_input_a.record.sequence ||
+      retrieved->records[0].record.hash != partition_input_a.record.hash ||
+      retrieved->records[0].payload != partition_input_a.payload ||
+      retrieved->records[1].record.sequence != partition_input_b.record.sequence ||
+      retrieved->records[1].record.hash != partition_input_b.record.hash ||
+      retrieved->records[1].payload != partition_input_b.payload) {
+    return 1;
+  }
+
   PackageDistributedProcessor distributed_processor;
   codec::LocalProcessorWorker distributed_worker{
       distributed_processor, "package-local-worker"};
   auto execution = codec::execute_partition(
-      distributed_worker, partitions->front(), partition_inputs);
+      distributed_worker, partitions->front(), retrieved->records);
   if (!execution || execution->partition_identity != partitions->front().identity ||
       execution->worker_name != "package-local-worker" ||
       execution->processor_name != "package-distributed" ||

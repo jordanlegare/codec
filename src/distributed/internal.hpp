@@ -7,6 +7,7 @@
 
 namespace codec::detail {
 
+ProvenanceRecordLink distributed_exact_link(const RecordInfo& record);
 ProvenanceRecordLink distributed_exact_link(const ExtractedRecord& input);
 Sha256 distributed_partition_identity(
     StreamId stream,

@@ -6,53 +6,53 @@ Canonical work loop for ChatGPT, Codex, and other agentic contributors.
 
 > Read `README.md` first. Read deeper design docs only when the task touches their subject. Do not reread large historical plans unless they are directly relevant.
 
-## Active work record — Stage F.6
+## Active work record — Stage F.7
 
 ```yaml
-task: Add a bounded provider-neutral remote-worker transport boundary that implements the existing DistributedWorker interface without changing F.5 scheduling semantics.
+task: Add bounded deterministic request/reply envelope serialization for the existing F.6 remote-worker structures without adding a concrete network transport.
 base_ref: origin/main
-base_head_sha: f98575cb88ac2115b7960c4fb4d417e9b8a381d0
-work_branch: automation/stage-f6-remote-worker-transport
+base_head_sha: 5892437b150ab8e4e7b16ece95870c70130a553c
+work_branch: automation/stage-f7-remote-envelope-codec
 current_version: 0.2.0
-active_roadmap_stage: F — F.1 partitioning, F.2 one-partition execution, F.3 exact retrieval, F.4 location indexing, and F.5 bounded multi-partition scheduling are merged; a generic remote-worker transport seam is the next unmet dependency.
+active_roadmap_stage: F — F.1-F.6 are merged; deterministic bounded remote-worker serialization is the current milestone before any concrete HTTP/gRPC/socket provider.
 continuity_evidence:
-  - git_head: main at f98575cb88ac2115b7960c4fb4d417e9b8a381d0
-  - open_prs: stale unrelated draft PR 26 is preserved; F.6 uses its own branch/PR 39
-  - exact_head_ci: F.5 final head 1c1e01baf7c2d44255e75c9318319cb04c37c2b4 passed CI 265 before merge; F.6 RED head a264a10dec099e08d02ca4f0f9ceb31a37ae8aae failed only on the intentionally absent remote-worker API
-  - roadmap_issue: issue 10 records F.5 complete and identifies the bounded remote-worker transport seam as the smallest next Stage F dependency
+  - git_head: main at 5892437b150ab8e4e7b16ece95870c70130a553c before F.7; post-F.6 main push CI run 277 passed
+  - open_prs: no open PRs existed before F.7; F.7 uses branch automation/stage-f7-remote-envelope-codec and PR 40
+  - exact_head_ci: F.7 RED head e21c04ef39bdee573f918737248ff85fcb4d1bc1 failed only because the public wire header was intentionally absent; declaration-only head f9e1f87ea689480384727471166f2bf5a61ddb36 compiled and failed at the intentionally unresolved encoder symbol; implementation/package/strict proof heads are recorded in PR 40
+  - roadmap_issue: issue 10 records F.6 complete and identifies deterministic remote request/reply serialization as the smallest next Stage F dependency
 roadmap_issue_title: CODEC v1.0 roadmap execution log
 scope: distributed
 touched_truth_classes: []
 current_behavior_verified_from: [code, tests, changelog]
-new_capability_claim: A caller-supplied DistributedWorkerTransport can back RemoteDistributedWorker, dispatch one bounded exact materialized input batch once to configured worker/processor labels, return bounded outputs or one explicit error, and compose unchanged through F.2 and F.5.
+new_capability_claim: CODEC can deterministically encode and strictly decode bounded DRQ1 remote execution requests plus DRS1 success/error replies that preserve existing F.6 structured data exactly enough for a later provider to transport them without inventing a private serialization format.
 change_class: generic_stream_abstraction
 ```
 
 ```text
-BEFORE: F.5 accepts any DistributedWorker, but CODEC supplies only the in-process LocalProcessorWorker and no bounded generic remote transport adapter.
-AFTER: RemoteDistributedWorker validates bounded request/label metadata, delegates exactly once through a caller-supplied DistributedWorkerTransport, requires descriptive response identity to match, bounds returned outputs, preserves transport errors without retry, and returns outputs to F.2 for authoritative semantic validation; F.5 remains unchanged.
+BEFORE: F.6 exposes a structured provider-neutral DistributedWorkerTransport seam, but concrete providers would have to invent their own request/reply serialization.
+AFTER: <codec/distributed_wire.hpp> exposes deterministic bounded DRQ1/DRS1 codecs for F.6 request records, ProcessorOutput/ProvenanceProcess success replies, and explicit Error replies; the codec adds no network I/O and F.2 remains authoritative for execution/truth/provenance semantics.
 ```
 
 ```yaml
 proof:
-  regression_test: tests/test_distributed_remote_worker.cpp plus unchanged F.1-F.5 and all existing tests
-  exactness_test: F.2 still verifies CDP1 identity, exact ordered links, payload sizes and SHA-256 before invoking the remote worker; F.6 does not redefine exactness or truth semantics
-  compatibility_test: installed-package remote consumer implements DistributedWorkerTransport from installed <codec/distributed.hpp> and executes through RemoteDistributedWorker/F.2; CODA, F.1-F.5, Stage E, C ABI, and CLI remain compatible
-  failure_path_test: invalid limits/labels/input sizes fail before dispatch; transport errors propagate exactly once; response identity mismatch and output exhaustion fail closed; invalid ProcessorOutput semantics are rejected by F.2 after one dispatch
-  security_test: worker/processor/transport names remain descriptive routing evidence only; F.6 adds no endpoint policy, credential, authentication, authorization, attestation, discovery, retry/failover, lease, or exactly-once decision
+  regression_test: tests/test_distributed_wire.cpp and tests/test_distributed_wire_strict.cpp plus unchanged F.1-F.6 and all existing tests
+  exactness_test: request round trips preserve complete RecordInfo, ordered payload bytes, hashes, file offsets, and unknown 16-bit record type codes; F.2 still performs CDP1/input SHA-256 and ProcessorOutput semantic validation after decode
+  compatibility_test: installed-package remote-wire consumer uses only installed <codec/distributed_wire.hpp> and codec::codec to round-trip a request, success reply, and retryable Error under GCC and Clang
+  failure_path_test: zero/oversized limits, malformed lengths, magic/version/flags, truncation/trailing bytes, digest mismatch, reserved fields, unknown outcome/truth/error codes, invalid retryable byte, and process/input/output/error bounds fail closed; strict tests recompute a valid digest after deep-field mutation to prove parser canonicality independently of checksum failure
+  security_test: DRQ1/DRS1 SHA-256 is corruption evidence only; it is not authentication, authorization, active-tamper protection, confidentiality, replay protection, attestation, or proof of remote execution
   benchmark: n/a — no network availability, throughput, latency, concurrency, fault-tolerance, durability, or scale claim
 ```
 
 Invariant decisions:
 
-- [x] S0/S1/D, CODA, CDP1, provenance, Stage E, C ABI, and CLI semantics remain unchanged.
-- [x] F.2 remains authoritative for partition identity, ordered membership, stream, SHA-256, and ProcessorOutput semantic validation.
-- [x] F.5 public API and scheduler implementation remain unchanged; RemoteDistributedWorker is an ordinary DistributedWorker.
-- [x] Adapter-owned limits, label shape, input count/bytes, and input payload-size metadata are validated before transport dispatch.
-- [x] One successful preflight causes exactly one caller-supplied transport dispatch; retryable provider errors are preserved but never retried by F.6.
-- [x] Successful responses must echo configured worker/processor labels and remain inside caller output count/byte bounds before returning to F.2.
-- [x] Matching labels are not authentication, authorization, attestation, or proof that a specific machine executed the work.
-- [x] F.6 defines no CODEC RPC wire format or concrete socket/HTTP/gRPC transport, discovery/health, concurrency, retry/failover, leases/heartbeats/cancellation/exactly-once semantics, persistence, deployment, or scale claim.
+- [x] S0/S1/D, CODA, CDP1, provenance persistence, Stage E, C ABI, and CLI semantics remain unchanged.
+- [x] F.7 is isolated in <codec/distributed_wire.hpp> and src/distributed/wire.cpp; F.6 worker, remote-worker, and scheduler behavior is unchanged.
+- [x] DRQ1 preserves full existing ExtractedRecord/RecordInfo metadata and payload order, including unknown 16-bit type codes, without claiming partition exactness on its own.
+- [x] DRS1 preserves structurally defined TruthClass values, ProcessorOutput payloads, full ProvenanceProcess metadata/optional hashes/details, and one explicit Error alternative.
+- [x] Stable explicit wire numbers map every current non-ok ErrorCode; ErrorCode::ok is never encoded as an error result.
+- [x] Decode validates fixed headers, declared lengths, reserved fields, enum domains, aggregate/resource limits, exact body consumption, and SHA-256 before accepting an envelope.
+- [x] F.2 remains authoritative for CDP1 identity, stream/member SHA-256, S1/D-only processor outputs, interval/type rules, and provenance/process semantic validity.
+- [x] F.7 adds no socket/HTTP/TLS/QUIC/gRPC provider, endpoint/DNS/SSRF policy, credential/authentication/authorization/attestation, signing/encryption/replay protection, discovery/health, retry/failover, leases/heartbeats/cancellation/idempotency/exactly-once, concurrency/server loop, persistence, deployment, or scale claim.
 
 ## 0. Work record
 

@@ -753,7 +753,7 @@ The CLI uses the default `WatermarkPolicy`; these policy values are not command-
 | Nyquist guard | 2 kHz |
 | Detector minimum confidence threshold | 0.30 |
 
-W2 therefore requires a sufficiently high sample-rate/Nyquist-qualified path; it is not intended for ordinary 44.1/48 kHz audio.
+A watermark message frame contains 40 bits, so at the default 20 ms bit duration one complete watermark frame spans 0.8 seconds. W2 requires a sufficiently high sample-rate/Nyquist-qualified path; it is not intended for ordinary 44.1/48 kHz audio.
 
 ### Issue output metrics
 
@@ -761,7 +761,7 @@ W2 therefore requires a sufficiently high sample-rate/Nyquist-qualified path; it
 {
   "band":"W1",
   "code":18993,
-  "frames_embedded":144000,
+  "frames_embedded":3,
   "derived_audio":true,
   "original_modified":false
 }
@@ -771,7 +771,7 @@ W2 therefore requires a sufficiently high sample-rate/Nyquist-qualified path; it
 |---|---|
 | `band` | Reference carrier band selected by the command. |
 | `code` | Embedded 16-bit acoustic code as an integer. |
-| `frames_embedded` | Number of audio frames covered by the embed operation. |
+| `frames_embedded` | Number of complete watermark message frames embedded. With the default policy this is the count of complete 0.8-second watermark frames that fit in the input; it is not the number of PCM audio frames. |
 | `derived_audio` | Always `true` for this operation: the output is a derivative. |
 | `original_modified` | `false`: the command writes a separate output path rather than rewriting the input WAV. |
 
@@ -829,8 +829,8 @@ One JSON object is emitted per observation. A statement-bound example can look l
 | `band` | Detected W1/W2 carrier band. |
 | `code` | Detected 16-bit acoustic code. |
 | `confidence` | Reference detector confidence statistic. It is **not** a calibrated probability of identity or authenticity. |
-| `start_frame` | First audio-frame index for the observation. |
-| `end_frame` | End audio-frame index for the observation. |
+| `start_frame` | First PCM audio-frame index for the observation. |
+| `end_frame` | Exclusive end PCM audio-frame index for the observation. |
 | `confirmation_hops` | Count of observations with the same band and code in the current scan. |
 | `detection_statistic` | `goertzel_bin_dominance` in the reference detector. |
 | `waveform_spike` | Currently reported as `false`; this path does not promote a waveform spike as identity evidence. |
@@ -955,7 +955,7 @@ Examples:
 - `verified_payload_bytes` measures payload volume covered by successful archive verification.
 - `valid_prefix_bytes` measures the verified committed file prefix.
 - `recovered_records` and `discarded_tail_bytes` describe archive repair results.
-- `frames_embedded` describes how many audio frames were processed by watermark embedding.
+- `frames_embedded` counts complete watermark message frames embedded, not PCM audio frames.
 - watermark `confidence` is a detector statistic, not a probability that an identity claim is true.
 
 v0.3.0 does **not** publish or claim measured:

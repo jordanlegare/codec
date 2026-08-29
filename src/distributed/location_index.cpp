@@ -8,6 +8,7 @@
 #include <limits>
 #include <new>
 #include <span>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -36,14 +37,25 @@ bool same_record_info(const RecordInfo& lhs, const RecordInfo& rhs) {
          lhs.file_offset == rhs.file_offset && lhs.hash == rhs.hash;
 }
 
+bool bytewise_less(std::string_view lhs, std::string_view rhs) {
+  return std::lexicographical_compare(
+      lhs.begin(), lhs.end(), rhs.begin(), rhs.end(),
+      [](char left, char right) {
+        return static_cast<unsigned char>(left) <
+               static_cast<unsigned char>(right);
+      });
+}
+
 bool less_placement(const DistributedRecordLocation& lhs,
                     const DistributedRecordLocation& rhs) {
   if (lhs.object.store != rhs.object.store) {
-    return lhs.object.store < rhs.object.store;
+    return bytewise_less(lhs.object.store, rhs.object.store);
   }
-  if (lhs.object.key != rhs.object.key) return lhs.object.key < rhs.object.key;
+  if (lhs.object.key != rhs.object.key) {
+    return bytewise_less(lhs.object.key, rhs.object.key);
+  }
   if (lhs.object.version != rhs.object.version) {
-    return lhs.object.version < rhs.object.version;
+    return bytewise_less(lhs.object.version, rhs.object.version);
   }
   if (lhs.offset != rhs.offset) return lhs.offset < rhs.offset;
   return lhs.length < rhs.length;
@@ -110,9 +122,8 @@ Result<void> validate_location_shape(
 bool add_metadata_bytes(std::uint64_t& total,
                         std::size_t amount,
                         std::uint64_t maximum) {
-  const auto value = static_cast<std::uint64_t>(amount);
-  if (value > maximum - total) return false;
-  total += value;
+  if (total > maximum || amount > maximum - total) return false;
+  total += static_cast<std::uint64_t>(amount);
   return true;
 }
 

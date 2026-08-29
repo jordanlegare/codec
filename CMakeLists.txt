@@ -214,7 +214,7 @@ if(CODEC_BUILD_TESTS)
 
   add_test(NAME codec-cli-integration
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/cli_integration.sh
-                 $<TARGET_FILE:codec_cli>)
+                 $<TARGET_FILE:codec_cli> ${PROJECT_VERSION})
 
   add_test(NAME codec-ai-contract
     COMMAND ${CMAKE_COMMAND}

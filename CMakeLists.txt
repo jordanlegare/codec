@@ -103,14 +103,14 @@ endif()
 
 function(codec_enable_warnings target)
   if(MSVC)
-    target_compile_options(${target} PRIVATE /W4)
+    target_compile_options(target PRIVATE /W4)
     if(CODEC_WARNINGS_AS_ERRORS)
-      target_compile_options(${target} PRIVATE /WX)
+      target_compile_options(target PRIVATE /WX)
     endif()
   else()
-    target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(target PRIVATE -Wall -Wextra -Wpedantic)
     if(CODEC_WARNINGS_AS_ERRORS)
-      target_compile_options(${target} PRIVATE -Werror)
+      target_compile_options(target PRIVATE -Werror)
     endif()
   endif()
 endfunction()
@@ -155,6 +155,7 @@ if(CODEC_BUILD_TESTS)
     tests/test_engine.cpp
     tests/test_engine_concurrency.cpp
     tests/test_distributed_partition.cpp
+    tests/test_distributed_retrieval.cpp
     tests/test_distributed_worker.cpp
     tests/test_processing.cpp
     tests/test_exporter.cpp

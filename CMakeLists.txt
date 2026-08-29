@@ -41,6 +41,7 @@ add_library(codec_core
   src/core/stream_continuity.cpp
   src/core/stream_provenance.cpp
   src/distributed/identity.cpp
+  src/distributed/location_index.cpp
   src/distributed/partition.cpp
   src/distributed/retrieval.cpp
   src/distributed/worker.cpp

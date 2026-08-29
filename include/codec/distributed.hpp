@@ -76,4 +76,49 @@ Result<DistributedExecutionResult> execute_partition(
     std::span<const ExtractedRecord> inputs,
     DistributedExecutionLimits limits = {});
 
+struct ObjectStoreObjectRef {
+  std::string store;
+  std::string key;
+  std::string version;
+};
+
+struct DistributedRecordLocation {
+  RecordInfo record{};
+  ObjectStoreObjectRef object;
+  std::uint64_t offset{};
+  std::uint64_t length{};
+};
+
+struct DistributedRetrievalLimits {
+  std::size_t maximum_records{1024};
+  std::uint64_t maximum_bytes{64ULL * 1024ULL * 1024ULL};
+  std::size_t maximum_backend_name_bytes{256};
+  std::size_t maximum_store_bytes{512};
+  std::size_t maximum_key_bytes{4096};
+  std::size_t maximum_version_bytes{512};
+};
+
+class ObjectStoreBackend {
+ public:
+  virtual ~ObjectStoreBackend() = default;
+  virtual std::string name() const = 0;
+  virtual Result<std::vector<std::byte>> read_range(
+      const ObjectStoreObjectRef& object,
+      std::uint64_t offset,
+      std::uint64_t length) = 0;
+};
+
+struct DistributedRetrievalResult {
+  Sha256 partition_identity{};
+  StreamId stream{};
+  std::string backend_name;
+  std::vector<ExtractedRecord> records;
+};
+
+Result<DistributedRetrievalResult> retrieve_partition_records(
+    ObjectStoreBackend& backend,
+    const DistributedPartition& partition,
+    std::span<const DistributedRecordLocation> locations,
+    DistributedRetrievalLimits limits = {});
+
 }  // namespace codec

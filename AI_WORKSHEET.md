@@ -6,51 +6,51 @@ Canonical work loop for ChatGPT, Codex, and other agentic contributors.
 
 > Read `README.md` first. Read deeper design docs only when the task touches their subject. Do not reread large historical plans unless they are directly relevant.
 
-## Active work record — Stage F.1
+## Active work record — Stage F.2
 
 ```yaml
-task: Add bounded deterministic distributed work partitioning over exact extracted records without changing truth or archive semantics.
+task: Add bounded one-partition/one-worker execution over F.1 exact partitions while preserving generic processor truth/provenance semantics.
 base_ref: origin/main
-base_head_sha: 5301da72c65f519b0c16347f8684be113d15ab0b
-work_branch: automation/stage-f1-distributed-partitioning
+base_head_sha: 812f7d90ca994efb1dcbd9b03d5e25fe6f4da445
+work_branch: automation/stage-f2-distributed-worker-execution
 current_version: 0.2.0
-active_roadmap_stage: F — Stage E is complete at the bounded CMX1/E.2/XRF1 streaming-repair scope; the first unmet distributed-profile gate is worker-agnostic exact-work partitioning.
+active_roadmap_stage: F — F.1 exact-work partitioning is merged; bounded worker execution against exact partition membership is the next unmet dependency.
 continuity_evidence:
-  - git_head: main at 5301da72c65f519b0c16347f8684be113d15ab0b
-  - open_prs: F.1 PR 33 plus stale unrelated draft E.3 PR 26; draft 26 is preserved untouched
-  - exact_head_ci: Stage E.5 PR head 57f6bbd6e8b8fb9e2ac20ee23d78a8c9bbc55036 passed CI 209 before merge
-  - roadmap_issue: issue 10 records Stage E complete and F.1 next
+  - git_head: main at 812f7d90ca994efb1dcbd9b03d5e25fe6f4da445
+  - open_prs: preserve unrelated work; F.2 uses its own branch/PR
+  - exact_head_ci: F.1 final head 83d408f5b2e5be74482f586313feebe3c99cce79 passed CI 222 before merge
+  - roadmap_issue: issue 10 records F.1 complete and F.2 worker execution next
 roadmap_issue_title: CODEC v1.0 roadmap execution log
 scope: distributed
 touched_truth_classes: []
 current_behavior_verified_from: [code, tests, cli, changelog]
-new_capability_claim: A caller can deterministically divide an exact extracted-record batch into bounded one-stream logical work partitions with stable exact-record membership identities, without assigning workers or storage locations.
+new_capability_claim: A caller can verify one F.1 partition against exact in-memory record bytes, execute it through one bounded worker, and receive only existing generic-processor-validated S1/D outputs plus descriptive execution metadata.
 change_class: generic_stream_abstraction
 ```
 
 ```text
-BEFORE: CODEC has stable logical StreamId, exact extracted-record, provenance-link, processor/exporter, and Stage E transport/recovery contracts, but no generic primitive defines deterministic distributed work partitions independently of workers or storage.
-AFTER: A caller can partition an exact ExtractedRecord batch into caller-bounded one-stream logical work units that preserve ordered exact physical record links and receive deterministic SHA-256 membership identities without changing truth, provenance, or archive bytes.
+BEFORE: F.1 defines deterministic one-stream exact-record partitions, while callers have no worker boundary that verifies partition membership before invoking generic processing.
+AFTER: execute_partition validates one exact F.1 partition and its record bytes before one worker invocation, then returns only outputs accepted by invoke_processor; LocalProcessorWorker runs a caller-owned StreamProcessor synchronously.
 ```
 
 ```yaml
 proof:
-  regression_test: tests/test_distributed_partition.cpp plus all existing tests
-  exactness_test: every partition link equals its source RecordInfo stream/type/sequence/hash and per-stream relative input order is preserved
-  compatibility_test: CODA, S0/S1/D, provenance, Stage E, C ABI, CLI, and installed package behavior remain compatible; installed C++ package consumer exercises the additive distributed header
-  failure_path_test: zero limits, malformed exact input sizes, oversized individual records, aggregate input exhaustion, and partition-count exhaustion fail closed without partial results
-  security_test: partition SHA-256 is identity/integrity evidence only; no authentication, authorization, RPC, worker, or storage trust claim is introduced
-  benchmark: n/a — no throughput, latency, scale, or cost claim
+  regression_test: tests/test_distributed_worker.cpp plus all existing tests
+  exactness_test: partition stream/ordered links/payload bytes/CDP1 identity and each supplied payload SHA-256 must match before worker invocation
+  compatibility_test: F.1 CDP1 membership identity, CODA, S0/S1/D, provenance, Stage E, C ABI, CLI, and installed package behavior remain compatible
+  failure_path_test: malformed/tampered partition or exact inputs, zero/exceeded bounds, worker errors, and invalid worker outputs fail closed with no retry or partial result
+  security_test: worker/processor names and partition SHA-256 remain descriptive/integrity metadata only; no authentication, attestation, authorization, or remote trust claim
+  benchmark: n/a — no throughput, latency, scale, fault-tolerance, or cost claim
 ```
 
 Invariant decisions:
 
-- [x] S0/S1/D semantics remain unchanged; partitions reference exact physical records but do not create or reclassify truth records.
-- [x] Logical StreamId is never replaced by partition, worker, storage, archive, or deployment identity.
-- [x] Every partition contains exactly one StreamId and preserves ordered exact record links; records are never split.
-- [x] Partition identity is deterministic over versioned exact membership only and is not authentication or a global archive locator.
-- [x] All input, aggregate-byte, partition-count, records-per-partition, and bytes-per-partition resources are caller bounded.
-- [x] No worker scheduler, RPC/socket layer, retry/lease semantics, object store, distributed index, automatic CODA persistence, deployment integration, or scale claim is introduced.
+- [x] S0/S1/D semantics remain unchanged; F.2 executes existing generic processors and does not reclassify output.
+- [x] F.1 partition StreamId and exact ordered record membership remain independent of worker identity or deployment location.
+- [x] Partition identity and each exact payload hash verify before worker invocation.
+- [x] Worker outputs are accepted only through the existing invoke_processor validation contract.
+- [x] Worker/processor labels are descriptive only and do not authenticate or attest execution.
+- [x] No scheduling pool, RPC/socket layer, retry/lease/exactly-once semantics, object store, distributed index, automatic CODA persistence, deployment integration, or scale claim is introduced.
 
 ## 0. Work record
 

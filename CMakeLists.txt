@@ -138,6 +138,8 @@ set_target_properties(codec_cli PROPERTIES
   OUTPUT_NAME codec
 )
 target_include_directories(codec_cli PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_compile_definitions(codec_cli PRIVATE
+  CODEC_VERSION_STRING="${PROJECT_VERSION}")
 target_link_libraries(codec_cli PRIVATE codec::codec)
 codec_enable_warnings(codec_cli)
 codec_enable_sanitizers(codec_cli)

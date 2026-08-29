@@ -6,53 +6,53 @@ Canonical work loop for ChatGPT, Codex, and other agentic contributors.
 
 > Read `README.md` first. Read deeper design docs only when the task touches their subject. Do not reread large historical plans unless they are directly relevant.
 
-## Active work record — Stage F.5
+## Active work record — Stage F.6
 
 ```yaml
-task: Add bounded deterministic multi-partition scheduling that composes F.1 partitions through F.4 location resolution, F.3 exact retrieval, and F.2 worker execution with per-partition outcomes.
+task: Add a bounded provider-neutral remote-worker transport boundary that implements the existing DistributedWorker interface without changing F.5 scheduling semantics.
 base_ref: origin/main
-base_head_sha: 1e48a16b11378897b0311f4c198c443d1a1bb976
-work_branch: automation/stage-f5-bounded-orchestration
+base_head_sha: f98575cb88ac2115b7960c4fb4d417e9b8a381d0
+work_branch: automation/stage-f6-remote-worker-transport
 current_version: 0.2.0
-active_roadmap_stage: F — F.1 partitioning, F.2 one-partition execution, F.3 exact retrieval, and F.4 bounded location indexing are merged; bounded multi-partition scheduling/orchestration is the next unmet dependency.
+active_roadmap_stage: F — F.1 partitioning, F.2 one-partition execution, F.3 exact retrieval, F.4 location indexing, and F.5 bounded multi-partition scheduling are merged; a generic remote-worker transport seam is the next unmet dependency.
 continuity_evidence:
-  - git_head: main at 1e48a16b11378897b0311f4c198c443d1a1bb976
-  - open_prs: stale unrelated draft PR 26 is preserved; F.5 uses its own branch/PR 37
-  - exact_head_ci: F.4 merge evidence is recorded in roadmap issue 10; F.5 RED head 3aa5ccf612be995d3f57f0702c094b2f9400b144 failed only on the intentionally absent scheduler API
-  - roadmap_issue: issue 10 records F.4 complete and requires a fresh Stage F dependency selection
+  - git_head: main at f98575cb88ac2115b7960c4fb4d417e9b8a381d0
+  - open_prs: stale unrelated draft PR 26 is preserved; F.6 uses its own branch/PR 39
+  - exact_head_ci: F.5 final head 1c1e01baf7c2d44255e75c9318319cb04c37c2b4 passed CI 265 before merge; F.6 RED head a264a10dec099e08d02ca4f0f9ceb31a37ae8aae failed only on the intentionally absent remote-worker API
+  - roadmap_issue: issue 10 records F.5 complete and identifies the bounded remote-worker transport seam as the smallest next Stage F dependency
 roadmap_issue_title: CODEC v1.0 roadmap execution log
 scope: distributed
 touched_truth_classes: []
-current_behavior_verified_from: [code, tests, cli, changelog]
-new_capability_claim: A caller can schedule a bounded ordered batch of exact F.1 partitions across an ordered worker pool, deterministically select canonical F.4 placements, materialize through F.3, execute through F.2, and receive one explicit outcome per partition.
+current_behavior_verified_from: [code, tests, changelog]
+new_capability_claim: A caller-supplied DistributedWorkerTransport can back RemoteDistributedWorker, dispatch one bounded exact materialized input batch once to configured worker/processor labels, return bounded outputs or one explicit error, and compose unchanged through F.2 and F.5.
 change_class: generic_stream_abstraction
 ```
 
 ```text
-BEFORE: F.1-F.4 expose exact partitioning, one-partition worker execution, exact retrieval, and bounded canonical placement lookup, but callers must coordinate more than one partition themselves.
-AFTER: schedule_partitions preflights a bounded ordered batch, assigns workers by stable input-position round robin, selects the first canonical F.4 candidate for each exact member, composes F.3 retrieval into F.2 execution, and returns one ordered success/failure outcome per input partition.
+BEFORE: F.5 accepts any DistributedWorker, but CODEC supplies only the in-process LocalProcessorWorker and no bounded generic remote transport adapter.
+AFTER: RemoteDistributedWorker validates bounded request/label metadata, delegates exactly once through a caller-supplied DistributedWorkerTransport, requires descriptive response identity to match, bounds returned outputs, preserves transport errors without retry, and returns outputs to F.2 for authoritative semantic validation; F.5 remains unchanged.
 ```
 
 ```yaml
 proof:
-  regression_test: tests/test_distributed_scheduler.cpp plus unchanged F.1/F.2/F.3/F.4 and all existing tests
-  exactness_test: each F.1 CDP1 identity and stream membership is revalidated before side effects; F.4 canonical candidate order is preserved; F.3 still verifies exact length and SHA-256 before F.2 receives materialized records
-  compatibility_test: installed-package consumer exercises F.5 from installed <codec/distributed.hpp>; F.1-F.4 APIs, CODA, S0/S1/D, provenance, Stage E, C ABI, and CLI remain compatible
-  failure_path_test: invalid worker/batch/aggregate bounds and tampered/duplicate partitions fail before backend or worker side effects; missing locations, retrieval failures, and execution failures become ordered per-partition outcomes while later partitions continue
-  security_test: scheduling consumes caller-supplied workers, backend, and F.4 index only; it adds no credential, authorization, authentication, attestation, discovery, health, retry, failover, lease, or exactly-once decision
-  benchmark: n/a — synchronous deterministic orchestration adds no throughput, latency, concurrency, availability, durability, fault-tolerance, or scale claim
+  regression_test: tests/test_distributed_remote_worker.cpp plus unchanged F.1-F.5 and all existing tests
+  exactness_test: F.2 still verifies CDP1 identity, exact ordered links, payload sizes and SHA-256 before invoking the remote worker; F.6 does not redefine exactness or truth semantics
+  compatibility_test: installed-package remote consumer implements DistributedWorkerTransport from installed <codec/distributed.hpp> and executes through RemoteDistributedWorker/F.2; CODA, F.1-F.5, Stage E, C ABI, and CLI remain compatible
+  failure_path_test: invalid limits/labels/input sizes fail before dispatch; transport errors propagate exactly once; response identity mismatch and output exhaustion fail closed; invalid ProcessorOutput semantics are rejected by F.2 after one dispatch
+  security_test: worker/processor/transport names remain descriptive routing evidence only; F.6 adds no endpoint policy, credential, authentication, authorization, attestation, discovery, retry/failover, lease, or exactly-once decision
+  benchmark: n/a — no network availability, throughput, latency, concurrency, fault-tolerance, durability, or scale claim
 ```
 
 Invariant decisions:
 
-- [x] S0/S1/D semantics remain unchanged; F.5 coordinates existing exact/derived boundaries only.
-- [x] F.1 `DistributedPartition` and CDP1 bytes remain unchanged and are revalidated before scheduling side effects.
-- [x] The complete batch is structurally and aggregately preflighted before the first backend read or worker invocation.
-- [x] Worker assignment is deterministic from input position (`partition_index % workers.size()`) and is not perturbed by prior partition failures.
-- [x] F.5 selects only the first canonical F.4 candidate for each exact member; it invents no health, locality, cost, retry, or failover ranking.
-- [x] F.4/F.3/F.2 failures after preflight are captured as explicit per-partition outcomes and do not reorder or suppress later partitions.
-- [x] Retryable nested errors are preserved as evidence but F.5 performs no retry.
-- [x] F.5 is synchronous and sequential; it adds no threads, RPC/network execution, worker/backend discovery, persistent/global catalogs, leases, heartbeats, exactly-once semantics, deployment integration, or scale claim.
+- [x] S0/S1/D, CODA, CDP1, provenance, Stage E, C ABI, and CLI semantics remain unchanged.
+- [x] F.2 remains authoritative for partition identity, ordered membership, stream, SHA-256, and ProcessorOutput semantic validation.
+- [x] F.5 public API and scheduler implementation remain unchanged; RemoteDistributedWorker is an ordinary DistributedWorker.
+- [x] Adapter-owned limits, label shape, input count/bytes, and input payload-size metadata are validated before transport dispatch.
+- [x] One successful preflight causes exactly one caller-supplied transport dispatch; retryable provider errors are preserved but never retried by F.6.
+- [x] Successful responses must echo configured worker/processor labels and remain inside caller output count/byte bounds before returning to F.2.
+- [x] Matching labels are not authentication, authorization, attestation, or proof that a specific machine executed the work.
+- [x] F.6 defines no CODEC RPC wire format or concrete socket/HTTP/gRPC transport, discovery/health, concurrency, retry/failover, leases/heartbeats/cancellation/exactly-once semantics, persistence, deployment, or scale claim.
 
 ## 0. Work record
 

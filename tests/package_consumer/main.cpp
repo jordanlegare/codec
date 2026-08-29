@@ -2,6 +2,7 @@
 #include <codec/archive_follow.hpp>
 #include <codec/distributed.hpp>
 #include <codec/integrity.hpp>
+#include <codec/processing.hpp>
 #include <codec/profiles/audio.hpp>
 #include <codec/recovery.hpp>
 #include <codec/streaming_repair.hpp>
@@ -11,8 +12,43 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <optional>
+#include <span>
+#include <string>
 #include <utility>
 #include <vector>
+
+namespace {
+
+class PackageDistributedProcessor final : public codec::StreamProcessor {
+ public:
+  std::string name() const override { return "package-distributed"; }
+
+  codec::Result<std::vector<codec::ProcessorOutput>> process(
+      std::span<const codec::ExtractedRecord> inputs) override {
+    codec::ProvenanceProcess process{
+        .operation = "package-distributed",
+        .implementation_id = "package-consumer",
+        .implementation_version = "1",
+        .implementation_hash = std::nullopt,
+        .configuration_hash = std::nullopt,
+        .created_utc_ns = 1,
+        .details_type = {},
+        .details = {},
+    };
+    return std::vector<codec::ProcessorOutput>{codec::ProcessorOutput{
+        .stream = inputs.front().record.stream,
+        .type = 0x7a10,
+        .start_ns = 0,
+        .end_ns = 1,
+        .truth = codec::TruthClass::derived,
+        .payload = {std::byte{0x42}},
+        .process = std::move(process),
+    }};
+  }
+};
+
+}  // namespace
 
 int main() {
   const codec::profiles::audio::Pcm16FlacExportLimits limits{};
@@ -165,6 +201,19 @@ int main() {
       partitions->front().records.size() != 2 ||
       partitions->front().payload_bytes != 3 ||
       partitions->front().stream != partition_input_a.record.stream) {
+    return 1;
+  }
+
+  PackageDistributedProcessor distributed_processor;
+  codec::LocalProcessorWorker distributed_worker{
+      distributed_processor, "package-local-worker"};
+  auto execution = codec::execute_partition(
+      distributed_worker, partitions->front(), partition_inputs);
+  if (!execution || execution->partition_identity != partitions->front().identity ||
+      execution->worker_name != "package-local-worker" ||
+      execution->processor_name != "package-distributed" ||
+      execution->outputs.size() != 1 ||
+      execution->outputs.front().truth != codec::TruthClass::derived) {
     return 1;
   }
 

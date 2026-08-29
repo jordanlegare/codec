@@ -1,57 +1,15 @@
 #include <codec/distributed.hpp>
 
-#include <codec/integrity.hpp>
+#include "internal.hpp"
 
 #include <cstddef>
 #include <cstdint>
 #include <map>
 #include <new>
-#include <string_view>
 #include <vector>
 
 namespace codec {
 namespace {
-
-void append_u16(std::vector<std::byte>& out, std::uint16_t value) {
-  out.push_back(static_cast<std::byte>(value & 0xffU));
-  out.push_back(static_cast<std::byte>((value >> 8U) & 0xffU));
-}
-
-void append_u64(std::vector<std::byte>& out, std::uint64_t value) {
-  for (unsigned int shift = 0; shift < 64U; shift += 8U) {
-    out.push_back(static_cast<std::byte>((value >> shift) & 0xffU));
-  }
-}
-
-ProvenanceRecordLink exact_link(const ExtractedRecord& input) {
-  return ProvenanceRecordLink{
-      .stream = input.record.stream,
-      .type = input.record.type_code(),
-      .sequence = input.record.sequence,
-      .hash = input.record.hash,
-  };
-}
-
-Sha256 partition_identity(const DistributedPartition& partition) {
-  std::vector<std::byte> encoded;
-  constexpr std::string_view domain{"CDP1"};
-  for (const auto character : domain) {
-    encoded.push_back(static_cast<std::byte>(
-        static_cast<unsigned char>(character)));
-  }
-  for (const auto byte : partition.stream.bytes) {
-    encoded.push_back(static_cast<std::byte>(byte));
-  }
-  append_u64(encoded, static_cast<std::uint64_t>(partition.records.size()));
-  for (const auto& record : partition.records) {
-    append_u16(encoded, record.type);
-    append_u64(encoded, record.sequence);
-    for (const auto byte : record.hash) {
-      encoded.push_back(static_cast<std::byte>(byte));
-    }
-  }
-  return sha256(encoded);
-}
 
 Result<void> validate_limits(const DistributedPartitionLimits& limits) {
   if (limits.maximum_input_records == 0 ||
@@ -136,12 +94,13 @@ Result<std::vector<DistributedPartition>> partition_exact_records(
       }
 
       auto& target = partitions[open->second];
-      target.records.push_back(exact_link(input));
+      target.records.push_back(detail::distributed_exact_link(input));
       target.payload_bytes += input_bytes;
     }
 
     for (auto& partition : partitions) {
-      partition.identity = partition_identity(partition);
+      partition.identity = detail::distributed_partition_identity(
+          partition.stream, partition.records);
     }
     return partitions;
   } catch (const std::bad_alloc&) {

@@ -2,6 +2,7 @@
 #include <codec/archive_follow.hpp>
 #include <codec/profiles/audio.hpp>
 #include <codec/recovery.hpp>
+#include <codec/streaming_repair.hpp>
 #include <codec/transport.hpp>
 #include <codec/xor_recovery.hpp>
 
@@ -114,6 +115,29 @@ int main() {
   if (!xor_recovered ||
       xor_recovered->frame.sequence != xor_second.sequence ||
       xor_recovered->frame.payload != xor_second.payload) {
+    return 1;
+  }
+
+  codec::StreamingRepairSession repair_session;
+  if (!repair_session.begin_group(xor_descriptor)) return 1;
+  auto repair_symbol_batch = repair_session.push_repair_symbol(*xor_wire);
+  if (!repair_symbol_batch || !repair_symbol_batch->frames.empty()) return 1;
+  auto repair_observed_batch = repair_session.push_frame(*encoded_multiplex);
+  if (!repair_observed_batch || repair_observed_batch->frames.size() != 1 ||
+      repair_observed_batch->frames.front().kind !=
+          codec::StreamingRepairFrameKind::observed ||
+      repair_observed_batch->frames.front().encoded_frame != *encoded_multiplex) {
+    return 1;
+  }
+  auto repair_sealed_batch = repair_session.seal_group(xor_descriptor.key);
+  if (!repair_sealed_batch || !repair_sealed_batch->group_report.has_value() ||
+      repair_sealed_batch->group_report->state !=
+          codec::RecoveryGroupState::sealed_incomplete ||
+      repair_sealed_batch->frames.size() != 1 ||
+      repair_sealed_batch->frames.front().kind !=
+          codec::StreamingRepairFrameKind::recovered ||
+      repair_sealed_batch->frames.front().frame.sequence != xor_second.sequence ||
+      repair_sealed_batch->frames.front().frame.payload != xor_second.payload) {
     return 1;
   }
 

@@ -75,6 +75,7 @@ implemented_v0_1:
     - bounded deterministic distributed work partitioning over exact ExtractedRecord batches: every partition contains one StreamId, preserves ordered exact physical record links without splitting records, obeys caller record/byte/partition limits, and receives a stable SHA-256 identity over versioned exact membership without assigning a worker or storage location
     - bounded synchronous distributed worker execution for one exact partition: execute_partition verifies F.1 CDP1 identity, ordered physical links, stream membership, payload sizes and SHA-256s, aggregate bytes, and label/resource limits before exactly one worker invocation; LocalProcessorWorker delegates to one caller-owned StreamProcessor and outputs remain subject to invoke_processor validation
     - bounded provider-neutral object-store record retrieval over explicit placement descriptors: a caller-supplied backend receives opaque store/key/version plus exact byte ranges only after complete F.1 partition/location preflight; returned ranges must match requested lengths and physical-record SHA-256 before ordered ExtractedRecord materialization, preserving original RecordInfo and composing directly with F.2
+    - bounded deterministic in-memory distributed location indexing over exact F.3 placement descriptors: exact-link replicas require identical original RecordInfo, exact duplicate placements deduplicate, entries/candidates canonicalize independently of registration order, and F.1 partitions resolve to bounded ordered candidate sets with explicit incomplete results for missing indexed placement without selecting or reading a backend
     - C++ API, C ABI, CLI
   audio_profile:
     - explicit C++ profile facade at codec/profiles/audio.hpp in codec::profiles::audio, forwarding the exact existing WAV/PCM, watermark, and separation types/functions while root-level codec::* audio APIs remain compatible
@@ -105,7 +106,7 @@ planned_not_implemented:
   - video, telemetry, sensor, document/event, network/system profiles
   - production neural separation/diarization/identity models
   - transport retransmission/ARQ, authenticated transport/session semantics, multi-erasure correction/FEC, automatic CODA persistence of repair traffic/results, and measured loss-tolerance/throughput/latency/scale claims beyond the implemented bounded Stage E XOR single-erasure repair session
-  - multi-partition scheduling/worker pools, RPC/network execution, processor discovery/distribution, worker authentication/attestation, leases/retries/exactly-once semantics, concrete cloud/network object-store clients, object writes/uploads, backend registry, location discovery/distributed indexes/global archive catalog, multi-backend failover, automatic distributed persistence, operational benchmarks, and deployment integrations beyond the implemented F.1 partitioning, F.2 synchronous worker execution, and F.3 caller-supplied exact retrieval primitives
+  - multi-partition scheduling/worker pools, RPC/network execution, processor discovery/distribution, worker authentication/attestation, leases/retries/exactly-once semantics, concrete cloud/network object-store clients, object writes/uploads, backend registry, persistent/global/network location discovery/index services and global archive catalogs, multi-backend routing/failover, automatic distributed persistence, operational benchmarks, and deployment integrations beyond the implemented F.1 partitioning, F.2 synchronous worker execution, F.3 caller-supplied exact retrieval, and F.4 bounded in-memory location-index primitives
   - trust/selective-disclosure profile
 
 profile_rule:
@@ -119,7 +120,7 @@ roadmap_order:
   - expose generic adapter/processor/query/extraction boundaries
   - complete Audio Stream Profile 1.0
   - Stage E transport/recovery completed at the bounded CMX1 + E.2 + XRF1 streaming-repair scope
-  - Stage F distributed profile has deterministic exact-work partitioning, bounded synchronous one-partition/one-worker execution, and bounded provider-neutral exact record retrieval; scheduling/network execution, location indexes, operational benchmarks, and deployment remain planned
+  - Stage F distributed profile has deterministic exact-work partitioning, bounded synchronous one-partition/one-worker execution, bounded provider-neutral exact record retrieval, and bounded deterministic in-memory location indexing; scheduling/network execution, persistent/global location discovery/catalogs, operational benchmarks, and deployment remain planned
   - add trust/selective-disclosure
   - add more stream/vertical profiles
 ```
@@ -162,7 +163,7 @@ ctest --test-dir build-san --output-on-failure
 | `src/archive/` | CODA archive/integrity implementation |
 | `src/capture/` | Source ingest/capture |
 | `src/core/` | Engine/core primitives; currently includes compatibility-era feed naming |
-| `src/distributed/` | Stage F primitives: deterministic exact-work partitioning, bounded synchronous one-partition/one-worker execution, and bounded provider-neutral exact record retrieval |
+| `src/distributed/` | Stage F primitives: deterministic exact-work partitioning, bounded synchronous one-partition/one-worker execution, bounded provider-neutral exact record retrieval, and bounded deterministic in-memory location indexing |
 | `src/transport/` | Generic transport-profile framing, demultiplexing, loss observation, recovery groups, bounded XOR single-erasure repair, and bounded streaming repair orchestration |
 | `src/audio/` | Audio Stream Profile implementation |
 | `src/watermark/` | Audio W0/W1/W2 identity implementation |
@@ -216,6 +217,10 @@ F.2 itself does **not** provide multi-partition scheduling or worker pools, RPC/
 F.3 extends `<codec/distributed.hpp>` with opaque `ObjectStoreObjectRef` placement metadata, `DistributedRecordLocation`, a caller-supplied read-only `ObjectStoreBackend`, explicit retrieval limits, and `retrieve_partition_records()`. Placement stays outside `DistributedPartition`, so the existing F.1 `CDP1` identity continues to commit only logical stream plus ordered exact record links. Before any provider read, F.3 validates the complete partition/location batch, exact ordered links, stream membership, intervals, range shape, metadata/aggregate bounds, and partition payload-byte total. It then issues exactly one sequential range read per member, requires the returned byte count to equal the declared record payload size, verifies SHA-256 against the original `RecordInfo`, and materializes ordered `ExtractedRecord`s that are directly consumable by F.2. `RecordInfo::file_offset` remains preserved original archive metadata and is distinct from the object-store `offset`.
 
 The object backend owns provider-specific endpoint, credential, transport, and authorization behavior outside this generic contract; store/key/version and backend names are descriptive placement labels only. F.3 bundles no S3/GCS/Azure/HTTP/filesystem client and adds no object write/upload/delete/list, backend registry, location discovery/index, multi-backend routing/failover, scheduling/RPC worker execution, retry/exactly-once behavior, automatic CODA persistence, deployment integration, authentication/attestation claim, or measured throughput/latency/availability/durability/scale/cost evidence.
+
+F.4 extends the same header with an immutable `DistributedLocationIndex`, explicit build/query limits, `build_distributed_location_index()`, and `resolve_partition_location_candidates()`. The builder validates existing F.3 placement descriptors without storage I/O, groups them by the exact physical `ProvenanceRecordLink`, requires every replica for one link to retain identical complete original `RecordInfo`, deduplicates exact duplicate placements, and canonical-sorts exact-link entries plus store/key/version/range candidates so observable index contents are independent of registration order. Resolution revalidates the exact F.1 `CDP1` and returns one bounded candidate set per partition member in original membership order; a missing indexed link is an explicit empty candidate set with `complete=false`, while output limits fail rather than silently truncating candidates.
+
+F.4 candidate order is deterministic metadata order only—not a health, locality, cost, latency, durability, trust, preference, or failover ranking. F.4 performs no `ObjectStoreBackend` read, automatic candidate selection, routing, retry/failover, location discovery, persistent/global/network catalog operation, worker scheduling/RPC, authentication/attestation, automatic CODA persistence, deployment integration, or measured throughput/latency/availability/durability/scale/cost claim. A caller may choose one candidate externally and pass it to F.3, which independently revalidates membership, range length, and payload SHA-256 before F.2 execution.
 
 ## Audio Stream Profile
 

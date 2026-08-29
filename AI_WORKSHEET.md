@@ -6,51 +6,53 @@ Canonical work loop for ChatGPT, Codex, and other agentic contributors.
 
 > Read `README.md` first. Read deeper design docs only when the task touches their subject. Do not reread large historical plans unless they are directly relevant.
 
-## Active work record — Stage F.3
+## Active work record — Stage F.4
 
 ```yaml
-task: Add bounded object-store placement descriptors and exact record retrieval for F.1 partitions while preserving F.2 execution and generic truth semantics.
+task: Add a bounded deterministic distributed location index that maps exact F.1 record membership to one or more F.3 placement candidates without changing record truth or partition identity.
 base_ref: origin/main
-base_head_sha: c685cdcc06518478cb7390b3abfc71f2cdc32692
-work_branch: automation/stage-f3-object-store-retrieval
+base_head_sha: 56ce57a40bcfeeff97598c6d3afb4d58e3d7c25b
+work_branch: automation/stage-f4-distributed-location-index
 current_version: 0.2.0
-active_roadmap_stage: F — F.1 exact-work partitioning and F.2 bounded worker execution are merged; exact storage placement/materialization is the next unmet dependency.
+active_roadmap_stage: F — F.1 exact-work partitioning, F.2 bounded worker execution, and F.3 exact object-store materialization are merged; bounded location/index resolution is the next unmet dependency.
 continuity_evidence:
-  - git_head: main at c685cdcc06518478cb7390b3abfc71f2cdc32692
-  - open_prs: preserve unrelated work; F.3 uses its own branch/PR
-  - exact_head_ci: F.2 final head de963a367457439bc6445bd50af0479b8c803beb passed CI 233 before merge
-  - roadmap_issue: issue 10 records F.2 complete and object-store retrieval next
+  - git_head: main at 56ce57a40bcfeeff97598c6d3afb4d58e3d7c25b
+  - open_prs: stale unrelated draft PR 26 is preserved; F.4 uses its own branch/PR
+  - exact_head_ci: F.3 final head c87d076a94769b9281958d3d56880ca36d04900e passed CI 245 before merge
+  - roadmap_issue: issue 10 records F.3 complete and distributed location/indexing next
 roadmap_issue_title: CODEC v1.0 roadmap execution log
 scope: distributed
 touched_truth_classes: []
 current_behavior_verified_from: [code, tests, cli, changelog]
-new_capability_claim: A caller can bind exact F.1 record links to opaque object-store ranges, retrieve each range through a caller-supplied backend under explicit bounds, verify exact record SHA-256, and hand the resulting ExtractedRecord batch unchanged to F.2.
+new_capability_claim: A caller can build a bounded immutable in-memory index from exact F.3 record-location descriptors and deterministically resolve an F.1 partition into ordered per-record placement candidate sets, including explicit incomplete resolution when a member has no candidate.
 change_class: generic_stream_abstraction
 ```
 
 ```text
-BEFORE: F.1 identifies exact work and F.2 executes materialized exact records, but CODEC has no generic storage-placement/read boundary that can materialize a partition from object-store ranges.
-AFTER: retrieve_partition_records validates one exact F.1 partition plus ordered placement descriptors before provider I/O, reads each exact range once through a caller-supplied backend, verifies length and SHA-256, and returns records directly consumable by F.2.
+BEFORE: F.3 can materialize a partition only when the caller already supplies one exact ordered location descriptor per member; CODEC has no generic index that maps exact F.1 links to available placement candidates.
+AFTER: build_distributed_location_index validates and canonicalizes bounded F.3 descriptors into immutable exact-link entries, and resolve_partition_location_candidates returns deterministic candidate sets in F.1 membership order without selecting a backend or performing I/O.
 ```
 
 ```yaml
 proof:
-  regression_test: tests/test_distributed_retrieval.cpp plus unchanged F.1/F.2 and all existing tests
-  exactness_test: partition CDP1/link order/payload total plus each retrieved range length and SHA-256 must verify before success
-  compatibility_test: F.1 CDP1 bytes, F.2 execution, CODA, S0/S1/D, provenance, Stage E, C ABI, CLI, and installed package behavior remain compatible
-  failure_path_test: malformed/tampered placement descriptors, exceeded bounds, provider errors, short/long ranges, and wrong content fail closed with no retry or partial result
-  security_test: store/key/version/backend labels remain descriptive placement metadata only; no credential, authorization, authentication, attestation, or storage-proof claim
+  regression_test: tests/test_distributed_location_index.cpp plus unchanged F.1/F.2/F.3 and all existing tests
+  exactness_test: F.1 CDP1 is revalidated; exact links and full RecordInfo remain unchanged; replica candidates for one link must have identical original record metadata
+  compatibility_test: F.1 CDP1 bytes, F.2 execution, F.3 retrieval, CODA, S0/S1/D, provenance, Stage E, C ABI, CLI, and installed package behavior remain compatible
+  failure_path_test: malformed locations, conflicting replica metadata, exceeded input/metadata/record/candidate/query bounds, and tampered partitions fail closed without storage/backend I/O
+  security_test: location strings remain descriptive placement metadata only; the index performs no credential, authorization, authentication, attestation, availability, or storage-proof decision
   benchmark: n/a — no throughput, latency, scale, availability, durability, fault-tolerance, or cost claim
 ```
 
 Invariant decisions:
 
-- [x] S0/S1/D semantics remain unchanged; F.3 only materializes exact bytes already identified by physical record hashes.
-- [x] F.1 partition identity remains independent of archive/object placement; CDP1 bytes do not change.
-- [x] Original RecordInfo.file_offset is preserved as record metadata and is never used as the object-store byte offset.
-- [x] Complete descriptor preflight occurs before the first backend range read.
-- [x] Returned range length and SHA-256 verify before a record enters the success result.
-- [x] No cloud SDK/client, upload/write path, distributed index, backend registry, scheduler, RPC execution, retry/failover, automatic persistence, deployment integration, or scale claim is introduced.
+- [x] S0/S1/D semantics remain unchanged; F.4 indexes placement metadata only.
+- [x] F.1 `DistributedPartition` and CDP1 bytes remain unchanged and independent of placement.
+- [x] F.3 `DistributedRecordLocation` is reused as the candidate unit; no second placement schema is introduced.
+- [x] All candidates for one exact physical link must carry identical full original RecordInfo metadata; conflicting metadata is rejected.
+- [x] Exact duplicate placements are idempotently deduplicated; stored entries and candidates are canonical-sorted so lookup output is independent of registration order.
+- [x] Missing indexed placement is represented explicitly by an empty candidate set and `complete=false`; F.4 does not fabricate a location or invent a retry route.
+- [x] Query output is caller-bounded and never silently truncates candidates.
+- [x] F.4 performs no ObjectStoreBackend reads, backend selection, retrieval, network discovery, persistence, scheduling, RPC execution, retry/failover, deployment integration, or scale claim.
 
 ## 0. Work record
 

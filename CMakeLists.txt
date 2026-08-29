@@ -153,6 +153,7 @@ if(CODEC_BUILD_TESTS)
     tests/test_engine.cpp
     tests/test_engine_concurrency.cpp
     tests/test_distributed_partition.cpp
+    tests/test_distributed_worker.cpp
     tests/test_processing.cpp
     tests/test_exporter.cpp
     tests/test_stream.cpp

@@ -6,51 +6,51 @@ Canonical work loop for ChatGPT, Codex, and other agentic contributors.
 
 > Read `README.md` first. Read deeper design docs only when the task touches their subject. Do not reread large historical plans unless they are directly relevant.
 
-## Active work record — Stage F.2
+## Active work record — Stage F.3
 
 ```yaml
-task: Add bounded one-partition/one-worker execution over F.1 exact partitions while preserving generic processor truth/provenance semantics.
+task: Add bounded object-store placement descriptors and exact record retrieval for F.1 partitions while preserving F.2 execution and generic truth semantics.
 base_ref: origin/main
-base_head_sha: 812f7d90ca994efb1dcbd9b03d5e25fe6f4da445
-work_branch: automation/stage-f2-distributed-worker-execution
+base_head_sha: c685cdcc06518478cb7390b3abfc71f2cdc32692
+work_branch: automation/stage-f3-object-store-retrieval
 current_version: 0.2.0
-active_roadmap_stage: F — F.1 exact-work partitioning is merged; bounded worker execution against exact partition membership is the next unmet dependency.
+active_roadmap_stage: F — F.1 exact-work partitioning and F.2 bounded worker execution are merged; exact storage placement/materialization is the next unmet dependency.
 continuity_evidence:
-  - git_head: main at 812f7d90ca994efb1dcbd9b03d5e25fe6f4da445
-  - open_prs: preserve unrelated work; F.2 uses its own branch/PR
-  - exact_head_ci: F.1 final head 83d408f5b2e5be74482f586313feebe3c99cce79 passed CI 222 before merge
-  - roadmap_issue: issue 10 records F.1 complete and F.2 worker execution next
+  - git_head: main at c685cdcc06518478cb7390b3abfc71f2cdc32692
+  - open_prs: preserve unrelated work; F.3 uses its own branch/PR
+  - exact_head_ci: F.2 final head de963a367457439bc6445bd50af0479b8c803beb passed CI 233 before merge
+  - roadmap_issue: issue 10 records F.2 complete and object-store retrieval next
 roadmap_issue_title: CODEC v1.0 roadmap execution log
 scope: distributed
 touched_truth_classes: []
 current_behavior_verified_from: [code, tests, cli, changelog]
-new_capability_claim: A caller can verify one F.1 partition against exact in-memory record bytes, execute it through one bounded worker, and receive only existing generic-processor-validated S1/D outputs plus descriptive execution metadata.
+new_capability_claim: A caller can bind exact F.1 record links to opaque object-store ranges, retrieve each range through a caller-supplied backend under explicit bounds, verify exact record SHA-256, and hand the resulting ExtractedRecord batch unchanged to F.2.
 change_class: generic_stream_abstraction
 ```
 
 ```text
-BEFORE: F.1 defines deterministic one-stream exact-record partitions, while callers have no worker boundary that verifies partition membership before invoking generic processing.
-AFTER: execute_partition validates one exact F.1 partition and its record bytes before one worker invocation, then returns only outputs accepted by invoke_processor; LocalProcessorWorker runs a caller-owned StreamProcessor synchronously.
+BEFORE: F.1 identifies exact work and F.2 executes materialized exact records, but CODEC has no generic storage-placement/read boundary that can materialize a partition from object-store ranges.
+AFTER: retrieve_partition_records validates one exact F.1 partition plus ordered placement descriptors before provider I/O, reads each exact range once through a caller-supplied backend, verifies length and SHA-256, and returns records directly consumable by F.2.
 ```
 
 ```yaml
 proof:
-  regression_test: tests/test_distributed_worker.cpp plus all existing tests
-  exactness_test: partition stream/ordered links/payload bytes/CDP1 identity and each supplied payload SHA-256 must match before worker invocation
-  compatibility_test: F.1 CDP1 membership identity, CODA, S0/S1/D, provenance, Stage E, C ABI, CLI, and installed package behavior remain compatible
-  failure_path_test: malformed/tampered partition or exact inputs, zero/exceeded bounds, worker errors, and invalid worker outputs fail closed with no retry or partial result
-  security_test: worker/processor names and partition SHA-256 remain descriptive/integrity metadata only; no authentication, attestation, authorization, or remote trust claim
-  benchmark: n/a — no throughput, latency, scale, fault-tolerance, or cost claim
+  regression_test: tests/test_distributed_retrieval.cpp plus unchanged F.1/F.2 and all existing tests
+  exactness_test: partition CDP1/link order/payload total plus each retrieved range length and SHA-256 must verify before success
+  compatibility_test: F.1 CDP1 bytes, F.2 execution, CODA, S0/S1/D, provenance, Stage E, C ABI, CLI, and installed package behavior remain compatible
+  failure_path_test: malformed/tampered placement descriptors, exceeded bounds, provider errors, short/long ranges, and wrong content fail closed with no retry or partial result
+  security_test: store/key/version/backend labels remain descriptive placement metadata only; no credential, authorization, authentication, attestation, or storage-proof claim
+  benchmark: n/a — no throughput, latency, scale, availability, durability, fault-tolerance, or cost claim
 ```
 
 Invariant decisions:
 
-- [x] S0/S1/D semantics remain unchanged; F.2 executes existing generic processors and does not reclassify output.
-- [x] F.1 partition StreamId and exact ordered record membership remain independent of worker identity or deployment location.
-- [x] Partition identity and each exact payload hash verify before worker invocation.
-- [x] Worker outputs are accepted only through the existing invoke_processor validation contract.
-- [x] Worker/processor labels are descriptive only and do not authenticate or attest execution.
-- [x] No scheduling pool, RPC/socket layer, retry/lease/exactly-once semantics, object store, distributed index, automatic CODA persistence, deployment integration, or scale claim is introduced.
+- [x] S0/S1/D semantics remain unchanged; F.3 only materializes exact bytes already identified by physical record hashes.
+- [x] F.1 partition identity remains independent of archive/object placement; CDP1 bytes do not change.
+- [x] Original RecordInfo.file_offset is preserved as record metadata and is never used as the object-store byte offset.
+- [x] Complete descriptor preflight occurs before the first backend range read.
+- [x] Returned range length and SHA-256 verify before a record enters the success result.
+- [x] No cloud SDK/client, upload/write path, distributed index, backend registry, scheduler, RPC execution, retry/failover, automatic persistence, deployment integration, or scale claim is introduced.
 
 ## 0. Work record
 

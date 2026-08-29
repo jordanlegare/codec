@@ -121,4 +121,69 @@ Result<DistributedRetrievalResult> retrieve_partition_records(
     std::span<const DistributedRecordLocation> locations,
     DistributedRetrievalLimits limits = {});
 
+struct DistributedLocationIndexLimits {
+  std::size_t maximum_input_locations{65536};
+  std::size_t maximum_records{16384};
+  std::size_t maximum_locations_per_record{16};
+  std::uint64_t maximum_metadata_bytes{64ULL * 1024ULL * 1024ULL};
+  std::size_t maximum_store_bytes{512};
+  std::size_t maximum_key_bytes{4096};
+  std::size_t maximum_version_bytes{512};
+};
+
+struct DistributedLocationQueryLimits {
+  std::size_t maximum_records{1024};
+  std::size_t maximum_candidates_per_record{16};
+  std::size_t maximum_candidates{4096};
+};
+
+struct DistributedLocationIndexEntry {
+  RecordInfo record{};
+  std::vector<DistributedRecordLocation> candidates;
+};
+
+struct DistributedLocationCandidateSet {
+  ProvenanceRecordLink record{};
+  std::vector<DistributedRecordLocation> candidates;
+};
+
+struct DistributedPartitionLocationCandidates {
+  Sha256 partition_identity{};
+  StreamId stream{};
+  bool complete{};
+  std::vector<DistributedLocationCandidateSet> records;
+};
+
+class DistributedLocationIndex {
+ public:
+  DistributedLocationIndex() = default;
+
+  std::size_t record_count() const noexcept;
+  std::size_t location_count() const noexcept;
+  std::span<const DistributedLocationIndexEntry> entries() const noexcept;
+
+ private:
+  std::vector<DistributedLocationIndexEntry> entries_;
+  std::size_t location_count_{};
+
+  friend Result<DistributedLocationIndex> build_distributed_location_index(
+      std::span<const DistributedRecordLocation> locations,
+      DistributedLocationIndexLimits limits);
+  friend Result<DistributedPartitionLocationCandidates>
+  resolve_partition_location_candidates(
+      const DistributedLocationIndex& index,
+      const DistributedPartition& partition,
+      DistributedLocationQueryLimits limits);
+};
+
+Result<DistributedLocationIndex> build_distributed_location_index(
+    std::span<const DistributedRecordLocation> locations,
+    DistributedLocationIndexLimits limits = {});
+
+Result<DistributedPartitionLocationCandidates>
+resolve_partition_location_candidates(
+    const DistributedLocationIndex& index,
+    const DistributedPartition& partition,
+    DistributedLocationQueryLimits limits = {});
+
 }  // namespace codec

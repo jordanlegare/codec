@@ -44,6 +44,7 @@ add_library(codec_core
   src/distributed/location_index.cpp
   src/distributed/partition.cpp
   src/distributed/retrieval.cpp
+  src/distributed/scheduler.cpp
   src/distributed/worker.cpp
   src/inference/backend.cpp
   src/transport/multiplex.cpp

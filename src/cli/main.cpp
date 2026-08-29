@@ -29,7 +29,8 @@ using Strings = std::vector<std::string_view>;
 
 void usage(std::ostream& output) {
   output
-      << "CODEC 0.1.0 - preservation-first audio feed archive and identity\n\n"
+      << "CODEC " << CODEC_VERSION_STRING
+      << " - preservation-first audio feed archive and identity\n\n"
       << "Usage:\n"
       << "  codec capabilities\n"
       << "  codec record --archive FILE --feed LABEL=URI [--feed ...]\n"
@@ -149,7 +150,7 @@ codec::Result<void> write_bytes(const std::filesystem::path& path,
 
 int capabilities_command() {
   const auto value = codec::Engine::capabilities();
-  std::cout << "{\"version\":\"0.1.0\","
+  std::cout << "{\"version\":\"" << CODEC_VERSION_STRING << "\","
             << "\"coda_archive\":" << (value.coda_archive ? "true" : "false")
             << ",\"file_capture\":" << (value.file_capture ? "true" : "false")
             << ",\"http_capture\":" << (value.http_capture ? "true" : "false")
@@ -636,7 +637,7 @@ int main(int argc, char** argv) {
     return 0;
   }
   if (command == "--version") {
-    std::cout << "codec 0.1.0\n";
+    std::cout << "codec " << CODEC_VERSION_STRING << '\n';
     return 0;
   }
   if (command == "capabilities") return capabilities_command();

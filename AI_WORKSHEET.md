@@ -6,6 +6,52 @@ Canonical work loop for ChatGPT, Codex, and other agentic contributors.
 
 > Read `README.md` first. Read deeper design docs only when the task touches their subject. Do not reread large historical plans unless they are directly relevant.
 
+## Active work record — Stage E.4
+
+```yaml
+task: Add bounded deterministic single-erasure XOR repair symbols and exact CMX1 frame recovery over explicit E.2 recovery groups.
+base_ref: origin/main
+base_head_sha: bd8a15ec3e3306b0fbe415064b128fb2e313f6f4
+work_branch: automation/stage-e4-xor-recovery
+current_version: 0.2.0
+active_roadmap_stage: E — transport/recovery profile; E.1 multiplexing, E.2 loss/group semantics, and E.3 concurrent recording/follow extraction are integrated; the next unmet gate is a concrete bounded repair-symbol/FEC implementation.
+continuity_evidence:
+  - git_head: bd8a15ec3e3306b0fbe415064b128fb2e313f6f4
+  - open_prs: stale draft E.3 PR 26 only; no E.4 work
+  - exact_head_ci: CI 194 / 33215219199 completed success on the exact base
+  - roadmap_issue: issue 10 records E.3 complete and release v0.2.0 at the exact base
+roadmap_issue_title: CODEC v1.0 roadmap execution log
+scope: recovery
+touched_truth_classes: []
+current_behavior_verified_from: [code, tests, cli, changelog]
+new_capability_claim: CODEC can generate a bounded versioned XOR repair symbol for one explicit CMX1 recovery group and exactly reconstruct and verify one missing encoded frame from all remaining group members.
+change_class: generic_stream_abstraction
+```
+
+```text
+BEFORE: E.2 can seal exact missing source-sequence ranges but implements no repair symbol, parity generation, or reconstruction; E.1 CMX1 bytes are only framed, decoded, and integrity-checked.
+AFTER: A caller can create and decode one bounded XRF1 XOR symbol for an exact E.2 group and reconstruct one known missing CMX1 frame only after its encoded length, committed SHA-256, CMX1 integrity, and group membership all verify.
+```
+
+```yaml
+proof:
+  regression_test: tests/test_transport_xor_recovery.cpp plus all existing tests
+  exactness_test: recover one omitted variable-length CMX1 frame byte-for-byte and compare every decoded field and deterministic re-encoding
+  compatibility_test: E.1 CMX1 and CODA formats remain byte-identical; installed C++ package consumer exercises the additive header
+  failure_path_test: malformed/noncanonical/corrupt XRF1, invalid groups, duplicate/wrong members, zero or multiple erasures, hash mismatch, truncation/trailing bytes, and all caller bounds fail closed without partial recovery
+  security_test: SHA-256 is documented and tested as integrity-only, never authentication
+  benchmark: n/a — no performance or scale claim
+```
+
+Invariant decisions:
+
+- [x] S0/S1/D semantics remain unchanged; transport repair returns verified encoded data rather than creating a truth-class record.
+- [x] CMX1 and CODA bytes remain unchanged; XRF1 is an additive independent repair-symbol format.
+- [x] One symbol is scoped to one exact `StreamId` and connection/format epoch through `RecoveryGroupDescriptor`.
+- [x] Recovery is limited to exactly one known erasure and never claims multi-erasure or bit-error correction.
+- [x] All source counts, encoded-frame bytes, metadata tables, parity bytes, aggregate working bytes, and decode outputs are caller bounded.
+- [x] No network provider, retransmission, automatic archive persistence, authentication, scale claim, or Stage E completion is introduced.
+
 ## 0. Work record
 
 Fill this before editing:

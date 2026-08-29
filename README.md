@@ -72,6 +72,7 @@ implemented_v0_1:
     - bounded StreamingRepairSession orchestration over registered E.2 groups: complete canonical CMX1 frames and XRF1 symbols may arrive in either order, source reordering/duplicates/provisional late gap fills are tolerated within caller limits, observed frames remain withheld until their XRF1 slot commitment verifies, and recovery is attempted only after an explicit seal proves exactly one missing member
     - concurrent repeated-feed and generic-stream recording into one CODA writer with descriptors committed before producers start, caller-bounded per-stream/aggregate queues, blocking backpressure, single-writer serialization, exact per-stream S0 byte order, and no deterministic cross-stream ordering claim
     - bounded verified-prefix source-exact follow extraction through SourceExactCursor and the CLI by exact StreamId or feed label; limits paginate without skipping an unreturned selected record, oversized individual selected records fail closed, output is appended incrementally, and following ends only after a committed final index is visible
+    - bounded deterministic distributed work partitioning over exact ExtractedRecord batches: every partition contains one StreamId, preserves ordered exact physical record links without splitting records, obeys caller record/byte/partition limits, and receives a stable SHA-256 identity over versioned exact membership without assigning a worker or storage location
     - C++ API, C ABI, CLI
   audio_profile:
     - explicit C++ profile facade at codec/profiles/audio.hpp in codec::profiles::audio, forwarding the exact existing WAV/PCM, watermark, and separation types/functions while root-level codec::* audio APIs remain compatible
@@ -102,7 +103,7 @@ planned_not_implemented:
   - video, telemetry, sensor, document/event, network/system profiles
   - production neural separation/diarization/identity models
   - transport retransmission/ARQ, authenticated transport/session semantics, multi-erasure correction/FEC, automatic CODA persistence of repair traffic/results, and measured loss-tolerance/throughput/latency/scale claims beyond the implemented bounded Stage E XOR single-erasure repair session
-  - distributed/cloud execution profile
+  - distributed workers/scheduler, RPC execution, object-store backends and remote retrieval, distributed indexes/global archive locations, automatic distributed persistence, operational benchmarks, and deployment integrations beyond the implemented deterministic F.1 partition descriptor primitive
   - trust/selective-disclosure profile
 
 profile_rule:
@@ -116,7 +117,7 @@ roadmap_order:
   - expose generic adapter/processor/query/extraction boundaries
   - complete Audio Stream Profile 1.0
   - Stage E transport/recovery completed at the bounded CMX1 + E.2 + XRF1 streaming-repair scope
-  - add distributed/cloud execution
+  - Stage F distributed profile started with bounded deterministic exact-work partitioning; workers, storage, indexes, benchmarks, and deployment remain planned
   - add trust/selective-disclosure
   - add more stream/vertical profiles
 ```
@@ -159,6 +160,7 @@ ctest --test-dir build-san --output-on-failure
 | `src/archive/` | CODA archive/integrity implementation |
 | `src/capture/` | Source ingest/capture |
 | `src/core/` | Engine/core primitives; currently includes compatibility-era feed naming |
+| `src/distributed/` | Stage F distributed-profile primitives; currently deterministic worker-agnostic exact-work partitioning only |
 | `src/transport/` | Generic transport-profile framing, demultiplexing, loss observation, recovery groups, bounded XOR single-erasure repair, and bounded streaming repair orchestration |
 | `src/audio/` | Audio Stream Profile implementation |
 | `src/watermark/` | Audio W0/W1/W2 identity implementation |
@@ -198,6 +200,14 @@ E.4 adds `<codec/xor_recovery.hpp>` as the first concrete bounded repair scheme 
 E.5 adds `<codec/streaming_repair.hpp>` as bounded in-memory orchestration over the existing E.1/E.2/E.4 contracts. `StreamingRepairSession` registers explicit non-overlapping recovery groups, accepts exactly one complete canonical CMX1 frame or one strict XRF1 symbol per push, and may receive source frames or the repair symbol first. Unique source frames are bounded in aggregate and fed through E.2 loss/group observation; exact duplicates are tolerated without duplicate emission, forward reordering can open provisional E.2 gaps, and late pre-seal arrivals may fill those gaps. Observed frames remain withheld until a matching XRF1 slot commits their exact encoded length and SHA-256; release additionally requires successful CMX1 integrity/canonical decode and exact stream/epoch/sequence membership. Recovery is attempted only after explicit E.2 sealing reports exactly one unresolved source slot, then delegates to E.4's exact single-erasure reconstruction and verification. Zero or multiple erasures do not trigger recovery. A seal closes the group to new source membership, while a later exact duplicate of an already accepted/recovered member remains non-emitting. No socket/provider, retransmission/ARQ, automatic CODA persistence, authentication/authorization, CLI/C ABI recovery, multi-erasure correction, or measured loss-tolerance/performance/scale claim is added.
 
 The Stage E completion audit is satisfied at this deliberately bounded scope: E.1/E.2 provide generic multiplexing and recovery semantics, E.4 provides a validated concrete XOR FEC/repair implementation with exact verification, and E.5 provides the missing streaming repair orchestration. This completion claim does **not** promote any of the explicit non-capabilities above. The next architecture stage is F, distributed/cloud partitioning and execution.
+
+## Distributed Processing Profile
+
+F.1 adds `<codec/distributed.hpp>` as a bounded, worker-agnostic partition descriptor primitive over exact in-memory `ExtractedRecord` batches. `partition_exact_records()` validates caller record/byte/partition limits and exact payload sizes before producing output, never splits a physical record, keeps every partition scoped to one stable `StreamId`, preserves that stream's relative input order as exact `ProvenanceRecordLink`s, and deterministically creates new partitions when configured record-count or payload-byte limits would be exceeded. Interleaved streams may therefore produce separate partitions while each stream's exact membership order remains intact.
+
+Each `DistributedPartition` carries only its logical stream, ordered exact physical record links, aggregate payload-byte count, and a SHA-256 identity over the private `CDP1` membership descriptor (stream bytes plus ordered record type/sequence/hash links). The identity is deterministic membership evidence, not authentication, authorization, a global archive locator, a storage address, or a worker assignment. F.1 changes no CODA bytes, S0/S1/D classification, provenance encoding, Stage E contract, C ABI, or CLI behavior.
+
+F.1 does **not** execute work remotely. Distributed workers or a scheduler, RPC/sockets, leases/retries/heartbeats or exactly-once claims, object-store backends or remote retrieval, distributed indexes/global archive locations, automatic CODA persistence, deployment integrations, and measured throughput/latency/scale/cost evidence remain unimplemented Stage F work.
 
 ## Audio Stream Profile
 

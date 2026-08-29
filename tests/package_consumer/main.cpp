@@ -9,6 +9,7 @@
 #include <codec/transport.hpp>
 #include <codec/xor_recovery.hpp>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -293,6 +294,41 @@ int main() {
       execution->processor_name != "package-distributed" ||
       execution->outputs.size() != 1 ||
       execution->outputs.front().truth != codec::TruthClass::derived) {
+    return 1;
+  }
+
+  codec::DistributedPartitionLimits schedule_partition_limits;
+  schedule_partition_limits.maximum_records_per_partition = 1;
+  auto scheduled_partitions =
+      codec::partition_exact_records(partition_inputs, schedule_partition_limits);
+  if (!scheduled_partitions || scheduled_partitions->size() != 2) return 1;
+
+  PackageDistributedProcessor schedule_processor_a;
+  PackageDistributedProcessor schedule_processor_b;
+  codec::LocalProcessorWorker schedule_worker_a{
+      schedule_processor_a, "package-schedule-a"};
+  codec::LocalProcessorWorker schedule_worker_b{
+      schedule_processor_b, "package-schedule-b"};
+  std::array<codec::DistributedWorker*, 2> schedule_workers{
+      &schedule_worker_a, &schedule_worker_b};
+  auto scheduled = codec::schedule_partitions(
+      schedule_workers, object_store, *location_index, *scheduled_partitions);
+  if (!scheduled || scheduled->succeeded != 2 ||
+      scheduled->partitions.size() != 2 ||
+      scheduled->partitions[0].worker_index != 0 ||
+      scheduled->partitions[1].worker_index != 1 ||
+      scheduled->partitions[0].status !=
+          codec::DistributedPartitionOutcomeStatus::succeeded ||
+      scheduled->partitions[1].status !=
+          codec::DistributedPartitionOutcomeStatus::succeeded ||
+      !scheduled->partitions[0].execution.has_value() ||
+      !scheduled->partitions[1].execution.has_value() ||
+      scheduled->partitions[0].execution->worker_name != "package-schedule-a" ||
+      scheduled->partitions[1].execution->worker_name != "package-schedule-b" ||
+      scheduled->partitions[0].selected_locations.size() != 1 ||
+      scheduled->partitions[1].selected_locations.size() != 1 ||
+      scheduled->partitions[0].selected_locations.front().offset != 0 ||
+      scheduled->partitions[1].selected_locations.front().offset != 1) {
     return 1;
   }
 

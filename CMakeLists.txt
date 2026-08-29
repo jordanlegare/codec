@@ -163,6 +163,7 @@ if(CODEC_BUILD_TESTS)
     tests/test_distributed_partition.cpp
     tests/test_distributed_remote_worker.cpp
     tests/test_distributed_wire.cpp
+    tests/test_distributed_wire_strict.cpp
     tests/test_distributed_retrieval.cpp
     tests/test_distributed_scheduler.cpp
     tests/test_distributed_worker.cpp

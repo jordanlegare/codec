@@ -2,6 +2,7 @@
 set -euo pipefail
 
 codec_bin=${1:?codec binary path required}
+expected_version=${2:?expected CODEC version required}
 test_dir=$(mktemp -d)
 record_pid=
 feed_a_pid=
@@ -21,6 +22,7 @@ trap cleanup EXIT
 
 printf 'internet audio source bytes\n' > "$test_dir/input.bin"
 "$codec_bin" capabilities > "$test_dir/capabilities.json"
+grep -Fq "\"version\":\"$expected_version\"" "$test_dir/capabilities.json"
 grep -q '"neural_separation":false' "$test_dir/capabilities.json"
 
 "$codec_bin" record --archive "$test_dir/session.coda" \

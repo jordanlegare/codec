@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(CODEC VERSION 0.2.0 LANGUAGES C CXX)
+project(CODEC VERSION 0.3.0 LANGUAGES C CXX)
 
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
@@ -138,6 +138,8 @@ set_target_properties(codec_cli PROPERTIES
   OUTPUT_NAME codec
 )
 target_include_directories(codec_cli PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_compile_definitions(codec_cli PRIVATE
+  CODEC_VERSION_STRING="${PROJECT_VERSION}")
 target_link_libraries(codec_cli PRIVATE codec::codec)
 codec_enable_warnings(codec_cli)
 codec_enable_sanitizers(codec_cli)
@@ -214,7 +216,7 @@ if(CODEC_BUILD_TESTS)
 
   add_test(NAME codec-cli-integration
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/cli_integration.sh
-                 $<TARGET_FILE:codec_cli>)
+                 $<TARGET_FILE:codec_cli> ${PROJECT_VERSION})
 
   add_test(NAME codec-ai-contract
     COMMAND ${CMAKE_COMMAND}

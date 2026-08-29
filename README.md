@@ -11,7 +11,7 @@ CODEC is a C++20, stream-first engine and archive substrate for authorized heter
 ```yaml
 project:
   name: CODEC
-  version: 0.2.0
+  version: 0.3.0
   language: C++20
   build: CMake >= 3.20
   archive: CODA (.coda)

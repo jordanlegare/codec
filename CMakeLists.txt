@@ -46,6 +46,7 @@ add_library(codec_core
   src/distributed/remote_worker.cpp
   src/distributed/retrieval.cpp
   src/distributed/scheduler.cpp
+  src/distributed/wire.cpp
   src/distributed/worker.cpp
   src/inference/backend.cpp
   src/transport/multiplex.cpp

@@ -40,7 +40,9 @@ add_library(codec_core
   src/core/sha256.cpp
   src/core/stream_continuity.cpp
   src/core/stream_provenance.cpp
+  src/distributed/identity.cpp
   src/distributed/partition.cpp
+  src/distributed/worker.cpp
   src/inference/backend.cpp
   src/transport/multiplex.cpp
   src/transport/recovery.cpp

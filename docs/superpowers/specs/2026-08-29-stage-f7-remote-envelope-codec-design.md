@@ -84,7 +84,7 @@ Both use one fixed 56-byte little-endian header:
 | 16 | 8 | body bytes |
 | 24 | 32 | SHA-256 over header bytes `[0,24)` followed by the body |
 
-`total_bytes` must equal `56 + body_bytes` and exactly equal the supplied encoded span. No trailing bytes are accepted. Reserved flags must be zero. The digest detects accidental/malicious byte corruption but is not a signature, MAC, authentication, or authorization claim.
+`total_bytes` must equal `56 + body_bytes` and exactly equal the supplied encoded span. No trailing bytes are accepted. Reserved flags must be zero. The digest detects accidental transmission/storage corruption when the digest itself is trusted only as part of the same bytes; it is not a signature, MAC, active-tamper defense, authentication, or authorization claim.
 
 All integers are little-endian, matching CODEC's generic CMX1/SPV1 development-profile conventions.
 
@@ -196,7 +196,7 @@ Decode followed by encode must reproduce the original bytes for every accepted e
 
 F.7 treats encoded envelopes as untrusted input. It validates the fixed header and declared sizes against caller limits before allocating variable-sized fields, uses checked arithmetic for aggregate sizes, and rejects unknown flags and enum values.
 
-The SHA-256 envelope digest is integrity evidence only. It does not identify a worker, authenticate a processor, authorize execution, protect confidentiality, prevent replay, bind an endpoint, or prove that a remote machine executed anything. Worker and processor names remain descriptive labels exactly as in F.6.
+The SHA-256 envelope digest is integrity evidence only. It does not identify a worker, authenticate a processor, authorize execution, protect confidentiality, prevent or detect an active attacker who can rewrite the envelope and digest, prevent replay, bind an endpoint, or prove that a remote machine executed anything. Worker and processor names remain descriptive labels exactly as in F.6.
 
 ## Testing contract
 

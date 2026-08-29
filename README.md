@@ -1,12 +1,1103 @@
-# CODEC
+# CODEC v0.3.0
 
 **Channel-Oriented Decomposition, Extraction, and Capture**
 
-CODEC is a C++20, stream-first engine and archive substrate for authorized heterogeneous temporal streams. It preserves source truth in **CODA** (`.coda`), keeps derived intelligence traceable to source evidence, and lets stream-specific profiles add exact normalization, inference, identity, recovery, and export behavior without redefining core semantics.
+CODEC is a C++20 preservation-first capture and archive engine for temporal data streams. The `codec` command-line program can capture one or more local, standard-input, HTTP, or HTTPS sources into a CODA archive, verify archive integrity, list and extract exact source streams, repair a damaged trailing archive segment into a new file, and issue or detect the reference audio watermark format.
 
-> **AI entry point:** repository-aware agents start with [`AGENTS.md`](AGENTS.md); otherwise read this manifest first. Then use [`AI_WORKSHEET.md`](AI_WORKSHEET.md) for execution. Detailed rationale lives in the linked design spec; do not duplicate it here.
+Version **0.3.0** also contains substantially more functionality in the installed C++ library than is exposed through the CLI, including generic stream/provenance APIs, transport multiplexing and bounded XOR recovery, audio-profile processing, and the Stage F.1-F.7 distributed-processing primitives.
 
-## AI manifest
+> **Important scope:** the distributed Stage F.1-F.7 implementation in v0.3.0 is a C++ library/package capability. There is no `codec distributed ...` CLI command and no built-in remote HTTP/gRPC worker service yet.
+
+## What CODEC is for
+
+CODEC is designed around a simple rule: **preserve the accepted source representation before optional interpretation or derivation**.
+
+It distinguishes three truth classes:
+
+| Class | Meaning |
+|---|---|
+| **S0** | The exact accepted source representation. This is the preservation layer used by the CLI capture/extract workflow. |
+| **S1** | An exact canonical state defined by a registered profile, such as deterministic PCM16 state in the Audio Stream Profile. |
+| **D** | A derived, inferred, transformed, or analytical result that carries provenance back to supporting records. |
+
+For a normal CLI user, the most important behavior is that `codec record` writes S0 source bytes to a `.coda` archive and `codec extract ... --fidelity source-exact` reconstructs those source bytes.
+
+## What you can do from the CLI in v0.3.0
+
+| Task | Command |
+|---|---|
+| Show version | `codec --version` |
+| Show runtime capability flags | `codec capabilities` |
+| Record one or more feeds | `codec record` |
+| Verify a CODA archive | `codec verify` |
+| Verify and show basic archive information | `codec inspect` |
+| List legacy feed descriptors | `codec list feeds` |
+| List generic streams | `codec list streams` |
+| Extract exact source bytes | `codec extract` |
+| Follow exact source bytes while an archive is still growing | `codec extract --follow` |
+| Rebuild the valid committed prefix of a damaged archive into a new archive | `codec repair` |
+| Generate an Ed25519 watermark statement key pair | `codec watermark keygen` |
+| Embed a reference W1/W2 acoustic code and create a signed statement | `codec watermark issue` |
+| Detect reference watermark candidates | `codec watermark detect` |
+
+The CLI writes machine-readable JSON or JSON Lines to standard output for successful operations. Human-readable errors go to standard error.
+
+---
+
+# Build environment
+
+## Supported/validated build environment
+
+The project CI for v0.3.0 builds and tests on **Ubuntu Linux** with both **GCC** and **Clang**. The implementation is currently POSIX-oriented; native Windows is not a validated v0.3.0 target.
+
+Minimum project requirements:
+
+- CMake **3.20+**
+- C++20 compiler
+- OpenSSL **3.0+** Crypto
+- libcurl
+- pkg-config
+- libFLAC development headers/library
+- a build tool such as Ninja or Make
+
+### Ubuntu/Debian setup
+
+A practical development environment is:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y \
+  build-essential \
+  cmake \
+  ninja-build \
+  pkg-config \
+  curl \
+  ca-certificates \
+  libssl-dev \
+  libcurl4-openssl-dev \
+  libflac-dev
+```
+
+To build with Clang as well:
+
+```bash
+sudo apt-get install -y clang
+```
+
+CI currently validates the optional ONNX Runtime CPU integration using ONNX Runtime **1.29.0** on Linux x86-64, but ONNX Runtime is **not required** to build or use the CLI functionality described in this README.
+
+## Clone and build
+
+```bash
+git clone https://github.com/jordanlegare/codec.git
+cd codec
+
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+```
+
+The executable is then:
+
+```bash
+./build/codec --version
+./build/codec capabilities
+```
+
+Expected version output:
+
+```text
+codec 0.3.0
+```
+
+## Run the test suite
+
+Tests are enabled by default:
+
+```bash
+ctest --test-dir build --output-on-failure
+```
+
+The normal test configuration includes the C++ unit suite, C API test, real CLI integration test, and repository contract check.
+
+## CMake switches
+
+These are the CODEC-specific CMake configuration switches in v0.3.0:
+
+| Switch | Default | Meaning |
+|---|---:|---|
+| `CODEC_BUILD_TESTS` | `ON` | Build and register the test suite. |
+| `CODEC_BUILD_EXAMPLES` | `ON` | Build the example programs, including `codec_capture_example`. |
+| `CODEC_WARNINGS_AS_ERRORS` | `OFF` | Promote compiler warnings to errors (`-Werror` or `/WX`). CI enables this. |
+| `CODEC_ENABLE_SANITIZERS` | `OFF` | For GCC/Clang, compile/link with AddressSanitizer and UndefinedBehaviorSanitizer. |
+| `CODEC_ONNXRUNTIME_ROOT` | empty | Optional path to an extracted ONNX Runtime distribution used by the Audio CPU separation backend. |
+
+Useful standard CMake switches include:
+
+| Switch | Example | Purpose |
+|---|---|---|
+| `CMAKE_BUILD_TYPE` | `Release`, `Debug` | Select optimization/debug configuration for single-config generators such as Ninja. |
+| `CMAKE_INSTALL_PREFIX` | `/opt/codec` | Default installation prefix used by `cmake --install`. |
+| `CMAKE_PREFIX_PATH` | `/opt/codec` | Helps another CMake project find an installed CODEC package. |
+| `CMAKE_C_COMPILER` | `clang` | Select a C compiler explicitly. |
+| `CMAKE_CXX_COMPILER` | `clang++` | Select a C++ compiler explicitly. |
+
+Example strict release build:
+
+```bash
+cmake -S . -B build -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCODEC_WARNINGS_AS_ERRORS=ON
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure
+```
+
+### Sanitizer build
+
+```bash
+cmake -S . -B build-san -G Ninja \
+  -DCMAKE_BUILD_TYPE=Debug \
+  -DCODEC_WARNINGS_AS_ERRORS=ON \
+  -DCODEC_ENABLE_SANITIZERS=ON
+cmake --build build-san --parallel
+ctest --test-dir build-san --output-on-failure
+```
+
+`CODEC_ENABLE_SANITIZERS` has an effect only for GCC/Clang builds.
+
+## Optional ONNX Runtime CPU backend
+
+A normal CLI build does not need ONNX Runtime. To compile the optional C++ Audio separation backend, point `CODEC_ONNXRUNTIME_ROOT` at an extracted runtime distribution containing:
+
+```text
+<root>/include/onnxruntime_c_api.h
+<root>/lib/libonnxruntime.so        # Linux
+```
+
+Then configure with:
+
+```bash
+cmake -S . -B build -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCODEC_ONNXRUNTIME_ROOT=/path/to/onnxruntime
+```
+
+If `CODEC_ONNXRUNTIME_ROOT` is supplied but the expected header/shared library cannot be found, configuration fails instead of silently disabling the backend.
+
+Even when this optional backend is compiled, `codec capabilities` still reports `"neural_separation":false` in v0.3.0. That flag means CODEC does not bundle a production model or default neural-separation runtime path for the CLI; the optional backend is activated through the C++ API with caller-supplied model/runtime material.
+
+## Install CODEC
+
+```bash
+cmake --install build --prefix "$HOME/.local"
+```
+
+This installs:
+
+- the `codec` executable;
+- the CODEC library;
+- public headers under `include/codec`;
+- CMake package files for `find_package(codec CONFIG ...)`.
+
+If `$HOME/.local/bin` is on your `PATH`:
+
+```bash
+codec --version
+```
+
+## Use CODEC from another CMake project
+
+After installation, a C++20 consumer can use:
+
+```cmake
+cmake_minimum_required(VERSION 3.20)
+project(my_codec_app LANGUAGES CXX)
+
+find_package(codec CONFIG REQUIRED)
+
+add_executable(my_codec_app main.cpp)
+target_compile_features(my_codec_app PRIVATE cxx_std_20)
+target_link_libraries(my_codec_app PRIVATE codec::codec)
+```
+
+If CODEC was installed into a non-system prefix:
+
+```bash
+cmake -S . -B build \
+  -DCMAKE_PREFIX_PATH=/path/to/codec/install
+```
+
+The consumer must also be able to resolve CODEC's public dependencies: OpenSSL 3 Crypto, CURL, pkg-config, and FLAC.
+
+---
+
+# CLI reference
+
+## General behavior
+
+```text
+codec --help
+codec help
+codec --version
+```
+
+`--help`/`help` prints the command synopsis. `--version` prints the configured CMake project version.
+
+### Exit status
+
+The principal CLI exit statuses in v0.3.0 are:
+
+| Code | Meaning |
+|---:|---|
+| `0` | Command completed successfully. |
+| `1` | General runtime/library error such as I/O, protocol, archive, key, or processing failure. |
+| `2` | Invalid or missing command-line arguments, unknown command, or malformed identifier. |
+| `3` | `verify`/`inspect` completed verification but the archive verification report is not OK. |
+| `4` | `watermark detect` completed successfully but found no watermark observations. |
+
+Library errors are printed as:
+
+```text
+codec: <error_code>: <message>
+```
+
+Examples of error-code names include `invalid_argument`, `unauthorized_source`, `network`, `protocol`, `decode`, `archive_io`, `archive_corrupt`, `model_incompatible`, `inference`, `resource_exhausted`, and `internal`.
+
+---
+
+## `codec capabilities`
+
+```bash
+codec capabilities
+```
+
+Example shape:
+
+```json
+{
+  "version":"0.3.0",
+  "coda_archive":true,
+  "file_capture":true,
+  "http_capture":true,
+  "pcm16_wav":true,
+  "w0_ed25519":true,
+  "w1_reference":true,
+  "w2_reference":true,
+  "w2_policy":"qualified_paths_only",
+  "neural_separation":false,
+  "gpu_inference":false
+}
+```
+
+Fields:
+
+| Field | Meaning in v0.3.0 |
+|---|---|
+| `version` | CLI/project version. |
+| `coda_archive` | CODA development-profile archive read/write/verify support is present. |
+| `file_capture` | Local file/stdin capture is present. |
+| `http_capture` | HTTP/HTTPS source capture is present. |
+| `pcm16_wav` | PCM16 RIFF/WAVE support is present. |
+| `w0_ed25519` | Ed25519/COSE signed statement support is present. |
+| `w1_reference` | Reference W1 acoustic watermark implementation is present. |
+| `w2_reference` | Reference W2 acoustic watermark implementation is present. |
+| `w2_policy` | W2 is only valid on qualified high-bandwidth audio paths; the reference implementation enforces its sample-rate/Nyquist requirements. |
+| `neural_separation` | `false`: no production neural separation model/default CLI runtime is bundled. |
+| `gpu_inference` | `false`: no GPU inference backend is provided. |
+
+These are capability declarations, not performance measurements.
+
+---
+
+## `codec record`
+
+Capture one or more feeds into a CODA archive:
+
+```bash
+codec record --archive FILE --feed LABEL=URI [--feed LABEL=URI ...]
+```
+
+### Switches
+
+| Argument | Required | Meaning |
+|---|---:|---|
+| `--archive FILE` | yes | Output CODA archive path. |
+| `--feed LABEL=URI` | yes, repeatable | Declares one named input source. Multiple feeds are captured concurrently into one archive. |
+
+At least one feed is required.
+
+### Feed labels
+
+A feed label must:
+
+- be unique within the command;
+- contain 1-128 printable ASCII characters;
+- not contain `=`.
+
+### Supported URI/source forms
+
+`URI` can be:
+
+```text
+/path/to/file
+file:///path/to/file
+-
+http://example.com/source
+https://example.com/source
+```
+
+Meaning:
+
+- a plain path reads a local file/device/FIFO path;
+- `file://...` reads a local path;
+- `-` duplicates and reads standard input;
+- `http://` and `https://` perform a bounded HTTP capture.
+
+Other URI schemes are rejected.
+
+### Capture security behavior
+
+The CLI uses the default `EngineConfig`, which deliberately applies conservative source rules:
+
+- local paths are opened read-only with no symbolic-link following;
+- private/local HTTP destinations are denied by default;
+- resolved HTTP socket addresses must be globally routable;
+- environment proxies are disabled while private-network denial is active;
+- HTTP redirects are refused in v0.3.0 rather than being followed without re-authorizing every hop;
+- only HTTP/HTTPS protocols are permitted;
+- HTTP responses must be successful 2xx responses;
+- HTTP connection timeout is 15 seconds.
+
+There are currently **no CLI switches** to disable these protections.
+
+### CLI capture limits
+
+The CLI currently uses these fixed default engine limits:
+
+| Limit | v0.3.0 default |
+|---|---:|
+| Capture chunk size | 256 KiB |
+| Maximum bytes per feed | 16 GiB |
+| Maximum pending chunks per stream | 8 |
+| Maximum aggregate pending capture bytes | 64 MiB |
+
+The C++ `EngineConfig` can customize these values, but the v0.3.0 CLI does not expose them as switches.
+
+When capturing multiple feeds, producer reads may happen concurrently. A single archive writer serializes committed records. CODEC preserves each stream's own S0 byte order; it does **not** promise deterministic physical interleaving between independent feeds.
+
+### Output metrics
+
+Successful recording prints one JSON object:
+
+```json
+{
+  "archive":"session.coda",
+  "feeds_recorded":2,
+  "source_bytes":123456,
+  "source_records":7
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `archive` | Archive path reported by the engine. |
+| `feeds_recorded` | Number of successfully recorded feed descriptors/sources. |
+| `source_bytes` | Total exact source payload bytes committed across the feeds. |
+| `source_records` | Number of committed S0 source-byte records/chunks, not the number of input files. |
+
+### Examples
+
+One local file:
+
+```bash
+codec record \
+  --archive session.coda \
+  --feed news=./input.bin
+```
+
+Two concurrent local feeds:
+
+```bash
+codec record \
+  --archive session.coda \
+  --feed left=./left.raw \
+  --feed right=./right.raw
+```
+
+Standard input:
+
+```bash
+cat input.bin | codec record \
+  --archive stdin.coda \
+  --feed stdin=-
+```
+
+Public HTTPS source:
+
+```bash
+codec record \
+  --archive remote.coda \
+  --feed source=https://example.com/media.bin
+```
+
+---
+
+## `codec verify`
+
+```bash
+codec verify ARCHIVE [--level full]
+```
+
+The v0.3.0 CLI has one archive verification behavior: it runs `CodaArchive::verify()` over the archive integrity structure. `--level full` is accepted as the documented spelling but does not select between multiple verification levels in this release.
+
+Example output:
+
+```json
+{
+  "ok":true,
+  "finalized":true,
+  "committed_records":12,
+  "verified_payload_bytes":123456,
+  "valid_prefix_bytes":125632,
+  "file_bytes":125632,
+  "message":"ok"
+}
+```
+
+### Verification metrics
+
+| Field | Meaning |
+|---|---|
+| `ok` | Whether archive verification succeeded. |
+| `finalized` | Whether a committed final index is present. An actively growing archive may be valid but not finalized. |
+| `committed_records` | Number of records accepted in the verified committed chain/prefix. |
+| `verified_payload_bytes` | Sum of record payload bytes covered by successful verification. |
+| `valid_prefix_bytes` | File offset/length through the valid committed archive prefix. This is especially useful when the tail is damaged or incomplete. |
+| `file_bytes` | Physical file size at verification time. |
+| `message` | Human-readable verification summary. |
+
+`valid_prefix_bytes < file_bytes` indicates bytes exist after the valid committed prefix.
+
+`verify` exits with status `3` when the verification report is not OK.
+
+---
+
+## `codec inspect`
+
+```bash
+codec inspect ARCHIVE
+```
+
+`inspect` runs the same archive verification and prints the same metrics as `verify`. If verification is OK, it also adds:
+
+```json
+"feeds":2
+```
+
+`feeds` is the number of legacy feed descriptors visible in the archive. It is not a count of generic records or derived artifacts.
+
+---
+
+## `codec list feeds`
+
+```bash
+codec list feeds ARCHIVE
+```
+
+Outputs one JSON object per feed, one object per line:
+
+```json
+{"label":"news","stream_id":"...","uri":"./input.bin","fidelity":"S0"}
+```
+
+Fields:
+
+| Field | Meaning |
+|---|---|
+| `label` | Feed label supplied during recording. |
+| `stream_id` | Stable logical stream identifier stored/projected for the feed. |
+| `uri` | Recorded/redacted source URI descriptor. URI user-info and query/fragment material are removed before descriptor persistence where applicable. |
+| `fidelity` | `S0`, indicating source-preservation truth. |
+
+---
+
+## `codec list streams`
+
+```bash
+codec list streams ARCHIVE
+```
+
+Outputs one JSON object per stream:
+
+```json
+{
+  "stream_id":"...",
+  "type":0,
+  "label":"news",
+  "source_id":"...",
+  "payload_type":"...",
+  "fidelity":"S0"
+}
+```
+
+Fields:
+
+| Field | Meaning |
+|---|---|
+| `stream_id` | Logical `StreamId`; use this value with `codec extract --stream`. |
+| `type` | Numeric generic stream type value. |
+| `label` | Human-readable stream label. |
+| `source_id` | Source identifier recorded in the generic stream descriptor/projection. |
+| `payload_type` | Generic payload-type descriptor. Legacy feed projections may leave this unspecified. |
+| `fidelity` | `S0`. |
+
+---
+
+## `codec extract`
+
+Extract exact source bytes by feed label or logical stream ID:
+
+```bash
+codec extract ARCHIVE \
+  --feed LABEL \
+  --fidelity source-exact \
+  --output FILE
+```
+
+or:
+
+```bash
+codec extract ARCHIVE \
+  --stream STREAM_ID \
+  --fidelity source-exact \
+  --output FILE
+```
+
+### Switches
+
+| Argument | Required | Meaning |
+|---|---:|---|
+| `ARCHIVE` | yes | Source CODA archive. |
+| `--feed LABEL` | exactly one selector | Select by legacy feed label. |
+| `--stream STREAM_ID` | exactly one selector | Select by 36-character UUID-style stream ID. |
+| `--fidelity source-exact` | recommended explicit spelling | `source-exact` is the only supported extraction fidelity in the v0.3.0 CLI. The parser also treats an omitted fidelity as source-exact, but scripts should specify it explicitly. |
+| `--output FILE` | yes | Destination file. |
+| `--follow` | no | Follow the verified committed prefix while the archive is still being written. |
+
+`--feed` and `--stream` are mutually exclusive and exactly one must be supplied.
+
+### Normal extraction output
+
+By feed:
+
+```json
+{"feed":"news","fidelity":"source_exact","bytes":123456}
+```
+
+By stream:
+
+```json
+{"stream_id":"...","fidelity":"source_exact","bytes":123456}
+```
+
+`bytes` is the number of exact S0 payload bytes written to the output file.
+
+### Live follow extraction
+
+```bash
+codec extract live.coda \
+  --feed LABEL1 \
+  --fidelity source-exact \
+  --follow \
+  --output live.bin
+```
+
+Follow mode:
+
+1. reads only the archive's verified committed prefix;
+2. writes newly committed source bytes for the selected stream incrementally;
+3. does not emit another stream's bytes;
+4. stays attached while the archive remains open/growing;
+5. finishes when a committed final index becomes visible.
+
+Final follow output adds:
+
+```json
+"follow":true
+```
+
+The `bytes` count is the total selected source bytes written during that follow session.
+
+---
+
+## `codec repair`
+
+```bash
+codec repair ARCHIVE --output REPAIRED.coda
+```
+
+Repair is **non-mutating**: it reads the source archive and writes a separate output archive from the recoverable committed prefix.
+
+### Switches
+
+| Argument | Required | Meaning |
+|---|---:|---|
+| `ARCHIVE` | yes | Damaged/incomplete source archive. |
+| `--output FILE` | yes | New repaired archive path. |
+
+Example:
+
+```bash
+codec repair damaged.coda --output repaired.coda
+codec verify repaired.coda --level full
+```
+
+### Repair metrics
+
+```json
+{
+  "recovered_records":11,
+  "recovered_payload_bytes":120000,
+  "discarded_tail_bytes":20
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `recovered_records` | Number of records copied/rebuilt into the repaired archive from the valid source prefix. |
+| `recovered_payload_bytes` | Payload bytes preserved in those recovered records. |
+| `discarded_tail_bytes` | Physical source-file tail bytes that could not be retained as valid committed archive data. |
+
+These are recovery counters, not an estimate of semantic data quality.
+
+---
+
+# Watermark commands
+
+The v0.3.0 watermark CLI is a **reference implementation**, not an authoritative identity system. Detection events explicitly report `"authoritative":false`.
+
+## `codec watermark keygen`
+
+Generate an Ed25519 key pair for signed feed statements:
+
+```bash
+codec watermark keygen \
+  --private issuer.key \
+  --public issuer.pub
+```
+
+### Switches
+
+| Switch | Required | Meaning |
+|---|---:|---|
+| `--private KEY` | yes | Private-key output path. |
+| `--public KEY` | yes | Public-key output path. |
+
+Output:
+
+```json
+{"algorithm":"Ed25519","private_key_written":true,"public_key_written":true}
+```
+
+Protect the private key as a signing credential; CODEC does not provide a key-management service.
+
+---
+
+## `codec watermark issue`
+
+Embed a 16-bit reference acoustic code into a PCM16 WAV derivative and create a signed statement:
+
+```bash
+codec watermark issue INPUT.wav \
+  --output OUTPUT.wav \
+  --statement feed.cose \
+  --private-key issuer.key \
+  --feed-uuid 7c2b2f74-7e31-4a1d-b469-d88d63fc8fcb \
+  --code 0x4a31 \
+  --issuer example \
+  --key-id example-1 \
+  --issued-at 1700000000 \
+  --not-before 1700000000 \
+  --expires-at 1800000000 \
+  --w1
+```
+
+### Switches
+
+| Argument | Required | Meaning |
+|---|---:|---|
+| `INPUT.wav` | yes | PCM16 RIFF/WAVE input. |
+| `--output OUTPUT.wav` | yes | Derived watermarked WAV output. The input file is not overwritten by this command. |
+| `--statement FILE` | yes | COSE Sign1 statement output. |
+| `--private-key KEY` | yes | Ed25519 private key used to sign the statement. |
+| `--feed-uuid UUID` | yes | Claimed feed identity string stored in the statement. |
+| `--code UINT16` | yes | 16-bit acoustic code. Decimal and conventional base-prefixed values such as `0x4a31` are accepted. |
+| `--issuer NAME` | yes | Issuer text included in the signed statement. |
+| `--key-id ID` | yes | Key identifier included in the signed statement. |
+| `--issued-at SEC` | yes | Signed issue time in integer seconds. |
+| `--not-before SEC` | yes | Signed not-before time in integer seconds. |
+| `--expires-at SEC` | yes | Signed expiry time in integer seconds. |
+| `--w1` | band selector | Select W1. W1 is also the default if `--w2` is absent. |
+| `--w2` | band selector | Select W2. Do not specify both `--w1` and `--w2`. |
+
+### Reference watermark policy
+
+The CLI uses the default `WatermarkPolicy`; these policy values are not command-line switches in v0.3.0:
+
+| Parameter | Default |
+|---|---:|
+| Embed amplitude | -42 dBFS |
+| Bit duration | 20 ms |
+| W1 frequencies | 17.5 kHz / 18.5 kHz |
+| W2 frequencies | 26 kHz / 28 kHz |
+| W2 minimum sample rate | 96 kHz |
+| Nyquist guard | 2 kHz |
+| Detector minimum confidence threshold | 0.30 |
+
+W2 therefore requires a sufficiently high sample-rate/Nyquist-qualified path; it is not intended for ordinary 44.1/48 kHz audio.
+
+### Issue output metrics
+
+```json
+{
+  "band":"W1",
+  "code":18993,
+  "frames_embedded":144000,
+  "derived_audio":true,
+  "original_modified":false
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `band` | Reference carrier band selected by the command. |
+| `code` | Embedded 16-bit acoustic code as an integer. |
+| `frames_embedded` | Number of audio frames covered by the embed operation. |
+| `derived_audio` | Always `true` for this operation: the output is a derivative. |
+| `original_modified` | `false`: the command writes a separate output path rather than rewriting the input WAV. |
+
+---
+
+## `codec watermark detect`
+
+```bash
+codec watermark detect INPUT.wav \
+  [--statement feed.cose --public-key issuer.pub] \
+  [--at SEC] \
+  [--format jsonl]
+```
+
+### Switches
+
+| Argument | Required | Meaning |
+|---|---:|---|
+| `INPUT.wav` | yes | PCM16 WAV to scan. |
+| `--statement FILE` | optional pair | Signed statement to verify and correlate with detected code. Must be supplied together with `--public-key`. |
+| `--public-key KEY` | optional pair | Ed25519 public key. Must be supplied together with `--statement`. |
+| `--at SEC` | no | Verification time in integer seconds. Defaults to the current system time. |
+| `--format jsonl` | no | Documented output spelling. v0.3.0 already emits JSON Lines and does not implement another format selector. |
+
+The implementation also accepts `codec watermark watch ...` as an alias for `detect`; in v0.3.0 it is the same **one-shot scan**, not a continuous watcher.
+
+### Detection output
+
+One JSON object is emitted per observation. A statement-bound example can look like:
+
+```json
+{
+  "state":"signature_bound_candidate",
+  "band":"W1",
+  "code":18993,
+  "confidence":0.73,
+  "start_frame":0,
+  "end_frame":48000,
+  "confirmation_hops":3,
+  "detection_statistic":"goertzel_bin_dominance",
+  "waveform_spike":false,
+  "authoritative":false,
+  "replay_check":"unavailable_in_stateless_reference_detector",
+  "statement_state":"valid",
+  "claimed_feed_uuid":"7c2b2f74-7e31-4a1d-b469-d88d63fc8fcb",
+  "issuer":"example"
+}
+```
+
+### Detection fields/metrics
+
+| Field | Meaning |
+|---|---|
+| `state` | `candidate` or `signature_bound_candidate`. The latter requires a valid statement matching the code plus at least three matching observations/hops. |
+| `band` | Detected W1/W2 carrier band. |
+| `code` | Detected 16-bit acoustic code. |
+| `confidence` | Reference detector confidence statistic. It is **not** a calibrated probability of identity or authenticity. |
+| `start_frame` | First audio-frame index for the observation. |
+| `end_frame` | End audio-frame index for the observation. |
+| `confirmation_hops` | Count of observations with the same band and code in the current scan. |
+| `detection_statistic` | `goertzel_bin_dominance` in the reference detector. |
+| `waveform_spike` | Currently reported as `false`; this path does not promote a waveform spike as identity evidence. |
+| `authoritative` | Always `false` in this stateless reference detector. |
+| `replay_check` | `unavailable_in_stateless_reference_detector`; v0.3.0 does not perform stateful replay detection here. |
+| `statement_state` | If a statement was supplied: `valid`, `invalid_signature`, `not_yet_valid`, `expired`, or `malformed`. If none was supplied: `absent`. |
+| `claimed_feed_uuid` | Feed UUID claimed by a parsed statement. It is a claim, not independent proof. |
+| `issuer` | Emitted when the observation is bound to a valid matching signed statement. |
+| `statement_error` | Present when statement parsing/verification fails as malformed. |
+
+If no observations are found, the command emits no observation objects and exits with status `4`.
+
+---
+
+# Practical workflows
+
+## Capture, verify, list, and extract
+
+```bash
+codec record \
+  --archive session.coda \
+  --feed news=./input.bin
+
+codec verify session.coda --level full
+codec list feeds session.coda
+codec list streams session.coda
+
+codec extract session.coda \
+  --feed news \
+  --fidelity source-exact \
+  --output recovered.bin
+
+cmp input.bin recovered.bin
+```
+
+## Extract using a stream ID
+
+```bash
+codec list streams session.coda
+```
+
+Copy the `stream_id`, then:
+
+```bash
+codec extract session.coda \
+  --stream 01234567-89ab-cdef-0123-456789abcdef \
+  --fidelity source-exact \
+  --output recovered.bin
+```
+
+## Follow a live recording
+
+Terminal 1:
+
+```bash
+codec record \
+  --archive live.coda \
+  --feed live=/path/to/a/growing-source-or-fifo
+```
+
+Terminal 2:
+
+```bash
+codec extract live.coda \
+  --feed live \
+  --fidelity source-exact \
+  --follow \
+  --output live-copy.bin
+```
+
+The follower reads only verified committed source records and exits after the recorder commits the final archive index.
+
+## Recover from a damaged tail
+
+```bash
+codec verify damaged.coda --level full
+codec repair damaged.coda --output repaired.coda
+codec verify repaired.coda --level full
+```
+
+Keep the original damaged archive if it is evidentiary material; `repair` intentionally produces a separate file.
+
+## Reference watermark lifecycle
+
+```bash
+codec watermark keygen \
+  --private issuer.key \
+  --public issuer.pub
+
+codec watermark issue input.wav \
+  --output marked.wav \
+  --statement feed.cose \
+  --private-key issuer.key \
+  --feed-uuid 7c2b2f74-7e31-4a1d-b469-d88d63fc8fcb \
+  --code 0x4a31 \
+  --issuer demo \
+  --key-id demo-1 \
+  --issued-at 1700000000 \
+  --not-before 1700000000 \
+  --expires-at 1800000000 \
+  --w1
+
+codec watermark detect marked.wav \
+  --statement feed.cose \
+  --public-key issuer.pub \
+  --at 1750000000 \
+  --format jsonl
+```
+
+Treat the resulting detection as reference evidence only; the CLI marks it non-authoritative and does not perform stateful replay protection.
+
+---
+
+# Understanding CODEC metrics
+
+CODEC's CLI outputs mostly **integrity, byte-count, record-count, and detector statistics**. They are not throughput/latency benchmarks.
+
+Examples:
+
+- `source_bytes` measures source payload volume preserved during recording.
+- `source_records` measures committed source chunks/records.
+- `verified_payload_bytes` measures payload volume covered by successful archive verification.
+- `valid_prefix_bytes` measures the verified committed file prefix.
+- `recovered_records` and `discarded_tail_bytes` describe archive repair results.
+- `frames_embedded` describes how many audio frames were processed by watermark embedding.
+- watermark `confidence` is a detector statistic, not a probability that an identity claim is true.
+
+v0.3.0 does **not** publish or claim measured:
+
+- capture throughput;
+- end-to-end latency;
+- distributed worker throughput/latency;
+- network availability/durability;
+- recovery percentage under real packet loss;
+- cloud cost/scale limits;
+- GPU performance.
+
+If you need those operational metrics, benchmark the exact workload, machine, storage, network, model, and build you intend to deploy.
+
+---
+
+# C++ library capabilities beyond the CLI
+
+The installed `codec::codec` library in v0.3.0 exposes significantly more than the command-line program. These APIs are useful to application developers but should not be mistaken for CLI functionality.
+
+## Generic archive and stream APIs
+
+Public APIs include:
+
+- CODA writer/archive verification and non-mutating repair;
+- generic `StreamId`, stream descriptor, clock, epoch, timing, and gap metadata;
+- exact physical record queries by stream/type/sequence/time;
+- exact per-record payload extraction;
+- S1/D provenance sidecars and direct-provenance queries;
+- `StreamAdapter`, `StreamProcessor`, and `StreamExporter` boundaries;
+- generic stream recording with caller-owned stable stream IDs.
+
+Unknown compatible 16-bit development-profile record type codes can be preserved/extracted without interpreting their payload.
+
+## Audio Stream Profile
+
+The C++ Audio profile provides, among other APIs:
+
+- deterministic PCM16 `APS1` S1 canonical state;
+- preservation-first WAV and native PCM16 FLAC ingest;
+- verified PCM16 WAV/FLAC export;
+- caller-supplied offline separation orchestration with provenance/reconstruction metrics;
+- deterministic `AMB1` separation-model bundles;
+- optional ONNX Runtime CPU separation backend when explicitly built and supplied a compatible runtime/model.
+
+No production neural model is bundled.
+
+## Stage E transport and recovery
+
+The C++ library includes the bounded Stage E profile:
+
+- deterministic `CMX1` multiplex framing/demultiplexing;
+- per-stream sequence-loss observation and explicit recovery groups;
+- deterministic `XRF1` XOR repair symbols;
+- exact reconstruction of one known missing member when commitments verify;
+- `StreamingRepairSession` orchestration that can accept source frames and repair symbols in either order.
+
+This is bounded in-memory transport/recovery logic, not a socket server, retransmission service, or measured network product.
+
+## Stage F.1-F.7 distributed processing
+
+v0.3.0 includes these C++ distributed primitives:
+
+| Stage | Library capability |
+|---|---|
+| **F.1** | Deterministic partitioning of exact extracted records into bounded one-stream work partitions with stable `CDP1` membership identity. |
+| **F.2** | Bounded one-partition/one-worker execution and local `StreamProcessor` worker adapter with exact input and S1/D output validation. |
+| **F.3** | Provider-neutral exact record retrieval from caller-described object-store byte ranges. |
+| **F.4** | Deterministic in-memory location index and bounded canonical placement candidate resolution. |
+| **F.5** | Deterministic synchronous multi-partition scheduling over an ordered worker pool. |
+| **F.6** | Provider-neutral `DistributedWorkerTransport` seam and `RemoteDistributedWorker` adapter. |
+| **F.7** | Bounded deterministic `DRQ1` request / `DRS1` reply serialization in `<codec/distributed_wire.hpp>`. |
+
+F.7 preserves full request record metadata/payloads and successful `ProcessorOutput`/`ProvenanceProcess` data, with strict bounded canonical decoding. Envelope SHA-256 provides corruption evidence; it is not a signature, MAC, authentication mechanism, or encryption mechanism.
+
+### What Stage F does not yet provide
+
+v0.3.0 does not include:
+
+- a concrete socket, HTTP, HTTPS, QUIC, or gRPC remote-worker implementation;
+- a remote worker server loop;
+- endpoint/DNS/SSRF policy for worker RPC;
+- credentials, authentication, authorization, attestation, or encrypted/replay-resistant worker sessions;
+- worker discovery/health or capability negotiation;
+- retry/failover, leases, heartbeats, cancellation, idempotency, or exactly-once semantics;
+- concurrent/thread-pool distributed scheduling;
+- a persistent/global location catalog;
+- concrete S3/GCS/Azure object-store clients;
+- a distributed-processing CLI.
+
+Applications may supply their own implementations behind the library interfaces.
+
+---
+
+# File-format and compatibility status
+
+The current executable uses a **CODA development profile**, not a frozen normative CODA v1 binary standard. The code deliberately identifies the executable profile separately so that the project can evolve without pretending that this development layout is a permanently frozen interoperability contract.
+
+The same caution applies to development-profile `CMX1`, `XRF1`, `CDP1`, `DRQ1`, and `DRS1` structures: they have deterministic tested encodings in this implementation, but v0.3.0 should not be treated as a promise that all future major versions will preserve every development-profile byte layout indefinitely.
+
+Within a given v0.3.0 workflow, integrity checks and exact-source extraction are the relevant guarantees to test.
+
+---
+
+# Security and operational boundaries
+
+CODEC includes integrity and preservation mechanisms, but integrity evidence is not the same as identity, authorization, confidentiality, or operational reliability.
+
+Keep these distinctions in mind:
+
+- SHA-256 archive/frame/envelope hashes detect corruption under their defined structures; an active attacker who can rewrite data can generally recompute an unkeyed hash.
+- Watermark detections are explicitly non-authoritative reference signals.
+- Signed watermark statements authenticate a statement under a supplied Ed25519 key; key distribution/trust policy remains the caller's responsibility.
+- The CLI blocks private HTTP capture targets by default and refuses redirects, but this does not make arbitrary remote content trustworthy.
+- Distributed F.1-F.7 labels and wire envelopes do not authenticate workers.
+- There is no encrypted remote-worker protocol in v0.3.0.
+- There are no published production-scale throughput, availability, or durability guarantees.
+
+Use CODEC only with sources and systems you are authorized to access and preserve.
+
+---
+
+# Release scope: v0.3.0
+
+The v0.3.0 release includes the previously accumulated Stage E.4/E.5 and Stage F.1-F.7 work, plus synchronized CLI/package version reporting.
+
+For the detailed change history, see [`CHANGELOG.md`](CHANGELOG.md).
+
+The GitHub release is tagged `v0.3.0`.
+
+---
+
+# Developer and repository documentation
+
+This README is the user-facing guide. Repository-maintenance and architecture material lives separately:
+
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — contributor workflow and architectural contribution rules.
+- [`AGENTS.md`](AGENTS.md) — machine-readable repository instructions for repository-aware agents.
+- [`AI_WORKSHEET.md`](AI_WORKSHEET.md) — current implementation/verification work record.
+- [`docs/superpowers/specs/2026-08-18-generalized-coda-direction-design.md`](docs/superpowers/specs/2026-08-18-generalized-coda-direction-design.md) — detailed stream-first architecture rationale.
+
+A small machine-readable project block is retained here because repository CI verifies version/documentation continuity:
 
 ```yaml
 project:
@@ -16,268 +1107,4 @@ project:
   build: CMake >= 3.20
   archive: CODA (.coda)
   architecture: stream-first, payload-type agnostic
-
-truth_classes:
-  S0: exact accepted source representation
-  S1: exact canonical state defined by a registered profile
-  D: derived/inferred/transformed artifact with provenance
-
-core_invariants:
-  - preserve S0 before optional interpretation
-  - never silently conflate S0, S1, and D
-  - keep logical stream identity independent of transport, worker, file, and archive segment
-  - preserve time, sequence, epochs, gaps, integrity, and provenance explicitly
-  - keep profile-specific fields out of generic core records unless universal
-  - inference/profile failure must not corrupt committed preservation
-  - unknown compatible stream/payload types remain preservable and extractable
-  - derived results remain traceable to exact supporting source records/intervals
-  - scale claims require measured bandwidth/compute/memory/storage/latency evidence
-  - unimplemented capability must remain explicitly unavailable
-
-core_vocabulary:
-  - StreamId
-  - StreamType
-  - StreamSpec
-  - StreamDescriptor
-  - StreamClock
-  - StreamEpoch
-  - StreamRecord
-  - StreamProvenance
-  - StreamAdapter
-  - StreamProcessor
-  - StreamExporter
-  - StreamInference
-  - StreamExtraction
-
-implemented_v0_1:
-  generic:
-    - append-only CODA development profile
-    - SHA-256 payload/chain integrity evidence
-    - commit trailers, final index, verification, exact S0 extraction, non-mutating repair
-    - bounded file/stdin/HTTP/HTTPS capture with hardened path/network policy
-    - generic C++ metadata primitives: StreamId, StreamType, TruthClass, StreamDescriptor, StreamClock, StreamEpoch
-    - versioned generic StreamDescriptor archive records and C++ append/list APIs, with legacy feed descriptors projected as opaque streams with unspecified payload type
-    - versioned generic S0 timing and gap records with C++ append/read APIs, per-stream sequence/epoch validation, explicit missing ranges, and exact prior source-record SHA-256 links preserved across repair
-    - versioned declared S1/D provenance sidecars with C++ append/read APIs, exact backward-only subject/input record links, bounded generic process identity, typed opaque profile details, and repair preservation
-    - AND-combined C++ direct-provenance queries over S1/D truth class plus physical subject and immediate-input filters, preserving sidecar order and exact record links
-    - explicit append/extract/repair round trips for unknown 16-bit development-profile record type codes without payload interpretation
-    - AND-combined C++ physical record queries over exact stream/raw type and half-open archive-sequence/envelope-time ranges, plus boundary-preserving per-record exact payload extraction
-    - pull-based C++ StreamAdapter S0 and bounded batch StreamProcessor S1/D contracts with interval, truth, process-metadata, and resource validation; registration, scheduling, and automatic persistence remain external
-    - bounded caller-supplied C++ StreamExporter contract for typed external representations from exact extracted record batches, with input/output/payload-type limits and exact ordered physical support links; registry, automatic query, persistence, CLI, and C ABI export remain external
-    - typed C++ generic stream recording with caller-owned stable StreamId and exact StreamDescriptor persistence through the existing hardened URI capture path; FeedSpec recording remains compatible
-    - generic CLI stream listing and exact S0 extraction by stable StreamId; legacy feed list/extract remains available
-    - bounded deterministic CMX1 generic multiplex framing and incremental demultiplexing for many logical StreamIds over one physical byte stream, preserving per-frame sequence, connection/format epochs, generic clock, interval, and opaque payload with bounded backpressure and SHA-256 corruption detection; no truth classification, recovery/FEC, or network provider is implied
-    - bounded generic sequence-loss observation and recovery-group semantics: provisional half-open gaps are tracked independently per exact StreamId/connection/format epoch and may be filled by late frames; caller-declared non-overlapping source ranges can be sealed into deterministic complete/incomplete reports under explicit memory bounds without claiming that missing members are repairable
-    - bounded deterministic XRF1 XOR repair symbols for explicit recovery groups, committing each exact CMX1 encoded length and SHA-256 plus zero-padded parity and reconstructing exactly one known missing frame only after commitment, CMX1 integrity, and group-membership verification
-    - bounded StreamingRepairSession orchestration over registered E.2 groups: complete canonical CMX1 frames and XRF1 symbols may arrive in either order, source reordering/duplicates/provisional late gap fills are tolerated within caller limits, observed frames remain withheld until their XRF1 slot commitment verifies, and recovery is attempted only after an explicit seal proves exactly one missing member
-    - concurrent repeated-feed and generic-stream recording into one CODA writer with descriptors committed before producers start, caller-bounded per-stream/aggregate queues, blocking backpressure, single-writer serialization, exact per-stream S0 byte order, and no deterministic cross-stream ordering claim
-    - bounded verified-prefix source-exact follow extraction through SourceExactCursor and the CLI by exact StreamId or feed label; limits paginate without skipping an unreturned selected record, oversized individual selected records fail closed, output is appended incrementally, and following ends only after a committed final index is visible
-    - bounded deterministic distributed work partitioning over exact ExtractedRecord batches: every partition contains one StreamId, preserves ordered exact physical record links without splitting records, obeys caller record/byte/partition limits, and receives a stable SHA-256 identity over versioned exact membership without assigning a worker or storage location
-    - bounded synchronous distributed worker execution for one exact partition: execute_partition verifies F.1 CDP1 identity, ordered physical links, stream membership, payload sizes and SHA-256s, aggregate bytes, and label/resource limits before exactly one worker invocation; LocalProcessorWorker delegates to one caller-owned StreamProcessor and outputs remain subject to invoke_processor validation
-    - bounded provider-neutral object-store record retrieval over explicit placement descriptors: a caller-supplied backend receives opaque store/key/version plus exact byte ranges only after complete F.1 partition/location preflight; returned ranges must match requested lengths and physical-record SHA-256 before ordered ExtractedRecord materialization, preserving original RecordInfo and composing directly with F.2
-    - bounded deterministic in-memory distributed location indexing over exact F.3 placement descriptors: exact-link replicas require identical original RecordInfo, exact duplicate placements deduplicate, entries/candidates canonicalize independently of registration order, and F.1 partitions resolve to bounded ordered candidate sets with explicit incomplete results for missing indexed placement without selecting or reading a backend
-    - bounded deterministic synchronous multi-partition scheduling over an ordered caller-supplied worker pool: schedule_partitions preflights the complete F.1 batch and aggregate limits before backend/worker side effects, assigns workers by stable input-position round robin, selects the first canonical F.4 placement for each exact member, composes F.3 materialization into F.2 execution, and returns one ordered per-partition outcome while continuing after partition-local location/retrieval/execution failures
-    - bounded provider-neutral remote-worker transport boundary: DistributedWorkerTransport is caller-supplied and RemoteDistributedWorker validates request/label bounds, dispatches exactly once, requires descriptive response worker/processor identity to match, bounds returned outputs, preserves provider errors without retry, and composes unchanged through F.2/F.5; no concrete network transport or authentication claim is implied
-    - bounded deterministic DRQ1/DRS1 remote-worker envelope codec in <codec/distributed_wire.hpp>: exact ordered ExtractedRecord requests preserve full RecordInfo, payload bytes, and unknown 16-bit record type codes; successful replies preserve ProcessorOutput plus full ProvenanceProcess metadata, explicit Error replies use stable wire error codes, strict bounded decode rejects malformed/noncanonical envelopes, and SHA-256 supplies corruption evidence only; no network transport, session security, or authentication claim is implied
-    - C++ API, C ABI, CLI
-  audio_profile:
-    - explicit C++ profile facade at codec/profiles/audio.hpp in codec::profiles::audio, forwarding the exact existing WAV/PCM, watermark, and separation types/functions while root-level codec::* audio APIs remain compatible
-    - deterministic sample-exact PCM16 S1 canonical state with a versioned self-contained APS1 encoding, strict decode validation, generic pcm16-record storage, and exact S0 provenance links
-    - bounded preservation-first PCM16 WAV ingest that captures one owned snapshot, commits its exact S0 before profile interpretation, emits APS1 S1 with exact provenance on success, and finalizes the verified S0-only archive with an explicit profile error when interpretation fails
-    - bounded preservation-first native PCM16 FLAC ingest that captures one owned audio/flac snapshot, commits its byte-exact S0 before decoding, accepts only native signed 16-bit FLAC under an independent decoded-PCM bound, emits the existing APS1 S1 with exact provenance on success, and finalizes malformed, unsupported 24-bit, Ogg-container, or over-limit input as verified S0-only with explicit profile error
-    - bounded finalized-archive PCM16 S1 query that returns decoded APS1 state only when exact state_exact subject/source lineage resolves to one same-stream, same-interval S0 record; unprovenanced pcm16 records remain unclassified
-    - bounded finalized-archive verified PCM16 WAV export that returns deterministic in-memory audio/wav bytes for D.3-verified S1 with exact state/source/provenance evidence and performs no archive or filesystem write
-    - bounded finalized-archive verified PCM16 FLAC export that emits native in-memory audio/flac only for D.3-verified S1, enables libFLAC verification, proves sample-exact decode round trips, retains exact state/source/provenance evidence, and keeps APS1 as the canonical S1 identity
-    - bounded offline PCM16 separation orchestration over explicit intervals and D.3-verified S1 using a caller-supplied backend, returning D-class APS1 stems plus mandatory residual with exact S1 support, model/runtime/configuration identity, and independent reconstruction metrics without archive mutation or a bundled-neural-runtime claim
-    - bounded deterministic AMB1 Audio separation ModelBundle encoding and strict in-memory decoding with canonical manifest metadata, exact opaque ONNX-byte SHA-256 verification, whole-bundle identity, and no filesystem/archive persistence or model execution
-    - caller-activated ONNX Runtime CPU separation backend with D.8 identity revalidation, real in-memory graph/session compatibility checks, bounded CODEC-owned window/output buffers, deterministic PCM16 overlap/add, mandatory residual construction, and D.7 integration; runtime binaries and production models are not bundled
-    - PCM16 RIFF/WAVE exact read/write
-    - Ed25519/COSE W0 signed statements
-    - W1 reference sub-20-kHz carrier/detector
-    - W2 reference >24-kHz carrier with sample-rate/Nyquist gating
-    - identity candidates and explicit non-authoritative stateless fusion
-  inference:
-    - backend boundary exists
-    - bounded structural AMB1 separation-bundle loader exists
-    - optional caller-activated ONNX Runtime CPU adapter exists when built with compatible private headers and a runtime library is supplied
-    - no production model or default runtime selection is bundled; the default backend returns model_incompatible
-
-planned_not_implemented:
-  - generalized Stream* CLI recording/processing/export and C ABI migration; profile API migration beyond the explicit Audio Stream Profile facade
-  - persisted generic policy tags
-  - generalized S1 canonical-state implementations beyond deterministic audio PCM16
-  - video, telemetry, sensor, document/event, network/system profiles
-  - production neural separation/diarization/identity models
-  - transport retransmission/ARQ, authenticated transport/session semantics, multi-erasure correction/FEC, automatic CODA persistence of repair traffic/results, and measured loss-tolerance/throughput/latency/scale claims beyond the implemented bounded Stage E XOR single-erasure repair session
-  - concrete socket/HTTP/gRPC remote-worker transports, endpoint/DNS/SSRF policy, authenticated/encrypted/replay-resistant remote sessions, concurrent/thread-pool distributed dispatch, processor/worker discovery and health, worker authentication/attestation, leases/retries/heartbeats/cancellation/idempotency/exactly-once semantics, concrete cloud/network object-store clients, object writes/uploads, backend registry, persistent/global/network location discovery/index services and global archive catalogs, multi-backend routing/failover, automatic distributed persistence, operational benchmarks, and deployment integrations beyond the implemented F.1-F.7 bounded distributed primitives
-  - trust/selective-disclosure profile
-
-profile_rule:
-  generic_requirement_wins_core_conflict: true
-  audio_is_first_reference_profile: true
-  root_audio_names_remain_v0_1_compatibility_surface: true
-  current_Feed_names_may_remain_for_v0_1_compatibility: true
-
-roadmap_order:
-  - stabilize generic stream identity/type/time/provenance/archive semantics
-  - expose generic adapter/processor/query/extraction boundaries
-  - complete Audio Stream Profile 1.0
-  - Stage E transport/recovery completed at the bounded CMX1 + E.2 + XRF1 streaming-repair scope
-  - Stage F distributed profile has deterministic exact-work partitioning, bounded synchronous one-partition/one-worker execution, bounded provider-neutral exact record retrieval, bounded deterministic in-memory location indexing, bounded deterministic synchronous multi-partition orchestration, a bounded provider-neutral remote-worker transport seam, and bounded deterministic DRQ1/DRS1 remote-worker envelope serialization; concrete network transports/endpoints, concurrency, discovery/health, authentication/session security, persistent/global location catalogs, routing/failover, operational benchmarks, and deployment remain planned
-  - add trust/selective-disclosure
-  - add more stream/vertical profiles
 ```
-
-## Runtime truth vs specification
-
-Use this precedence when deciding what CODEC **currently does**:
-
-1. code + tests + runtime capability output;
-2. `CMakeLists.txt`, public headers, CLI behavior, and `CHANGELOG.md`;
-3. this README for architectural invariants and current-status summary;
-4. design documents for rationale and future direction.
-
-A planned item is **not implemented** until code and tests prove it and the status above is updated.
-
-## Build and verify
-
-```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCODEC_WARNINGS_AS_ERRORS=ON
-cmake --build build --parallel
-ctest --test-dir build --output-on-failure
-./build/codec capabilities
-```
-
-Sanitizer gate:
-
-```bash
-cmake -S . -B build-san -DCMAKE_BUILD_TYPE=Debug \
-  -DCODEC_WARNINGS_AS_ERRORS=ON -DCODEC_ENABLE_SANITIZERS=ON
-cmake --build build-san --parallel
-ctest --test-dir build-san --output-on-failure
-```
-
-## Repository map
-
-| Path | Purpose |
-|---|---|
-| `AGENTS.md` | Automatic cold-start and repository-wide agent instructions |
-| `include/` | Public C++/C interfaces |
-| `src/archive/` | CODA archive/integrity implementation |
-| `src/capture/` | Source ingest/capture |
-| `src/core/` | Engine/core primitives; currently includes compatibility-era feed naming |
-| `src/distributed/` | Stage F primitives: deterministic exact-work partitioning, bounded synchronous one-partition/one-worker execution, bounded provider-neutral exact record retrieval, bounded deterministic in-memory location indexing, bounded deterministic synchronous multi-partition orchestration, the provider-neutral RemoteDistributedWorker adapter, and deterministic bounded DRQ1/DRS1 request/reply serialization |
-| `src/transport/` | Generic transport-profile framing, demultiplexing, loss observation, recovery groups, bounded XOR single-erasure repair, and bounded streaming repair orchestration |
-| `src/audio/` | Audio Stream Profile implementation |
-| `src/watermark/` | Audio W0/W1/W2 identity implementation |
-| `src/inference/` | Inference backend boundary |
-| `src/cli/` | CLI |
-| `tests/` | Unit, C ABI, and CLI integration tests |
-| `docs/superpowers/specs/2026-08-18-generalized-coda-direction-design.md` | Approved stream-first architecture |
-| `AI_WORKSHEET.md` | Canonical AI implementation/verification worksheet |
-
-## Core record direction
-
-Conceptual only; this is not a claim about the frozen v0.1 binary layout.
-
-```text
-RecordEnvelope {
-  stream_id, stream_type, source_id,
-  monotonic_time, observed_utc, source_timestamp,
-  sequence, format_epoch, connection_epoch,
-  truth_class, payload_type, payload,
-  payload_hash, previous_record_hash,
-  provenance, policy_tags
-}
-```
-
-Physical transport, logical stream identity, processing partition, and archive placement are separate concerns. One endpoint may multiplex many logical streams; one stream may migrate while retaining identity and provenance.
-
-## Transport / Recovery Profile
-
-Stage E started with the additive C++ `CMX1` multiplex boundary in `<codec/transport.hpp>`. `encode_multiplex_frame` deterministically frames one logical `StreamId` plus its independent sequence, connection/format epochs, generic `StreamClock`, interval, and opaque bytes; `MultiplexDecoder` incrementally demultiplexes arbitrary physical chunks in arrival order with caller-bounded buffering and frame-count backpressure. The version-1 frame SHA-256 detects corruption of its semantic header or payload but is not a signature, MAC, authentication, or authorization mechanism. E.1 deliberately does not assign S0/S1/D truth, infer gaps, reorder, retransmit, recover loss, generate parity/FEC, resynchronize after corruption, perform network I/O, write CODA, or claim throughput/latency/scale.
-
-E.2 adds `<codec/recovery.hpp>` above CMX1 without changing CMX1 bytes. `SequenceLossObserver` keeps bounded provisional missing sequence ranges independently for each exact `(StreamId, connection epoch, format epoch)` track: the first observation establishes a baseline, forward jumps open provisional ranges, and late members can fill or split those ranges; older observations outside a current gap remain only `late_or_replayed`. `RecoveryGroupTracker` separately tracks caller-declared non-overlapping source-sequence ranges within one exact stream/epoch namespace, accepts out-of-order first observations and duplicates, and freezes exact unresolved ranges only when the caller explicitly seals a group. `collecting`/`observed_complete` are pre-seal observations; `sealed_complete`/`sealed_incomplete` are closure states. An incomplete group is **not** a claim that CODEC can or cannot reconstruct it. E.2 does not automatically persist `StreamGap` records, encode repair symbols, generate parity/FEC, reconstruct missing frames, retransmit/ARQ, perform network I/O, authenticate transport, expose recovery through CLI/C ABI, or claim measured loss tolerance, throughput, latency, scale, or Stage E completion.
-
-E.3 adds live local multiplexed capture and verified-prefix follow extraction without changing CODA or CMX1 bytes. Repeated `codec record --feed LABEL=URI` inputs are prepared first, all feed/stream descriptors are committed before capture producers begin, and each prepared source runs concurrently behind caller-bounded queues. Backpressure blocks rather than drops; only the calling writer thread mutates CODA, so each logical stream retains exact S0 byte order while physical cross-stream archive order remains scheduler/I/O dependent. `<codec/archive_follow.hpp>` exposes `SourceExactCursor` plus bounded `extract_stream_source_exact_prefix()`: it reads only committed `verified_prefix` records, returns only exact-stream `source_bytes`, and treats record/byte limits as pagination. The cursor never advances past an unreturned selected record; if the first pending selected record alone exceeds `maximum_bytes`, the call returns `resource_exhausted`. CLI `extract --feed LABEL --fidelity source-exact --follow` and the equivalent `--stream STREAM_ID` path open output once, append newly committed selected bytes, remain attached while the archive is open, and exit after a committed final index becomes visible. E.3 does not wrap local CODA writes in CMX1, provide a network transport/provider, generate S1/D, add FEC/retransmission, promise deterministic cross-stream interleaving, expose a C ABI follow API, or claim hard real-time behavior, measured scale, or Stage E completion.
-
-E.4 adds `<codec/xor_recovery.hpp>` as the first concrete bounded repair scheme without changing CMX1, E.2, or CODA bytes. `create_xor_repair_symbol` deterministically encodes every exact member of one explicit E.2 `RecoveryGroupDescriptor`, commits its exact CMX1 length and SHA-256, and XORs the complete encodings with zero padding into one parity vector. The canonical version-1 `XRF1` representation binds that table and parity under a trailing integrity digest. `recover_xor_single_erasure` accepts exactly all but one unique group member, verifies every observed commitment, reconstructs and truncates the missing exact encoding, verifies its committed SHA-256, decodes exactly one valid CMX1 frame, and rechecks its stream, epochs, and sequence before return. This is exact encoded-data recovery for one known erasure only; SHA-256 is not authentication. E.4 does not locate/correct bit errors, recover multiple erasures, add Reed–Solomon/fountain coding, provide network transport or retransmission, persist symbols or recovered frames automatically, change S0/S1/D truth, expose CLI/C ABI recovery, claim measured performance/scale, orchestrate streaming repair, or freeze a normative wire standard.
-
-E.5 adds `<codec/streaming_repair.hpp>` as bounded in-memory orchestration over the existing E.1/E.2/E.4 contracts. `StreamingRepairSession` registers explicit non-overlapping recovery groups, accepts exactly one complete canonical CMX1 frame or one strict XRF1 symbol per push, and may receive source frames or the repair symbol first. Unique source frames are bounded in aggregate and fed through E.2 loss/group observation; exact duplicates are tolerated without duplicate emission, forward reordering can open provisional E.2 gaps, and late pre-seal arrivals may fill those gaps. Observed frames remain withheld until a matching XRF1 slot commits their exact encoded length and SHA-256; release additionally requires successful CMX1 integrity/canonical decode and exact stream/epoch/sequence membership. Recovery is attempted only after explicit E.2 sealing reports exactly one unresolved source slot, then delegates to E.4's exact single-erasure reconstruction and verification. Zero or multiple erasures do not trigger recovery. A seal closes the group to new source membership, while a later exact duplicate of an already accepted/recovered member remains non-emitting. No socket/provider, retransmission/ARQ, automatic CODA persistence, authentication/authorization, CLI/C ABI recovery, multi-erasure correction, or measured loss-tolerance/performance/scale claim is added.
-
-The Stage E completion audit is satisfied at this deliberately bounded scope: E.1/E.2 provide generic multiplexing and recovery semantics, E.4 provides a validated concrete XOR FEC/repair implementation with exact verification, and E.5 provides the missing streaming repair orchestration. This completion claim does **not** promote any of the explicit non-capabilities above. The next architecture stage is F, distributed/cloud partitioning and execution.
-
-## Distributed Processing Profile
-
-F.1 adds `<codec/distributed.hpp>` as a bounded, worker-agnostic partition descriptor primitive over exact in-memory `ExtractedRecord` batches. `partition_exact_records()` validates caller record/byte/partition limits and exact payload sizes before producing output, never splits a physical record, keeps every partition scoped to one stable `StreamId`, preserves that stream's relative input order as exact `ProvenanceRecordLink`s, and deterministically creates new partitions when configured record-count or payload-byte limits would be exceeded. Interleaved streams may therefore produce separate partitions while each stream's exact membership order remains intact.
-
-Each `DistributedPartition` carries only its logical stream, ordered exact physical record links, aggregate payload-byte count, and a SHA-256 identity over the private `CDP1` membership descriptor (stream bytes plus ordered record type/sequence/hash links). The identity is deterministic membership evidence, not authentication, authorization, a global archive locator, a storage address, or a worker assignment. F.1 changes no CODA bytes, S0/S1/D classification, provenance encoding, Stage E contract, C ABI, or CLI behavior.
-
-F.2 extends the same header with `DistributedWorker`, `LocalProcessorWorker`, and `execute_partition()`. Before any worker execution, the wrapper verifies the exact F.1 `CDP1` identity, one-stream ordered physical membership, input payload sizes and SHA-256s, aggregate payload bytes, and caller count/byte/name limits. The concrete local backend is synchronous and delegates exactly once to one caller-owned `StreamProcessor`; its outputs are accepted only through the existing `invoke_processor()` S1/D, interval, reserved-type, process-metadata, and output-resource validation path. Worker and processor names are descriptive labels only, and the returned execution result is in-memory metadata rather than authentication, attestation, persistence, or remote-execution proof.
-
-F.2 itself does **not** provide multi-partition scheduling or worker pools, RPC/sockets/network execution, processor discovery/distribution, worker authentication/attestation, leases/retries/heartbeats or exactly-once semantics, or remote storage access. F.3 below adds the bounded storage-placement/materialization boundary, F.5 adds bounded synchronous multi-partition orchestration, F.6 adds the provider-neutral remote-worker seam, and F.7 adds only deterministic transport-agnostic envelope serialization; concrete network execution and the remaining operational capabilities are still later Stage F work.
-
-F.3 extends `<codec/distributed.hpp>` with opaque `ObjectStoreObjectRef` placement metadata, `DistributedRecordLocation`, a caller-supplied read-only `ObjectStoreBackend`, explicit retrieval limits, and `retrieve_partition_records()`. Placement stays outside `DistributedPartition`, so the existing F.1 `CDP1` identity continues to commit only logical stream plus ordered exact record links. Before any provider read, F.3 validates the complete partition/location batch, exact ordered links, stream membership, intervals, range shape, metadata/aggregate bounds, and partition payload-byte total. It then issues exactly one sequential range read per member, requires the returned byte count to equal the declared record payload size, verifies SHA-256 against the original `RecordInfo`, and materializes ordered `ExtractedRecord`s that are directly consumable by F.2. `RecordInfo::file_offset` remains preserved original archive metadata and is distinct from the object-store `offset`.
-
-The object backend owns provider-specific endpoint, credential, transport, and authorization behavior outside this generic contract; store/key/version and backend names are descriptive placement labels only. F.3 bundles no S3/GCS/Azure/HTTP/filesystem client and adds no object write/upload/delete/list, backend registry, location discovery/index, multi-backend routing/failover, scheduling/RPC worker execution, retry/exactly-once behavior, automatic CODA persistence, deployment integration, authentication/attestation claim, or measured throughput/latency/availability/durability/scale/cost evidence.
-
-F.4 extends the same header with an immutable `DistributedLocationIndex`, explicit build/query limits, `build_distributed_location_index()`, and `resolve_partition_location_candidates()`. The builder validates existing F.3 placement descriptors without storage I/O, groups them by the exact physical `ProvenanceRecordLink`, requires every replica for one link to retain identical complete original `RecordInfo`, deduplicates exact duplicate placements, and canonical-sorts exact-link entries plus store/key/version/range candidates so observable index contents are independent of registration order. Resolution revalidates the exact F.1 `CDP1` and returns one bounded candidate set per partition member in original membership order; a missing indexed link is an explicit empty candidate set with `complete=false`, while output limits fail rather than silently truncating candidates.
-
-F.4 candidate order is deterministic metadata order only—not a health, locality, cost, latency, durability, trust, preference, or failover ranking. F.4 performs no `ObjectStoreBackend` read, automatic candidate selection, routing, retry/failover, location discovery, persistent/global/network catalog operation, worker scheduling/RPC, authentication/attestation, automatic CODA persistence, deployment integration, or measured throughput/latency/availability/durability/scale/cost claim. A caller may choose one candidate externally and pass it to F.3, which independently revalidates membership, range length, and payload SHA-256 before F.2 execution.
-
-F.5 adds `DistributedSchedulingLimits`, ordered `DistributedPartitionOutcome`s, and `schedule_partitions()` as a bounded synchronous coordinator over the already-merged F.1-F.4 primitives. Before any backend read or worker invocation, the scheduler validates non-zero scheduler-owned bounds, the complete worker pool, every partition's exact stream membership and `CDP1` identity, duplicate partition identities, and aggregate record/payload limits. A non-empty batch is assigned deterministically by input position (`partition_index % worker_count`), so failures never change later worker slots. For each partition, F.5 resolves F.4 candidates and selects candidate zero for every member; because F.4 canonicalizes candidates, selection is independent of registration order. Complete placements are materialized through F.3 and executed through F.2 without bypassing either layer's exactness checks.
-
-After successful batch preflight, missing/incomplete F.4 placement, F.3 retrieval failure, and F.2 execution failure are partition-local outcomes rather than schedule-wide reordering or cancellation; later input partitions continue and every input position produces exactly one outcome. Nested retryable errors are retained as evidence but F.5 performs no retry. F.5 itself remains deliberately sequential and synchronous: it adds no thread pool/concurrent dispatch, RPC/network worker transport or process management, worker/backend discovery or health, authentication/attestation, routing/failover, leases/heartbeats/cancellation/exactly-once semantics, persistent/global location catalog, automatic CODA persistence, deployment integration, or measured throughput/latency/availability/durability/fault-tolerance/scale claim.
-
-F.6 extends the existing worker seam without changing F.5. `DistributedWorkerTransport` is a caller-supplied structured transport contract, and `RemoteDistributedWorker` adapts it to `DistributedWorker`. Before dispatch, the adapter validates its non-zero limits, non-empty bounded transport/worker/processor labels, non-empty input count, exact payload-size metadata, and aggregate input bytes. It then calls the transport exactly once with the configured worker/processor labels and original ordered materialized input span. A provider error is returned unchanged, including its `retryable` flag, but F.6 itself never retries.
-
-A successful F.6 response is accepted only when its descriptive worker and processor labels exactly match the configured labels and its output count/aggregate payload bytes remain inside caller bounds. The resulting `ProcessorOutput`s then return through F.2, which remains authoritative for S1/D classification, interval, reserved-type, process/provenance metadata, and output-resource validation. Transport/worker/processor names are routing evidence only: matching strings do not authenticate or attest a machine or process. F.6 defines no socket, HTTP, TLS, QUIC, gRPC, endpoint/SSRF policy, credential/authentication/authorization/attestation mechanism, worker discovery/health/capability negotiation, retry/failover, leases/heartbeats/cancellation/idempotency/exactly-once semantics, concurrent dispatch, automatic CODA persistence, deployment integration, or measured network/performance/scale claim.
-
-F.7 adds `<codec/distributed_wire.hpp>` as a bounded deterministic serialization boundary for those F.6 structured values. `encode_distributed_remote_request()` emits version-1 `DRQ1` bytes containing bounded non-empty worker/processor labels plus the exact ordered materialized `ExtractedRecord` set, preserving each record's raw 16-bit type code, archive sequence, stable `StreamId`, interval, payload size, original file offset, SHA-256, and payload bytes. `decode_distributed_remote_request()` validates fixed magic/version/flags, exact envelope/body lengths, SHA-256, label/count/payload limits, zero reserved fields, truncation, and exact body consumption before returning owned records. Unknown 16-bit record type codes are preserved without interpretation. DRQ1 does not carry or replace F.1 `CDP1`; F.2 still verifies partition identity, ordered membership, stream, and input payload SHA-256 before execution.
-
-`DRS1` replies encode exactly one success or one `Error`. Success replies preserve the configured descriptive labels plus bounded ordered `ProcessorOutput` values, including stream/type/truth/interval/payload and complete `ProvenanceProcess` text, optional implementation/configuration hashes, creation time, typed details, and opaque details bytes. Error replies use an explicit stable version-1 wire-number mapping for every current non-`ok` `ErrorCode`, preserve the exact message bytes and `retryable` flag, and reject `ErrorCode::ok` as an error result. Decode is structural: defined S0/S1/D truth values may be reconstructed, but F.2 remains authoritative for the S1/D-only processor-output rule, intervals, reserved artifact types, and process/provenance semantics.
-
-Both envelopes use deterministic little-endian canonical field order, exact lengths, zero reserved fields, and SHA-256 over the fixed header prefix plus body. The hash supplies corruption evidence only; an active party able to rewrite the bytes can also recompute it. F.7 therefore adds no authentication, authorization, signing, encryption, confidentiality, replay protection, endpoint binding, attestation, or proof that a remote machine executed anything. It also adds no socket/HTTP/TLS/QUIC/gRPC provider, endpoint/DNS/SSRF policy, worker discovery/health, retry/failover, lease/heartbeat/cancellation/idempotency/exactly-once semantics, concurrent dispatch/server loop, automatic CODA persistence, deployment integration, or measured network/performance/availability/scale claim.
-
-## Audio Stream Profile
-
-Audio is the first implemented profile, not CODEC core. PCM/WAV, sample rate/channel layout, FLAC, W0/W1/W2, diarization, speaker embeddings, neural source separation/stems, and audio-specific fidelity tests belong to this profile.
-
-The canonical additive C++ profile entry point is `<codec/profiles/audio.hpp>` under `codec::profiles::audio`. It aliases/imports the existing WAV/PCM, watermark, and separation surface rather than moving ABI-bearing symbols; existing root-level `codec::*` audio headers and names remain the v0.1 compatibility surface.
-
-For audio, `Pcm16State` is the implemented sample-exact S1 contract: non-zero sample rate and channel count, complete interleaved frames, and exact signed 16-bit samples. `encode_pcm16_state` and `decode_pcm16_state` use the deterministic versioned `APS1` payload. A `pcm16` record is only S1 when a `state_exact` provenance sidecar links it to its exact S0 input; the record tag alone does not make that claim. Resampling, remixing, channel-layout interpretation, floating-point PCM, enhancement, concealment, separation, embeddings, and inferred labels remain outside the implemented canonical-state contract. FLAC is implemented as a preservation-first native PCM16 ingest representation and as the external lossless output representation described below; neither changes APS1 as the S1 identity. CODEC-generated watermark derivatives must not mutate preserved S0/S1 truth.
-
-`ingest_pcm16_wav` is the additive preservation-first C++ path for one bounded `audio/wav` source. It validates the request before opening the source or creating output, captures exactly once through the hardened URI boundary, appends the descriptor and byte-exact S0, and then interprets those same in-memory bytes. Successful PCM16 decoding appends deterministic `APS1` state plus `state_exact` provenance. A WAV/profile decode failure is reported in `Pcm16WavIngestReport::profile_error` while the finalized, verified S0-only archive remains a successful ingest result. Capture and archive I/O failures remain ordinary outer errors; this API does not claim filesystem transactions, automatic recovery, conversion, inference, CLI, or C ABI support.
-
-`ingest_pcm16_flac` is the additive preservation-first C++ path for one bounded native `audio/flac` source. It validates before capture/output, captures one owned snapshot through the same hardened URI boundary, commits the descriptor and byte-exact FLAC S0, and only then decodes those same bytes through a private libFLAC decoder with MD5 checking and an independent caller-supplied decoded-PCM byte limit. Successful native signed 16-bit FLAC decoding appends the existing deterministic APS1 state plus exact `state_exact` provenance on the same stream and interval. Malformed native FLAC, unsupported non-16-bit FLAC, Ogg-FLAC/container input, or decoded-output exhaustion is reported in `Pcm16FlacIngestReport::profile_error` after finalizing a verified S0-only archive. The path does not rewrite the source FLAC, does not claim input/output FLAC byte identity, and adds no FFmpeg/general conversion, resampling/remixing, CLI/C ABI, or inference behavior.
-
-`query_verified_pcm16_states` is the additive trusted read path for finalized archives. It filters `state_exact` provenance subjects to `pcm16`, resolves the exact subject and its single direct `source_bytes` input, requires the same logical stream and authenticated interval, enforces caller result and encoded-byte bounds before payload decode, and then decodes only the verified APS1 subject. Physical `pcm16` records without matching state-exact provenance are not promoted to S1. Contradictory selected lineage fails closed rather than being silently skipped. The returned `VerifiedPcm16State` retains both exact physical records and the full provenance object used to justify the state classification.
-
-`export_verified_pcm16_wav` is the additive lossless WAV output path for those D.3-verified states. It preserves D.3 ordering, preflights an aggregate caller output-byte limit before generating any WAV result, reads only the exact APS1 subject needed for each export, and invokes the generic exporter contract through a private Audio Profile implementation. Each result carries deterministic in-memory PCM16 RIFF/WAVE bytes, the exact APS1 support link, and the D.3 state/source/provenance evidence. The API does not write files or archives and does not classify the external WAV bytes as a new CODA S1/D record.
-
-`export_verified_pcm16_flac` is the additive native-FLAC output path for the same D.3-verified states. It uses libFLAC through a private Audio Profile encoder, keeps streamable-subset mode and encoder verification enabled, preserves the exact APS1 sample rate, channels, interleaving, frame/sample values, and retains the exact APS1 support link plus D.3 state/source/provenance evidence. Output is bounded in memory and returned as `audio/flac`; the API performs no archive, filesystem, or network write. Independent libFLAC decoder coverage proves sample-exact PCM round trips. The FLAC bitstream is an external representation rather than a new canonical S1: APS1 remains the S1 identity, and CODEC does not claim byte-for-byte stability across different compatible libFLAC versions. This path does not add FFmpeg/general media conversion, resampling, remixing, CLI or C ABI FLAC export, or neural inference.
-
-`separate_verified_pcm16_offline` is the additive bounded offline processing path over an explicit interval of D.3-verified PCM16 S1. It invokes one caller-supplied `SeparationBackend` per selected state through the generic processor validator, requires bounded and geometry-compatible stems plus a mandatory residual, and returns each APS1-encoded output explicitly as D with exact physical S1 support and the full verified S1-to-S0 lineage. Every run retains backend/provider identity, a backend-reported SHA-256 model identity, a deterministic request-configuration hash, typed role metadata, and independently computed maximum-absolute and RMS sample-domain reconstruction error alongside the backend metric. Results are caller-persistable but this function does not write or mutate an archive. The default backend remains explicitly `model_incompatible`; this orchestration does not bundle a neural model/runtime, make neural/GPU capabilities available, add streaming/latency/quality claims, or perform identity fusion.
-
-`encode_separation_model_bundle` and `decode_separation_model_bundle` implement the additive in-memory AMB1 structural and integrity boundary for Audio separation models. AMB1 deterministically binds bounded printable manifest identity, license and quality-domain metadata, exact sample/framing/source geometry, causal behavior, and distinct tensor names to opaque ONNX bytes by SHA-256; strict decode rejects unknown flags, noncanonical lengths, malformed metadata, truncation, trailing bytes, and model-hash mismatch before returning owned verified bytes plus whole-bundle identity. Version 1 fixes float32 input `[batch, channel, sample]`, float32 output `[batch, source, channel, sample]`, signed PCM16 divided by 32768.0, and source-waveform output semantics so a later runtime has one unambiguous compatibility target. The bundle hashes prove byte identity only: this API does not parse or execute ONNX, authenticate a signer, validate licensing or quality, load a provider, access a filesystem/network/archive, or make neural/GPU capabilities available.
-
-`create_onnx_cpu_separation_backend` is the additive caller-activated D.9 execution boundary for a D.8 verified bundle. When CODEC is built with private ONNX Runtime headers, the factory re-encodes and rechecks exact model/bundle identities before loading the caller-selected runtime library, creates an in-memory sequential CPU session, and requires one named float32 `[1, channel, window]` input plus one fixed float32 `[1, source, channel, window]` output compatible with AMB1. The returned legacy backend applies checked input/window/output bounds, deterministic zero-padded rectangular overlap/add, PCM16 normalization and saturation, and mandatory residual construction; D.7 independently validates and records the resulting D artifacts and provenance. Builds without those headers return explicit `model_incompatible`, and the default backend remains unavailable because CODEC bundles neither a production model nor a runtime selection. `onnx_cpu_separation_runtime_compiled()` reports build support only—not library/model availability, quality, trust, or safety. CODEC does not authenticate, sandbox, download, or qualify caller models, hard-limit ONNX Runtime's internal graph allocations, expose GPU providers, or claim neural separation/streaming/latency/quality availability.
-
-## Security and scope
-
-- Capture only authorized sources; do not bypass DRM, encryption, access controls, paywalls, or provider restrictions.
-- Keep secrets external where possible and redact configured secrets from descriptors/provenance.
-- Treat signatures as authentication of statements, not automatic proof of physical-world conclusions.
-- CODEC may record/enforce configured authorization metadata, but it does not create legal authority.
-
-## Contribution rule
-
-Before changing CODEC, use [`AI_WORKSHEET.md`](AI_WORKSHEET.md). Preserve the invariants above, add tests for new exactness/archive claims, keep current-status claims synchronized with code, and prefer generic stream primitives over profile-specific coupling.
-
-## References
-
-- [`AGENTS.md`](AGENTS.md) — cold-start instructions for repository-aware agents.
-- [`AI_WORKSHEET.md`](AI_WORKSHEET.md) — canonical AI work loop and merge gate.
-- [`docs/superpowers/specs/2026-08-18-generalized-coda-direction-design.md`](docs/superpowers/specs/2026-08-18-generalized-coda-direction-design.md) — full stream-first architecture and rationale.
-- [`CHANGELOG.md`](CHANGELOG.md) — released changes.
-- [`CONTRIBUTING.md`](CONTRIBUTING.md) — contribution basics.

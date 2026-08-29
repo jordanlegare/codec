@@ -70,7 +70,7 @@ Each accepted input contributes exactly one `ProvenanceRecordLink` copied from i
 - exact `StreamId`;
 - exact 16-bit record type code;
 - exact archive record sequence;
-- exact authenticated record hash.
+- exact record hash.
 
 F.1 does not reinterpret those records, infer truth class, rewrite provenance, or create CODA records.
 

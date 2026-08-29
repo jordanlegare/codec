@@ -117,6 +117,10 @@ Result<DistributedScheduleResult> schedule_partitions(
           .stream = partition.stream,
           .partition_index = partition_index,
           .worker_index = worker_index,
+          .status = DistributedPartitionOutcomeStatus::location_unavailable,
+          .selected_locations = {},
+          .execution = std::nullopt,
+          .error = std::nullopt,
       };
 
       auto resolved = resolve_partition_location_candidates(

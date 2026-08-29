@@ -40,6 +40,7 @@ add_library(codec_core
   src/core/sha256.cpp
   src/core/stream_continuity.cpp
   src/core/stream_provenance.cpp
+  src/distributed/partition.cpp
   src/inference/backend.cpp
   src/transport/multiplex.cpp
   src/transport/recovery.cpp
@@ -151,6 +152,7 @@ if(CODEC_BUILD_TESTS)
     tests/test_audio_offline_separation.cpp
     tests/test_engine.cpp
     tests/test_engine_concurrency.cpp
+    tests/test_distributed_partition.cpp
     tests/test_processing.cpp
     tests/test_exporter.cpp
     tests/test_stream.cpp

@@ -6,51 +6,51 @@ Canonical work loop for ChatGPT, Codex, and other agentic contributors.
 
 > Read `README.md` first. Read deeper design docs only when the task touches their subject. Do not reread large historical plans unless they are directly relevant.
 
-## Active work record — Stage E.5
+## Active work record — Stage F.1
 
 ```yaml
-task: Add bounded streaming repair orchestration that joins CMX1 frames, E.2 loss/recovery-group tracking, and E.4 XRF1 exact single-erasure recovery.
+task: Add bounded deterministic distributed work partitioning over exact extracted records without changing truth or archive semantics.
 base_ref: origin/main
-base_head_sha: bb982291131ec6a385fb6b1fc102d9aaaa33b87b
-work_branch: automation/stage-e5-streaming-repair
+base_head_sha: 5301da72c65f519b0c16347f8684be113d15ab0b
+work_branch: automation/stage-f1-distributed-partitioning
 current_version: 0.2.0
-active_roadmap_stage: E — generic CMX1 multiplexing, E.2 loss/group semantics, concurrent local recording/follow extraction, and validated XRF1 single-erasure recovery are integrated; the remaining explicit Stage E gate is bounded streaming repair orchestration with exact verification.
+active_roadmap_stage: F — Stage E is complete at the bounded CMX1/E.2/XRF1 streaming-repair scope; the first unmet distributed-profile gate is worker-agnostic exact-work partitioning.
 continuity_evidence:
-  - git_head: main at bb982291131ec6a385fb6b1fc102d9aaaa33b87b, the merged Stage E.4 commit
-  - open_prs: stale draft E.3 PR 26 only; no E.5 work exists
-  - exact_head_ci: E.4 PR head 1aaf6c7320f75c2d0c8ddf7d00d88f197b5dae16 has successful CI runs 196 and 197; the merge commit exposes no pull-request workflow run or combined status
-  - roadmap_issue: issue 10 is the single exact-title CODEC v1.0 roadmap execution log
+  - git_head: main at 5301da72c65f519b0c16347f8684be113d15ab0b
+  - open_prs: F.1 PR 33 plus stale unrelated draft E.3 PR 26; draft 26 is preserved untouched
+  - exact_head_ci: Stage E.5 PR head 57f6bbd6e8b8fb9e2ac20ee23d78a8c9bbc55036 passed CI 209 before merge
+  - roadmap_issue: issue 10 records Stage E complete and F.1 next
 roadmap_issue_title: CODEC v1.0 roadmap execution log
-scope: recovery
+scope: distributed
 touched_truth_classes: []
 current_behavior_verified_from: [code, tests, cli, changelog]
-new_capability_claim: A caller can run a bounded in-memory repair session over explicit recovery groups, tolerate bounded frame reordering/duplicates/late arrivals, defer output until XRF1 commitment plus CMX1 integrity and exact membership verify, and reconstruct only one explicitly sealed erasure.
+new_capability_claim: A caller can deterministically divide an exact extracted-record batch into bounded one-stream logical work partitions with stable exact-record membership identities, without assigning workers or storage locations.
 change_class: generic_stream_abstraction
 ```
 
 ```text
-BEFORE: E.1 decodes CMX1 frames, E.2 observes loss and explicit recovery groups, and E.4 verifies one XRF1 single-erasure reconstruction, but callers must coordinate those primitives themselves and no streaming session gates frame release on the combined evidence.
-AFTER: A bounded StreamingRepairSession accepts complete CMX1 and XRF1 wire objects for registered groups, tracks reorder/duplicate/late arrival state, emits only committed and verified members, and invokes E.4 recovery only after E.2 sealing proves exactly one missing source slot.
+BEFORE: CODEC has stable logical StreamId, exact extracted-record, provenance-link, processor/exporter, and Stage E transport/recovery contracts, but no generic primitive defines deterministic distributed work partitions independently of workers or storage.
+AFTER: A caller can partition an exact ExtractedRecord batch into caller-bounded one-stream logical work units that preserve ordered exact physical record links and receive deterministic SHA-256 membership identities without changing truth, provenance, or archive bytes.
 ```
 
 ```yaml
 proof:
-  regression_test: tests/test_transport_streaming_repair.cpp plus all existing tests
-  exactness_test: emitted observed/recovered encoded CMX1 bytes equal deterministic source encodings; recovered output matches the exact missing source member
-  compatibility_test: CMX1, XRF1, E.2 tracker, CODA, C ABI, CLI, and installed package behavior remain compatible; installed C++ package consumer exercises the additive session API
-  failure_path_test: corrupt/noncanonical CMX1 or XRF1, commitment conflict, wrong membership, conflicting duplicate, zero/multiple erasures, post-seal new members, and session byte/group limits fail closed without unverified emission
-  security_test: SHA-256 remains integrity-only; no authentication, authorization, network transport, or automatic CODA persistence is introduced
-  benchmark: n/a — no performance, latency, scale, or measured loss-tolerance claim
+  regression_test: tests/test_distributed_partition.cpp plus all existing tests
+  exactness_test: every partition link equals its source RecordInfo stream/type/sequence/hash and per-stream relative input order is preserved
+  compatibility_test: CODA, S0/S1/D, provenance, Stage E, C ABI, CLI, and installed package behavior remain compatible; installed C++ package consumer exercises the additive distributed header
+  failure_path_test: zero limits, malformed exact input sizes, oversized individual records, aggregate input exhaustion, and partition-count exhaustion fail closed without partial results
+  security_test: partition SHA-256 is identity/integrity evidence only; no authentication, authorization, RPC, worker, or storage trust claim is introduced
+  benchmark: n/a — no throughput, latency, scale, or cost claim
 ```
 
 Invariant decisions:
 
-- [x] S0/S1/D semantics remain unchanged; streaming repair emits verified transport frames and does not classify or persist truth records.
-- [x] CMX1, XRF1, E.2, and CODA wire/storage formats remain unchanged; E.5 is additive orchestration.
-- [x] Reordering/duplicate tolerance is bounded by explicit group/source-slot and aggregate encoded-byte limits.
-- [x] A source member is emitted only after exact XRF1 length/SHA-256 commitment, complete CMX1 integrity, and exact stream/epoch/sequence membership verify.
-- [x] Recovery is attempted only for a sealed group with exactly one known missing source slot and still uses E.4's exact verification primitive.
-- [x] No sockets, retransmission/ARQ, automatic CODA persistence, authentication, multi-erasure correction, CLI/C ABI expansion, or scale claim is introduced.
+- [x] S0/S1/D semantics remain unchanged; partitions reference exact physical records but do not create or reclassify truth records.
+- [x] Logical StreamId is never replaced by partition, worker, storage, archive, or deployment identity.
+- [x] Every partition contains exactly one StreamId and preserves ordered exact record links; records are never split.
+- [x] Partition identity is deterministic over versioned exact membership only and is not authentication or a global archive locator.
+- [x] All input, aggregate-byte, partition-count, records-per-partition, and bytes-per-partition resources are caller bounded.
+- [x] No worker scheduler, RPC/socket layer, retry/lease semantics, object store, distributed index, automatic CODA persistence, deployment integration, or scale claim is introduced.
 
 ## 0. Work record
 

@@ -1,5 +1,7 @@
 #include <codec/archive.hpp>
 #include <codec/archive_follow.hpp>
+#include <codec/distributed.hpp>
+#include <codec/integrity.hpp>
 #include <codec/profiles/audio.hpp>
 #include <codec/recovery.hpp>
 #include <codec/streaming_repair.hpp>
@@ -138,6 +140,31 @@ int main() {
           codec::StreamingRepairFrameKind::recovered ||
       repair_sealed_batch->frames.front().frame.sequence != xor_second.sequence ||
       repair_sealed_batch->frames.front().frame.payload != xor_second.payload) {
+    return 1;
+  }
+
+  codec::ExtractedRecord partition_input_a;
+  partition_input_a.record.type = codec::RecordType::source_bytes;
+  partition_input_a.record.stream =
+      codec::derive_stream_id("package-consumer/partition");
+  partition_input_a.record.sequence = 1;
+  partition_input_a.payload = {std::byte{0x10}};
+  partition_input_a.record.payload_size = 1;
+  partition_input_a.record.hash = codec::sha256(partition_input_a.payload);
+
+  auto partition_input_b = partition_input_a;
+  partition_input_b.record.sequence = 2;
+  partition_input_b.payload = {std::byte{0x20}, std::byte{0x21}};
+  partition_input_b.record.payload_size = 2;
+  partition_input_b.record.hash = codec::sha256(partition_input_b.payload);
+
+  const std::vector<codec::ExtractedRecord> partition_inputs{
+      partition_input_a, partition_input_b};
+  auto partitions = codec::partition_exact_records(partition_inputs);
+  if (!partitions || partitions->size() != 1 ||
+      partitions->front().records.size() != 2 ||
+      partitions->front().payload_bytes != 3 ||
+      partitions->front().stream != partition_input_a.record.stream) {
     return 1;
   }
 

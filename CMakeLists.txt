@@ -43,6 +43,7 @@ add_library(codec_core
   src/inference/backend.cpp
   src/transport/multiplex.cpp
   src/transport/recovery.cpp
+  src/transport/streaming_repair.cpp
   src/transport/xor_recovery.cpp
   src/watermark/carrier.cpp
   src/watermark/statement.cpp
@@ -157,6 +158,7 @@ if(CODEC_BUILD_TESTS)
     tests/test_transport_multiplex.cpp
     tests/test_transport_recovery.cpp
     tests/test_transport_recovery_integration.cpp
+    tests/test_transport_streaming_repair.cpp
     tests/test_transport_xor_recovery.cpp
     tests/test_watermark.cpp
   )

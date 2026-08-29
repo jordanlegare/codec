@@ -1,0 +1,116 @@
+name: Prepare v0.3.0 metadata
+
+on:
+  push:
+    branches:
+      - automation/release-v0.3.0
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: automation/release-v0.3.0
+          fetch-depth: 0
+      - name: Cut release metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+
+          cmake = Path('CMakeLists.txt')
+          text = cmake.read_text()
+          old = 'project(CODEC VERSION 0.2.0 LANGUAGES C CXX)'
+          new = 'project(CODEC VERSION 0.3.0 LANGUAGES C CXX)'
+          if old not in text and new not in text:
+              raise SystemExit('unexpected CMake project version')
+          cmake.write_text(text.replace(old, new, 1))
+
+          readme = Path('README.md')
+          text = readme.read_text()
+          old = '  version: 0.2.0'
+          new = '  version: 0.3.0'
+          if old not in text and new not in text:
+              raise SystemExit('unexpected README manifest version')
+          readme.write_text(text.replace(old, new, 1))
+
+          changelog = Path('CHANGELOG.md')
+          text = changelog.read_text()
+          marker = '## Unreleased\n\n'
+          release = '## 0.3.0 — 2026-08-29\n\n'
+          if release not in text:
+              if marker not in text:
+                  raise SystemExit('missing Unreleased changelog section')
+              text = text.replace(marker, marker + release, 1)
+          changelog.write_text(text)
+
+          worksheet = Path('AI_WORKSHEET.md')
+          text = worksheet.read_text()
+          start = text.find('## Active work record —')
+          end = text.find('## 0. Work record')
+          if start < 0 or end < 0 or end <= start:
+              raise SystemExit('cannot locate active worksheet record')
+          active = '''## Active work record — Release v0.3.0
+
+```yaml
+task: Cut CODEC v0.3.0 from the F.7-complete tree without adding Stage F.8 functionality.
+base_ref: origin/main
+base_head_sha: 1c4ad9e18b86630b2809468e69e7582bd7842e92
+work_branch: automation/release-v0.3.0
+current_version: 0.3.0
+active_roadmap_stage: F — F.1-F.7 are implemented as bounded C++ library/package primitives; concrete remote networking and user-facing distributed CLI orchestration remain planned.
+continuity_evidence:
+  - git_head: release preparation starts from F.7-complete main at 1c4ad9e18b86630b2809468e69e7582bd7842e92
+  - open_prs: none existed before release preparation; release work is PR 41
+  - exact_head_ci: CLI-version RED head 49984dc8d442d0d7a93f5a46e741accec0a14304 failed only codec-cli-integration; GREEN head f3b5e0c8883f81744ef21a8651d14bd9b414d139 passed GCC, Clang, installed-package consumers, and sanitizers in CI 294
+  - roadmap_issue: issue 10 remains the canonical roadmap evidence log; F.8 is not part of this release
+roadmap_issue_title: CODEC v1.0 roadmap execution log
+scope: docs
+current_behavior_verified_from: [code, tests, cli, changelog]
+new_capability_claim: CODEC v0.3.0 packages the F.7-complete implementation and the CLI now reports the configured project version; no new distributed execution capability is introduced by the release cut.
+change_class: documentation_only
+```
+
+```text
+BEFORE: The F.7-complete tree is still versioned 0.2.0 and the CLI independently reports stale 0.1.0 literals.
+AFTER: Package, README, changelog, usage banner, --version, and capabilities version metadata agree on 0.3.0; runtime semantics remain the F.7-complete tree.
+```
+
+```yaml
+proof:
+  regression_test: tests/cli_integration.sh requires capabilities.version to equal CMake PROJECT_VERSION
+  exactness_test: n/a — no S0/S1/D or archive-format change
+  compatibility_test: full CTest plus installed-package consumers on GCC and Clang
+  failure_path_test: RED CI 292 proves the stale CLI version was detected before production repair
+  security_test: n/a — no network/authentication/session behavior is added
+  benchmark: n/a — no performance or scale claim
+```
+
+Invariant decisions:
+
+- [x] S0/S1/D, CODA, provenance, Stage E, F.1-F.7, C ABI, and distributed-wire semantics are unchanged.
+- [x] v0.3.0 includes the existing Unreleased E.4/E.5 and F.1-F.7 changes.
+- [x] F.1-F.7 remain C++ library/package capabilities; this release does not expose distributed execution through the CLI.
+- [x] Concrete socket/HTTP/gRPC remote-worker transport, endpoint policy, authentication/session security, discovery, retry/failover, concurrency, deployment, and F.8 remain unimplemented.
+
+'''
+          worksheet.write_text(text[:start] + active + text[end:])
+          PY
+
+          git rm .github/workflows/prepare-v030.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add CMakeLists.txt README.md CHANGELOG.md AI_WORKSHEET.md
+          if git diff --cached --quiet; then
+            echo 'release metadata already prepared'
+            exit 0
+          fi
+          git commit -m 'release: prepare CODEC v0.3.0 metadata'
+          git push origin HEAD:automation/release-v0.3.0

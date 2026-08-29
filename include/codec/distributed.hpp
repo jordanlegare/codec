@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -185,5 +186,46 @@ resolve_partition_location_candidates(
     const DistributedLocationIndex& index,
     const DistributedPartition& partition,
     DistributedLocationQueryLimits limits = {});
+
+enum class DistributedPartitionOutcomeStatus {
+  succeeded,
+  location_unavailable,
+  retrieval_failed,
+  execution_failed,
+};
+
+struct DistributedSchedulingLimits {
+  std::size_t maximum_partitions{4096};
+  std::size_t maximum_workers{256};
+  std::size_t maximum_total_records{16384};
+  std::uint64_t maximum_total_payload_bytes{256ULL * 1024ULL * 1024ULL};
+  DistributedLocationQueryLimits location_query{};
+  DistributedRetrievalLimits retrieval{};
+  DistributedExecutionLimits execution{};
+};
+
+struct DistributedPartitionOutcome {
+  Sha256 partition_identity{};
+  StreamId stream{};
+  std::size_t partition_index{};
+  std::size_t worker_index{};
+  DistributedPartitionOutcomeStatus status{
+      DistributedPartitionOutcomeStatus::location_unavailable};
+  std::vector<DistributedRecordLocation> selected_locations;
+  std::optional<DistributedExecutionResult> execution;
+  std::optional<Error> error;
+};
+
+struct DistributedScheduleResult {
+  std::size_t succeeded{};
+  std::vector<DistributedPartitionOutcome> partitions;
+};
+
+Result<DistributedScheduleResult> schedule_partitions(
+    std::span<DistributedWorker* const> workers,
+    ObjectStoreBackend& backend,
+    const DistributedLocationIndex& index,
+    std::span<const DistributedPartition> partitions,
+    DistributedSchedulingLimits limits = {});
 
 }  // namespace codec

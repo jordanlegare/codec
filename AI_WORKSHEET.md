@@ -6,53 +6,53 @@ Canonical work loop for ChatGPT, Codex, and other agentic contributors.
 
 > Read `README.md` first. Read deeper design docs only when the task touches their subject. Do not reread large historical plans unless they are directly relevant.
 
-## Active work record — Stage F.4
+## Active work record — Stage F.5
 
 ```yaml
-task: Add a bounded deterministic distributed location index that maps exact F.1 record membership to one or more F.3 placement candidates without changing record truth or partition identity.
+task: Add bounded deterministic multi-partition scheduling that composes F.1 partitions through F.4 location resolution, F.3 exact retrieval, and F.2 worker execution with per-partition outcomes.
 base_ref: origin/main
-base_head_sha: 56ce57a40bcfeeff97598c6d3afb4d58e3d7c25b
-work_branch: automation/stage-f4-distributed-location-index
+base_head_sha: 1e48a16b11378897b0311f4c198c443d1a1bb976
+work_branch: automation/stage-f5-bounded-orchestration
 current_version: 0.2.0
-active_roadmap_stage: F — F.1 exact-work partitioning, F.2 bounded worker execution, and F.3 exact object-store materialization are merged; bounded location/index resolution is the next unmet dependency.
+active_roadmap_stage: F — F.1 partitioning, F.2 one-partition execution, F.3 exact retrieval, and F.4 bounded location indexing are merged; bounded multi-partition scheduling/orchestration is the next unmet dependency.
 continuity_evidence:
-  - git_head: main at 56ce57a40bcfeeff97598c6d3afb4d58e3d7c25b
-  - open_prs: stale unrelated draft PR 26 is preserved; F.4 uses its own branch/PR
-  - exact_head_ci: F.3 final head c87d076a94769b9281958d3d56880ca36d04900e passed CI 245 before merge
-  - roadmap_issue: issue 10 records F.3 complete and distributed location/indexing next
+  - git_head: main at 1e48a16b11378897b0311f4c198c443d1a1bb976
+  - open_prs: stale unrelated draft PR 26 is preserved; F.5 uses its own branch/PR 37
+  - exact_head_ci: F.4 merge evidence is recorded in roadmap issue 10; F.5 RED head 3aa5ccf612be995d3f57f0702c094b2f9400b144 failed only on the intentionally absent scheduler API
+  - roadmap_issue: issue 10 records F.4 complete and requires a fresh Stage F dependency selection
 roadmap_issue_title: CODEC v1.0 roadmap execution log
 scope: distributed
 touched_truth_classes: []
 current_behavior_verified_from: [code, tests, cli, changelog]
-new_capability_claim: A caller can build a bounded immutable in-memory index from exact F.3 record-location descriptors and deterministically resolve an F.1 partition into ordered per-record placement candidate sets, including explicit incomplete resolution when a member has no candidate.
+new_capability_claim: A caller can schedule a bounded ordered batch of exact F.1 partitions across an ordered worker pool, deterministically select canonical F.4 placements, materialize through F.3, execute through F.2, and receive one explicit outcome per partition.
 change_class: generic_stream_abstraction
 ```
 
 ```text
-BEFORE: F.3 can materialize a partition only when the caller already supplies one exact ordered location descriptor per member; CODEC has no generic index that maps exact F.1 links to available placement candidates.
-AFTER: build_distributed_location_index validates and canonicalizes bounded F.3 descriptors into immutable exact-link entries, and resolve_partition_location_candidates returns deterministic candidate sets in F.1 membership order without selecting a backend or performing I/O.
+BEFORE: F.1-F.4 expose exact partitioning, one-partition worker execution, exact retrieval, and bounded canonical placement lookup, but callers must coordinate more than one partition themselves.
+AFTER: schedule_partitions preflights a bounded ordered batch, assigns workers by stable input-position round robin, selects the first canonical F.4 candidate for each exact member, composes F.3 retrieval into F.2 execution, and returns one ordered success/failure outcome per input partition.
 ```
 
 ```yaml
 proof:
-  regression_test: tests/test_distributed_location_index.cpp plus unchanged F.1/F.2/F.3 and all existing tests
-  exactness_test: F.1 CDP1 is revalidated; exact links and full RecordInfo remain unchanged; replica candidates for one link must have identical original record metadata
-  compatibility_test: F.1 CDP1 bytes, F.2 execution, F.3 retrieval, CODA, S0/S1/D, provenance, Stage E, C ABI, CLI, and installed package behavior remain compatible
-  failure_path_test: malformed locations, conflicting replica metadata, exceeded input/metadata/record/candidate/query bounds, and tampered partitions fail closed without storage/backend I/O
-  security_test: location strings remain descriptive placement metadata only; the index performs no credential, authorization, authentication, attestation, availability, or storage-proof decision
-  benchmark: n/a — no throughput, latency, scale, availability, durability, fault-tolerance, or cost claim
+  regression_test: tests/test_distributed_scheduler.cpp plus unchanged F.1/F.2/F.3/F.4 and all existing tests
+  exactness_test: each F.1 CDP1 identity and stream membership is revalidated before side effects; F.4 canonical candidate order is preserved; F.3 still verifies exact length and SHA-256 before F.2 receives materialized records
+  compatibility_test: installed-package consumer exercises F.5 from installed <codec/distributed.hpp>; F.1-F.4 APIs, CODA, S0/S1/D, provenance, Stage E, C ABI, and CLI remain compatible
+  failure_path_test: invalid worker/batch/aggregate bounds and tampered/duplicate partitions fail before backend or worker side effects; missing locations, retrieval failures, and execution failures become ordered per-partition outcomes while later partitions continue
+  security_test: scheduling consumes caller-supplied workers, backend, and F.4 index only; it adds no credential, authorization, authentication, attestation, discovery, health, retry, failover, lease, or exactly-once decision
+  benchmark: n/a — synchronous deterministic orchestration adds no throughput, latency, concurrency, availability, durability, fault-tolerance, or scale claim
 ```
 
 Invariant decisions:
 
-- [x] S0/S1/D semantics remain unchanged; F.4 indexes placement metadata only.
-- [x] F.1 `DistributedPartition` and CDP1 bytes remain unchanged and independent of placement.
-- [x] F.3 `DistributedRecordLocation` is reused as the candidate unit; no second placement schema is introduced.
-- [x] All candidates for one exact physical link must carry identical full original RecordInfo metadata; conflicting metadata is rejected.
-- [x] Exact duplicate placements are idempotently deduplicated; stored entries and candidates are canonical-sorted so lookup output is independent of registration order.
-- [x] Missing indexed placement is represented explicitly by an empty candidate set and `complete=false`; F.4 does not fabricate a location or invent a retry route.
-- [x] Query output is caller-bounded and never silently truncates candidates.
-- [x] F.4 performs no ObjectStoreBackend reads, backend selection, retrieval, network discovery, persistence, scheduling, RPC execution, retry/failover, deployment integration, or scale claim.
+- [x] S0/S1/D semantics remain unchanged; F.5 coordinates existing exact/derived boundaries only.
+- [x] F.1 `DistributedPartition` and CDP1 bytes remain unchanged and are revalidated before scheduling side effects.
+- [x] The complete batch is structurally and aggregately preflighted before the first backend read or worker invocation.
+- [x] Worker assignment is deterministic from input position (`partition_index % workers.size()`) and is not perturbed by prior partition failures.
+- [x] F.5 selects only the first canonical F.4 candidate for each exact member; it invents no health, locality, cost, retry, or failover ranking.
+- [x] F.4/F.3/F.2 failures after preflight are captured as explicit per-partition outcomes and do not reorder or suppress later partitions.
+- [x] Retryable nested errors are preserved as evidence but F.5 performs no retry.
+- [x] F.5 is synchronous and sequential; it adds no threads, RPC/network execution, worker/backend discovery, persistent/global catalogs, leases, heartbeats, exactly-once semantics, deployment integration, or scale claim.
 
 ## 0. Work record
 

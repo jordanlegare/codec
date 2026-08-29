@@ -244,8 +244,31 @@ int main() {
           .length = partition_input_b.record.payload_size,
       },
   };
+
+  auto location_index = codec::build_distributed_location_index(locations);
+  if (!location_index || location_index->record_count() != 2 ||
+      location_index->location_count() != 2) {
+    return 1;
+  }
+  auto location_candidates = codec::resolve_partition_location_candidates(
+      *location_index, partitions->front());
+  if (!location_candidates || !location_candidates->complete ||
+      location_candidates->partition_identity != partitions->front().identity ||
+      location_candidates->stream != partitions->front().stream ||
+      location_candidates->records.size() != 2 ||
+      location_candidates->records[0].candidates.size() != 1 ||
+      location_candidates->records[1].candidates.size() != 1) {
+    return 1;
+  }
+  std::vector<codec::DistributedRecordLocation> selected_locations;
+  selected_locations.reserve(location_candidates->records.size());
+  for (const auto& candidate_set : location_candidates->records) {
+    if (candidate_set.candidates.empty()) return 1;
+    selected_locations.push_back(candidate_set.candidates.front());
+  }
+
   auto retrieved = codec::retrieve_partition_records(
-      object_store, partitions->front(), locations);
+      object_store, partitions->front(), selected_locations);
   if (!retrieved ||
       retrieved->partition_identity != partitions->front().identity ||
       retrieved->stream != partitions->front().stream ||

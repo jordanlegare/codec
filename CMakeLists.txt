@@ -159,6 +159,7 @@ if(CODEC_BUILD_TESTS)
     tests/test_engine_concurrency.cpp
     tests/test_distributed_location_index.cpp
     tests/test_distributed_partition.cpp
+    tests/test_distributed_remote_worker.cpp
     tests/test_distributed_retrieval.cpp
     tests/test_distributed_scheduler.cpp
     tests/test_distributed_worker.cpp

@@ -17,7 +17,7 @@ current_version: 0.2.0
 active_roadmap_stage: F — Stage E is complete at the bounded CMX1/E.2/XRF1 streaming-repair scope; the first unmet distributed-profile gate is worker-agnostic exact-work partitioning.
 continuity_evidence:
   - git_head: main at 5301da72c65f519b0c16347f8684be113d15ab0b
-  - open_prs: inspect before merge and preserve unrelated work
+  - open_prs: F.1 PR 33 plus stale unrelated draft E.3 PR 26; draft 26 is preserved untouched
   - exact_head_ci: Stage E.5 PR head 57f6bbd6e8b8fb9e2ac20ee23d78a8c9bbc55036 passed CI 209 before merge
   - roadmap_issue: issue 10 records Stage E complete and F.1 next
 roadmap_issue_title: CODEC v1.0 roadmap execution log

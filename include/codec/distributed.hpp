@@ -8,6 +8,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace codec {
@@ -61,6 +62,50 @@ class LocalProcessorWorker final : public DistributedWorker {
  private:
   StreamProcessor* processor_{};
   std::string worker_name_;
+};
+
+struct DistributedRemoteWorkerLimits {
+  std::size_t maximum_input_records{1024};
+  std::uint64_t maximum_input_bytes{64ULL * 1024ULL * 1024ULL};
+  std::size_t maximum_transport_name_bytes{256};
+  std::size_t maximum_worker_name_bytes{256};
+  std::size_t maximum_processor_name_bytes{256};
+  ProcessorRunLimits processor{};
+};
+
+struct DistributedRemoteExecutionResponse {
+  std::string worker_name;
+  std::string processor_name;
+  std::vector<ProcessorOutput> outputs;
+};
+
+class DistributedWorkerTransport {
+ public:
+  virtual ~DistributedWorkerTransport() = default;
+  virtual std::string name() const = 0;
+  virtual Result<DistributedRemoteExecutionResponse> dispatch(
+      std::string_view worker_name,
+      std::string_view processor_name,
+      std::span<const ExtractedRecord> inputs) = 0;
+};
+
+class RemoteDistributedWorker final : public DistributedWorker {
+ public:
+  RemoteDistributedWorker(DistributedWorkerTransport& transport,
+                          std::string worker_name,
+                          std::string processor_name,
+                          DistributedRemoteWorkerLimits limits = {});
+
+  std::string name() const override;
+  std::string processor_name() const override;
+  Result<std::vector<ProcessorOutput>> execute(
+      std::span<const ExtractedRecord> inputs) override;
+
+ private:
+  DistributedWorkerTransport* transport_{};
+  std::string worker_name_;
+  std::string processor_name_;
+  DistributedRemoteWorkerLimits limits_{};
 };
 
 struct DistributedExecutionResult {

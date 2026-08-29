@@ -43,6 +43,7 @@ add_library(codec_core
   src/distributed/identity.cpp
   src/distributed/location_index.cpp
   src/distributed/partition.cpp
+  src/distributed/remote_worker.cpp
   src/distributed/retrieval.cpp
   src/distributed/scheduler.cpp
   src/distributed/worker.cpp
@@ -159,6 +160,7 @@ if(CODEC_BUILD_TESTS)
     tests/test_engine_concurrency.cpp
     tests/test_distributed_location_index.cpp
     tests/test_distributed_partition.cpp
+    tests/test_distributed_remote_worker.cpp
     tests/test_distributed_retrieval.cpp
     tests/test_distributed_scheduler.cpp
     tests/test_distributed_worker.cpp

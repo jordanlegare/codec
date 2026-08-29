@@ -73,6 +73,7 @@ implemented_v0_1:
     - concurrent repeated-feed and generic-stream recording into one CODA writer with descriptors committed before producers start, caller-bounded per-stream/aggregate queues, blocking backpressure, single-writer serialization, exact per-stream S0 byte order, and no deterministic cross-stream ordering claim
     - bounded verified-prefix source-exact follow extraction through SourceExactCursor and the CLI by exact StreamId or feed label; limits paginate without skipping an unreturned selected record, oversized individual selected records fail closed, output is appended incrementally, and following ends only after a committed final index is visible
     - bounded deterministic distributed work partitioning over exact ExtractedRecord batches: every partition contains one StreamId, preserves ordered exact physical record links without splitting records, obeys caller record/byte/partition limits, and receives a stable SHA-256 identity over versioned exact membership without assigning a worker or storage location
+    - bounded synchronous distributed worker execution for one exact partition: execute_partition verifies F.1 CDP1 identity, ordered physical links, stream membership, payload sizes and SHA-256s, aggregate bytes, and label/resource limits before exactly one worker invocation; LocalProcessorWorker delegates to one caller-owned StreamProcessor and outputs remain subject to invoke_processor validation
     - C++ API, C ABI, CLI
   audio_profile:
     - explicit C++ profile facade at codec/profiles/audio.hpp in codec::profiles::audio, forwarding the exact existing WAV/PCM, watermark, and separation types/functions while root-level codec::* audio APIs remain compatible
@@ -103,7 +104,7 @@ planned_not_implemented:
   - video, telemetry, sensor, document/event, network/system profiles
   - production neural separation/diarization/identity models
   - transport retransmission/ARQ, authenticated transport/session semantics, multi-erasure correction/FEC, automatic CODA persistence of repair traffic/results, and measured loss-tolerance/throughput/latency/scale claims beyond the implemented bounded Stage E XOR single-erasure repair session
-  - distributed workers/scheduler, RPC execution, object-store backends and remote retrieval, distributed indexes/global archive locations, automatic distributed persistence, operational benchmarks, and deployment integrations beyond the implemented deterministic F.1 partition descriptor primitive
+  - multi-partition scheduling/worker pools, RPC/network execution, processor discovery/distribution, worker authentication/attestation, leases/retries/exactly-once semantics, object-store backends and remote retrieval, distributed indexes/global archive locations, automatic distributed persistence, operational benchmarks, and deployment integrations beyond the implemented F.1 partitioning and F.2 synchronous worker-execution primitives
   - trust/selective-disclosure profile
 
 profile_rule:
@@ -117,7 +118,7 @@ roadmap_order:
   - expose generic adapter/processor/query/extraction boundaries
   - complete Audio Stream Profile 1.0
   - Stage E transport/recovery completed at the bounded CMX1 + E.2 + XRF1 streaming-repair scope
-  - Stage F distributed profile started with bounded deterministic exact-work partitioning; workers, storage, indexes, benchmarks, and deployment remain planned
+  - Stage F distributed profile has deterministic exact-work partitioning and bounded synchronous one-partition/one-worker execution; remote storage/retrieval, scheduling/network execution, indexes, benchmarks, and deployment remain planned
   - add trust/selective-disclosure
   - add more stream/vertical profiles
 ```
@@ -160,7 +161,7 @@ ctest --test-dir build-san --output-on-failure
 | `src/archive/` | CODA archive/integrity implementation |
 | `src/capture/` | Source ingest/capture |
 | `src/core/` | Engine/core primitives; currently includes compatibility-era feed naming |
-| `src/distributed/` | Stage F distributed-profile primitives; currently deterministic worker-agnostic exact-work partitioning only |
+| `src/distributed/` | Stage F distributed-profile primitives: deterministic exact-work partitioning plus bounded synchronous one-partition/one-worker execution |
 | `src/transport/` | Generic transport-profile framing, demultiplexing, loss observation, recovery groups, bounded XOR single-erasure repair, and bounded streaming repair orchestration |
 | `src/audio/` | Audio Stream Profile implementation |
 | `src/watermark/` | Audio W0/W1/W2 identity implementation |
@@ -207,7 +208,9 @@ F.1 adds `<codec/distributed.hpp>` as a bounded, worker-agnostic partition descr
 
 Each `DistributedPartition` carries only its logical stream, ordered exact physical record links, aggregate payload-byte count, and a SHA-256 identity over the private `CDP1` membership descriptor (stream bytes plus ordered record type/sequence/hash links). The identity is deterministic membership evidence, not authentication, authorization, a global archive locator, a storage address, or a worker assignment. F.1 changes no CODA bytes, S0/S1/D classification, provenance encoding, Stage E contract, C ABI, or CLI behavior.
 
-F.1 does **not** execute work remotely. Distributed workers or a scheduler, RPC/sockets, leases/retries/heartbeats or exactly-once claims, object-store backends or remote retrieval, distributed indexes/global archive locations, automatic CODA persistence, deployment integrations, and measured throughput/latency/scale/cost evidence remain unimplemented Stage F work.
+F.2 extends the same header with `DistributedWorker`, `LocalProcessorWorker`, and `execute_partition()`. Before any worker execution, the wrapper verifies the exact F.1 `CDP1` identity, one-stream ordered physical membership, input payload sizes and SHA-256s, aggregate payload bytes, and caller count/byte/name limits. The concrete local backend is synchronous and delegates exactly once to one caller-owned `StreamProcessor`; its outputs are accepted only through the existing `invoke_processor()` S1/D, interval, reserved-type, process-metadata, and output-resource validation path. Worker and processor names are descriptive labels only, and the returned execution result is in-memory metadata rather than authentication, attestation, persistence, or remote-execution proof.
+
+F.2 does **not** provide multi-partition scheduling or worker pools, RPC/sockets/network execution, processor discovery/distribution, worker authentication/attestation, leases/retries/heartbeats or exactly-once semantics, object-store backends or remote exact-record retrieval, distributed indexes/global archive locations, automatic CODA persistence, deployment integrations, or measured throughput/latency/scale/fault-tolerance/cost evidence. Those remain later Stage F work.
 
 ## Audio Stream Profile
 

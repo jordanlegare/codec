@@ -43,6 +43,7 @@ add_library(codec_core
   src/distributed/identity.cpp
   src/distributed/location_index.cpp
   src/distributed/partition.cpp
+  src/distributed/remote_worker.cpp
   src/distributed/retrieval.cpp
   src/distributed/scheduler.cpp
   src/distributed/worker.cpp

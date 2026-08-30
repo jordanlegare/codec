@@ -209,7 +209,7 @@ Multiple exact S0 inputs are allowed for frames that depend on more than one sou
 
 ### VPD1
 
-`VPD1` is a fixed-size, big-endian descriptor payload:
+`VPD1` is a fixed-size 36-byte, big-endian descriptor payload:
 
 - four-byte magic `VPD1`;
 - one-byte schema version, initially 1;
@@ -232,8 +232,8 @@ All integer fields are unsigned and encoded big-endian. The decoder requires the
 - four-byte magic `VFR1`;
 - one-byte schema version, initially 1;
 - three reserved bytes required to be zero;
-- one unsigned big-endian descriptor length;
-- one unsigned big-endian pixel length;
+- one unsigned 32-bit big-endian descriptor length;
+- one unsigned 64-bit big-endian pixel length;
 - exactly one canonical VPD1 descriptor;
 - exactly the canonical pixel bytes.
 

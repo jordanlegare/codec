@@ -236,10 +236,10 @@ TEST(video_hls_ingest_reopens_same_url_as_distinct_snapshots) {
   auto report = video::ingest_video_ffmpeg(request);
   EXPECT_TRUE(report);
   if (!report) return;
-  EXPECT_TRUE(report->state_exact());
   EXPECT_EQ(report->secondary_descriptors.size(), std::size_t{2});
   EXPECT_EQ(report->secondary_sources.size(), std::size_t{2});
   EXPECT_EQ(server.requests("/live/same.ts"), std::size_t{2});
+  EXPECT_TRUE(report->state_exact());
 
   auto archive = codec::CodaArchive::open(archive_path);
   EXPECT_TRUE(archive);

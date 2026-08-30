@@ -1,9 +1,9 @@
 # Preservation-First HLS Video Ingest Design
 
-Date: 2026-08-30  
-Repository: `jordanlegare/codec`  
-Status: Approved in chat; written-spec review pending  
-Base: `main` at `f68515068a022ef4f16eefdc1df0512b94bcec77`  
+Date: 2026-08-30
+Repository: `jordanlegare/codec`
+Status: Approved in chat; written-spec review pending
+Base: `main` at `f68515068a022ef4f16eefdc1df0512b94bcec77`
 Branch: `codex/video-hls-ingest`
 
 ## Decision

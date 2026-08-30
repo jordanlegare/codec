@@ -65,6 +65,7 @@ add_library(codec_core
   src/transport/streaming_repair.cpp
   src/transport/xor_recovery.cpp
   src/video/ffmpeg_ingest.cpp
+  src/video/hls_policy.cpp
   src/video/frame_state.cpp
   src/video/frame_state_reader.cpp
 )
@@ -204,6 +205,7 @@ if(CODEC_BUILD_TESTS)
     tests/test_video_ffmpeg_ingest.cpp
     tests/test_video_ffmpeg_ingest_limits.cpp
     tests/test_video_ffmpeg_layouts.cpp
+    tests/test_video_hls_policy.cpp
     tests/test_video_profile.cpp
     tests/test_video_state_reader.cpp
   )

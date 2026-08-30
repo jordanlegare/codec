@@ -22,6 +22,7 @@ struct HlsHttpResponse {
   int status{200};
   std::string content_type{"application/octet-stream"};
   std::vector<std::byte> body;
+  std::vector<std::vector<std::byte>> subsequent_bodies{};
 };
 
 class HlsHttpFixture {
@@ -154,7 +155,7 @@ class HlsHttpFixture {
     HlsHttpResponse response{.status = 404, .content_type = "text/plain", .body = {}};
     {
       std::scoped_lock lock(mutex_);
-      ++requests_[target];
+      const auto request_index = requests_[target]++;
       auto found = responses_.find(target);
       if (found == responses_.end()) {
         const auto query = target.find('?');
@@ -162,7 +163,14 @@ class HlsHttpFixture {
           found = responses_.find(target.substr(0, query));
         }
       }
-      if (found != responses_.end()) response = found->second;
+      if (found != responses_.end()) {
+        response = found->second;
+        if (request_index != 0U && !response.subsequent_bodies.empty()) {
+          const auto body_index =
+              std::min(request_index - 1U, response.subsequent_bodies.size() - 1U);
+          response.body = response.subsequent_bodies[body_index];
+        }
+      }
     }
     send_response(connection, response);
   }

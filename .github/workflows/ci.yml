@@ -18,7 +18,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build curl ca-certificates libssl-dev libcurl4-openssl-dev libflac-dev
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build curl ca-certificates libssl-dev libcurl4-openssl-dev libflac-dev libavformat-dev libavcodec-dev libavutil-dev libswscale-dev
       - name: Fetch pinned ONNX Runtime CPU
         env:
           ORT_VERSION: 1.29.0
@@ -41,7 +41,7 @@ jobs:
             echo "CXX=g++" >> "$GITHUB_ENV"
           fi
       - name: Configure
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCODEC_WARNINGS_AS_ERRORS=ON -DCODEC_ONNXRUNTIME_ROOT="$CODEC_ONNXRUNTIME_ROOT"
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCODEC_WARNINGS_AS_ERRORS=ON -DCODEC_ENABLE_FFMPEG_VIDEO=ON -DCODEC_ONNXRUNTIME_ROOT="$CODEC_ONNXRUNTIME_ROOT"
       - name: Build
         run: cmake --build build --parallel
       - name: Test
@@ -59,7 +59,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build curl ca-certificates libssl-dev libcurl4-openssl-dev libflac-dev
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build curl ca-certificates libssl-dev libcurl4-openssl-dev libflac-dev libavformat-dev libavcodec-dev libavutil-dev libswscale-dev
       - name: Fetch pinned ONNX Runtime CPU
         env:
           ORT_VERSION: 1.29.0
@@ -73,7 +73,7 @@ jobs:
           tar --no-same-owner -xzf "$archive" -C "$RUNNER_TEMP"
           echo "CODEC_ONNXRUNTIME_ROOT=$root" >> "$GITHUB_ENV"
       - name: Configure
-        run: cmake -S . -B build-san -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCODEC_WARNINGS_AS_ERRORS=ON -DCODEC_ENABLE_SANITIZERS=ON -DCODEC_ONNXRUNTIME_ROOT="$CODEC_ONNXRUNTIME_ROOT"
+        run: cmake -S . -B build-san -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCODEC_WARNINGS_AS_ERRORS=ON -DCODEC_ENABLE_SANITIZERS=ON -DCODEC_ENABLE_FFMPEG_VIDEO=ON -DCODEC_ONNXRUNTIME_ROOT="$CODEC_ONNXRUNTIME_ROOT"
       - name: Build
         run: cmake --build build-san --parallel
       - name: Test

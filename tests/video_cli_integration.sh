@@ -31,7 +31,7 @@ base64 --decode "$script_dir/fixtures/video_4x4_h264.mp4.b64" > "$fixture"
 "$codec_bin" --help > "$test_dir/help.txt"
 grep -Fq 'codec video ingest' "$test_dir/help.txt"
 grep -Fq 'codec video export' "$test_dir/help.txt"
-grep -Fq -- '--video --source' "$test_dir/help.txt"
+grep -Fq -- '--archive FILE --video --source' "$test_dir/help.txt"
 grep -Fq -- '--maximum-hls-resources' "$test_dir/help.txt"
 grep -Fq -- '--maximum-hls-resource-bytes' "$test_dir/help.txt"
 grep -Fq -- '--maximum-hls-total-bytes' "$test_dir/help.txt"
@@ -47,21 +47,19 @@ if [ "$missing_status" -ne 2 ]; then
 fi
 [ ! -e "$test_dir/missing.coda" ]
 
-# Repeated-group syntax must preflight every group before creating any archive.
-# The second group intentionally omits --label.
-multi_invalid_a="$test_dir/multi-invalid-a.coda"
-multi_invalid_b="$test_dir/multi-invalid-b.coda"
+# Repeated-group syntax has one command-level archive and must preflight every
+# group before creating it. The second group intentionally omits --label.
+multi_invalid="$test_dir/multi-invalid.coda"
 set +e
 "$codec_bin" video ingest \
+  --archive "$multi_invalid" \
   --video \
     --source "$fixture" \
-    --archive "$multi_invalid_a" \
     --label multi-a \
     --start-ns 0 \
     --end-ns 1000000000 \
   --video \
     --source "$fixture" \
-    --archive "$multi_invalid_b" \
     --start-ns 0 \
     --end-ns 1000000000 \
   > "$test_dir/multi-invalid.stdout" 2> "$test_dir/multi-invalid.stderr"
@@ -71,8 +69,7 @@ if [ "$multi_invalid_status" -ne 2 ]; then
   echo "repeated video ingest must preflight every group; got $multi_invalid_status" >&2
   exit 1
 fi
-[ ! -e "$multi_invalid_a" ]
-[ ! -e "$multi_invalid_b" ]
+[ ! -e "$multi_invalid" ]
 
 for hls_option in \
   --maximum-hls-resources \
@@ -136,13 +133,12 @@ fi
 "$codec_bin" verify "$probe_archive" --level full > "$test_dir/probe-verify.json"
 grep -q '"ok":true' "$test_dir/probe-verify.json"
 
-# Two valid repeated --video groups execute independently and emit JSONL.
-multi_a="$test_dir/multi-a.coda"
-multi_b="$test_dir/multi-b.coda"
+# Two valid repeated --video groups land in one CODA and emit ordered JSONL.
+multi_archive="$test_dir/multi.coda"
 "$codec_bin" video ingest \
+  --archive "$multi_archive" \
   --video \
     --source "$fixture" \
-    --archive "$multi_a" \
     --label camera-a \
     --start-ns 1000000000 \
     --end-ns 2000000000 \
@@ -150,14 +146,13 @@ multi_b="$test_dir/multi-b.coda"
     --maximum-frames 4 \
   --video \
     --source "$fixture" \
-    --archive "$multi_b" \
     --label camera-b \
     --start-ns 2000000000 \
     --end-ns 3000000000 \
     --layout rgb24 \
     --maximum-frames 4 \
   > "$test_dir/multi.jsonl"
-python3 - "$test_dir/multi.jsonl" "$multi_a" "$multi_b" <<'PY'
+python3 - "$test_dir/multi.jsonl" "$multi_archive" "$test_dir/multi-streams.txt" <<'PY'
 import json
 import sys
 
@@ -165,19 +160,33 @@ lines = [line for line in open(sys.argv[1], encoding="utf-8") if line.strip()]
 if len(lines) != 2:
     raise SystemExit(f"expected two repeated-ingest JSON lines, got {len(lines)}")
 records = [json.loads(line) for line in lines]
-if [record["archive"] for record in records] != sys.argv[2:4]:
-    raise SystemExit("repeated-ingest JSON archive order does not match group order")
+if [record["archive"] for record in records] != [sys.argv[2], sys.argv[2]]:
+    raise SystemExit("repeated-ingest groups did not report one shared archive")
 if [record["layout"] for record in records] != ["gray8", "rgb24"]:
     raise SystemExit("repeated-ingest layouts do not match their groups")
 if not all(record["state_exact"] for record in records):
     raise SystemExit("repeated-ingest group did not produce exact state")
-if records[0]["stream_id"] == records[1]["stream_id"]:
+streams = [record["stream_id"] for record in records]
+if streams[0] == streams[1]:
     raise SystemExit("distinct repeated-ingest groups unexpectedly share a stream ID")
+open(sys.argv[3], "w", encoding="utf-8").write("\n".join(streams) + "\n")
 PY
-"$codec_bin" verify "$multi_a" --level full > "$test_dir/multi-a-verify.json"
-"$codec_bin" verify "$multi_b" --level full > "$test_dir/multi-b-verify.json"
-grep -q '"ok":true' "$test_dir/multi-a-verify.json"
-grep -q '"ok":true' "$test_dir/multi-b-verify.json"
+"$codec_bin" verify "$multi_archive" --level full > "$test_dir/multi-verify.json"
+grep -q '"ok":true' "$test_dir/multi-verify.json"
+mapfile -t multi_streams < "$test_dir/multi-streams.txt"
+for index in 0 1; do
+  output="$test_dir/multi-$index.mp4"
+  "$codec_bin" video export "$multi_archive" \
+    --stream "${multi_streams[$index]}" \
+    --output "$output" \
+    --maximum-frames 4 \
+    --maximum-input-bytes 1048576 \
+    --maximum-output-bytes 1048576 \
+    > "$test_dir/multi-$index-export.json"
+  grep -q '"payload_type":"video/mp4"' "$test_dir/multi-$index-export.json"
+  grep -q '"frames":1' "$test_dir/multi-$index-export.json"
+  test -s "$output"
+done
 
 probe_stream=$(python3 - "$test_dir/probe.stdout" <<'PY'
 import json

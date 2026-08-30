@@ -250,8 +250,8 @@ project(my_codec_app LANGUAGES CXX)
 find_package(codec CONFIG REQUIRED)
 
 add_executable(my_codec_app main.cpp)
-target_compile_features(codec_package_consumer PRIVATE cxx_std_20)
-target_link_libraries(codec_package_consumer PRIVATE codec::codec)
+target_compile_features(my_codec_app PRIVATE cxx_std_20)
+target_link_libraries(my_codec_app PRIVATE codec::codec)
 ```
 
 If CODEC was installed into a non-system prefix:
@@ -681,10 +681,7 @@ codec record \
 Terminal 2:
 
 ```bash
-codec extract live.coda \
-  --feed live \
-  --follow \
-  --output live-copy.bin
+codec extract live.coda --feed live --follow --output live-copy.bin
 ```
 
 The follower reads only verified committed source records and exits after the recorder commits the final archive index.

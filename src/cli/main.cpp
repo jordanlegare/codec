@@ -1,20 +1,24 @@
 #include <codec/archive.hpp>
 #include <codec/archive_follow.hpp>
 #include <codec/engine.hpp>
+#include <codec/profiles/video.hpp>
 
 #include "../core/internal.hpp"
 
 #include <algorithm>
+#include <charconv>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <thread>
 #include <vector>
 
@@ -29,6 +33,7 @@ void usage(std::ostream& output) {
       << "Usage:\n"
       << "  codec capabilities\n"
       << "  codec record --archive FILE --feed LABEL=URI [--feed ...]\n"
+      << "  codec video ingest --source URI --archive FILE --label LABEL --start-ns NS --end-ns NS [--layout gray8|rgb24|rgba32|yuv420p8] [--maximum-source-bytes N] [--maximum-decoded-bytes N] [--maximum-frames N]\n"
       << "  codec inspect ARCHIVE\n"
       << "  codec verify ARCHIVE [--level full]\n"
       << "  codec list feeds ARCHIVE\n"
@@ -47,6 +52,15 @@ std::optional<std::string_view> option(const Strings& arguments,
 bool flag(const Strings& arguments, std::string_view name) {
   return std::find(arguments.begin(), arguments.end(), name) !=
          arguments.end();
+}
+
+template <typename Integer>
+bool parse_decimal(std::string_view text, Integer& value) {
+  if (text.empty()) return false;
+  const auto* begin = text.data();
+  const auto* end = begin + text.size();
+  const auto [next, error] = std::from_chars(begin, end, value, 10);
+  return error == std::errc{} && next == end;
 }
 
 int print_error(const codec::Error& error) {
@@ -103,6 +117,130 @@ int record_command(const Strings& arguments) {
             << ",\"source_bytes\":" << report->source_bytes
             << ",\"source_records\":" << report->source_records << "}\n";
   return 0;
+}
+
+std::optional<codec::profiles::video::PixelLayout> parse_video_layout(
+    std::string_view text) {
+  using codec::profiles::video::PixelLayout;
+  if (text == "gray8") return PixelLayout::gray8;
+  if (text == "rgb24") return PixelLayout::rgb24;
+  if (text == "rgba32") return PixelLayout::rgba32;
+  if (text == "yuv420p8") return PixelLayout::yuv420p8;
+  return std::nullopt;
+}
+
+std::string_view video_layout_name(codec::profiles::video::PixelLayout layout) {
+  using codec::profiles::video::PixelLayout;
+  switch (layout) {
+    case PixelLayout::gray8: return "gray8";
+    case PixelLayout::rgb24: return "rgb24";
+    case PixelLayout::rgba32: return "rgba32";
+    case PixelLayout::yuv420p8: return "yuv420p8";
+  }
+  return "unknown";
+}
+
+int video_command(const Strings& arguments) {
+  if (arguments.empty() || arguments.front() != "ingest") {
+    std::cerr << "codec: video supports: video ingest\n";
+    return 2;
+  }
+  const Strings tail(arguments.begin() + 1, arguments.end());
+  const auto source = option(tail, "--source");
+  const auto archive = option(tail, "--archive");
+  const auto label = option(tail, "--label");
+  const auto start_text = option(tail, "--start-ns");
+  const auto end_text = option(tail, "--end-ns");
+  const auto layout_text = option(tail, "--layout");
+  if (!source || !archive || !label || !start_text || !end_text ||
+      source->empty() || archive->empty() || label->empty()) {
+    std::cerr << "codec: video ingest requires --source, --archive, --label, --start-ns, and --end-ns\n";
+    return 2;
+  }
+
+  std::int64_t start_ns = 0;
+  std::int64_t end_ns = 0;
+  if (!parse_decimal(*start_text, start_ns) ||
+      !parse_decimal(*end_text, end_ns) || end_ns <= start_ns) {
+    std::cerr << "codec: video ingest requires a valid positive --start-ns/--end-ns interval\n";
+    return 2;
+  }
+
+  const auto layout =
+      parse_video_layout(layout_text.value_or(std::string_view{"yuv420p8"}));
+  if (!layout) {
+    std::cerr << "codec: video ingest --layout must be gray8, rgb24, rgba32, or yuv420p8\n";
+    return 2;
+  }
+
+  std::uint64_t maximum_source_bytes = 1024ULL * 1024ULL * 1024ULL;
+  std::uint64_t maximum_decoded_bytes = 1024ULL * 1024ULL * 1024ULL;
+  std::size_t maximum_frames = 4096U;
+  if (const auto value = option(tail, "--maximum-source-bytes")) {
+    if (!parse_decimal(*value, maximum_source_bytes) || maximum_source_bytes == 0U) {
+      std::cerr << "codec: video ingest --maximum-source-bytes must be a positive integer\n";
+      return 2;
+    }
+  }
+  if (const auto value = option(tail, "--maximum-decoded-bytes")) {
+    if (!parse_decimal(*value, maximum_decoded_bytes) || maximum_decoded_bytes == 0U) {
+      std::cerr << "codec: video ingest --maximum-decoded-bytes must be a positive integer\n";
+      return 2;
+    }
+  }
+  if (const auto value = option(tail, "--maximum-frames")) {
+    std::uint64_t parsed = 0U;
+    if (!parse_decimal(*value, parsed) || parsed == 0U ||
+        parsed > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())) {
+      std::cerr << "codec: video ingest --maximum-frames must be a positive process-sized integer\n";
+      return 2;
+    }
+    maximum_frames = static_cast<std::size_t>(parsed);
+  }
+
+  std::string identity = "codec.video.cli\n";
+  identity += *label;
+  identity += '\n';
+  identity += *source;
+  const auto stream = codec::derive_stream_id(identity);
+  codec::profiles::video::FfmpegVideoIngestRequest request{
+      .source_uri = std::string{*source},
+      .archive_path = std::filesystem::path{std::string{*archive}},
+      .descriptor = codec::StreamDescriptor{
+          .id = stream,
+          .type = codec::StreamType::video,
+          .label = std::string{*label},
+          .source_id = std::string{*source},
+          .payload_type = "application/octet-stream",
+      },
+      .start_ns = start_ns,
+      .end_ns = end_ns,
+      .output_layout = *layout,
+      .maximum_source_bytes = maximum_source_bytes,
+      .maximum_decoded_bytes = maximum_decoded_bytes,
+      .maximum_frames = maximum_frames,
+  };
+  auto report = codec::profiles::video::ingest_video_ffmpeg(request);
+  if (!report) return print_error(report.error());
+
+  std::cout << "{\"archive\":\""
+            << codec::detail::json_escape(report->archive_path.string())
+            << "\",\"stream_id\":\"" << codec::to_string(stream)
+            << "\",\"layout\":\"" << video_layout_name(*layout)
+            << "\",\"source_bytes\":" << report->source.payload_size
+            << ",\"frames\":" << report->states.size()
+            << ",\"provenance\":" << report->provenance.size()
+            << ",\"state_exact\":"
+            << (report->state_exact() ? "true" : "false");
+  if (report->profile_error) {
+    std::cout << ",\"profile_error\":\""
+              << codec::error_code_name(report->profile_error->code)
+              << "\",\"profile_message\":\""
+              << codec::detail::json_escape(report->profile_error->message)
+              << "\"";
+  }
+  std::cout << "}\n";
+  return report->profile_error ? 1 : 0;
 }
 
 int verify_command(const Strings& arguments, bool inspect) {
@@ -318,6 +456,7 @@ int main(int argc, char** argv) {
   }
   if (command == "capabilities") return capabilities_command();
   if (command == "record") return record_command(arguments);
+  if (command == "video") return video_command(arguments);
   if (command == "verify") return verify_command(arguments, false);
   if (command == "inspect") return verify_command(arguments, true);
   if (command == "list") return list_command(arguments);

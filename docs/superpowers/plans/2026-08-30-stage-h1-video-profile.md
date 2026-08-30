@@ -320,7 +320,7 @@ Create `tests/test_video_state_reader.cpp` with helpers that:
 2. append a `StreamDescriptor{.type = StreamType::video}`;
 3. append one `source_bytes` S0 record;
 4. append one VFR1 record using `append_raw(raw_video_frame_state_record_type, ...)`;
-5. attach provenance with `TruthClass::state_exact`, operation `codec.video.raw-frame.canonicalize`, implementation `codec.video`, version `1`, and details type `application/vnd.codec.video.canonicalization.v1`;
+5. attach provenance with `TruthClass::state_exact`, operation `codec.video.raw-frame.canonicalize`, implementation `codec.video`, version `1`, and details type `application/vnd.codec.video.canonicalization.v1`, and details exactly `{std::byte{0x01}}`;
 6. finalize and reopen.
 
 Add tests:
@@ -365,7 +365,7 @@ In `src/video/frame_state_reader.cpp`:
 - require at least one input;
 - reject a self-link;
 - require every input to be `RecordType::source_bytes`, share the subject stream, and overlap the subject interval;
-- require exact process strings from Step 2;
+- require the exact process strings from Step 2 and the exact one-byte details payload `{std::byte{0x01}}`;
 - preflight aggregate state payload bytes using subtraction-safe arithmetic.
 
 Do not require exactly one source input.

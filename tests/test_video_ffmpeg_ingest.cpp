@@ -196,6 +196,39 @@ TEST(video_ffmpeg_ingest_preserves_source_when_decode_fails) {
   std::filesystem::remove(source_path);
 }
 
+TEST(video_ffmpeg_ingest_accepts_negative_archive_interval) {
+  if (!video::ffmpeg_video_ingest_available()) return;
+  const auto source_path = test_path("negative-time.mp4");
+  const auto archive_path = test_path("negative-time.coda");
+  std::filesystem::remove(source_path);
+  std::filesystem::remove(archive_path);
+  EXPECT_TRUE(write_bytes(source_path, mp4_h264_fixture()));
+  const auto stream = codec::derive_stream_id("video-ffmpeg-negative-time");
+  auto request = request_for(source_path, archive_path, stream);
+  request.start_ns = -1'000'000'000;
+  request.end_ns = 0;
+
+  auto report = video::ingest_video_ffmpeg(request);
+  EXPECT_TRUE(report);
+  if (report) {
+    EXPECT_TRUE(report->state_exact());
+    auto archive = codec::CodaArchive::open(archive_path);
+    EXPECT_TRUE(archive);
+    if (archive) {
+      auto frames = video::query_verified_raw_video_frames(*archive);
+      EXPECT_TRUE(frames);
+      if (frames && !frames->empty()) {
+        EXPECT_EQ(frames->front().state_record.start_ns,
+                  std::int64_t{-1'000'000'000});
+        EXPECT_EQ(frames->front().state_record.end_ns, std::int64_t{0});
+      }
+    }
+  }
+
+  std::filesystem::remove(archive_path);
+  std::filesystem::remove(source_path);
+}
+
 TEST(video_ffmpeg_ingest_validates_interval_before_backend_use) {
   const auto source_path = test_path("invalid.mp4");
   const auto archive_path = test_path("invalid.coda");

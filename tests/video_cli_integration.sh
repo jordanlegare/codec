@@ -30,6 +30,9 @@ base64 --decode "$script_dir/fixtures/video_4x4_h264.mp4.b64" > "$fixture"
 
 "$codec_bin" --help > "$test_dir/help.txt"
 grep -Fq 'codec video ingest' "$test_dir/help.txt"
+grep -Fq -- '--maximum-hls-resources' "$test_dir/help.txt"
+grep -Fq -- '--maximum-hls-resource-bytes' "$test_dir/help.txt"
+grep -Fq -- '--maximum-hls-total-bytes' "$test_dir/help.txt"
 
 set +e
 "$codec_bin" video ingest --source "$fixture" \
@@ -41,6 +44,31 @@ if [ "$missing_status" -ne 2 ]; then
   exit 1
 fi
 [ ! -e "$test_dir/missing.coda" ]
+
+for hls_option in \
+  --maximum-hls-resources \
+  --maximum-hls-resource-bytes \
+  --maximum-hls-total-bytes; do
+  option_name=${hls_option#--}
+  invalid_hls_archive="$test_dir/$option_name.coda"
+  set +e
+  "$codec_bin" video ingest \
+    --source "$fixture" \
+    --archive "$invalid_hls_archive" \
+    --label "invalid-$option_name" \
+    --start-ns 0 \
+    --end-ns 1000000000 \
+    "$hls_option" 0 \
+    > "$test_dir/$option_name.stdout" \
+    2> "$test_dir/$option_name.stderr"
+  invalid_hls_status=$?
+  set -e
+  if [ "$invalid_hls_status" -ne 2 ]; then
+    echo "$hls_option zero case should exit 2, got $invalid_hls_status" >&2
+    exit 1
+  fi
+  [ ! -e "$invalid_hls_archive" ]
+done
 
 probe_archive="$test_dir/probe.coda"
 set +e
@@ -68,6 +96,8 @@ fi
 grep -q '"state_exact":true' "$test_dir/probe.stdout"
 grep -q '"frames":1' "$test_dir/probe.stdout"
 grep -q '"provenance":1' "$test_dir/probe.stdout"
+grep -q '"secondary_sources":0' "$test_dir/probe.stdout"
+grep -q '"secondary_source_bytes":0' "$test_dir/probe.stdout"
 grep -q '"layout":"yuv420p8"' "$test_dir/probe.stdout"
 grep -q '"stream_id":"' "$test_dir/probe.stdout"
 if grep -Fqa "$fixture" "$probe_archive"; then

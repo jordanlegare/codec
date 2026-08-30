@@ -5,6 +5,7 @@
 #include <codec/profiles/video_export.hpp>
 
 #include "../core/internal.hpp"
+#include "video_multi_ingest.hpp"
 
 #include <algorithm>
 #include <charconv>
@@ -35,6 +36,7 @@ void usage(std::ostream& output) {
       << "  codec capabilities\n"
       << "  codec record --archive FILE --feed LABEL=URI [--feed ...]\n"
       << "  codec video ingest --source URI --archive FILE --label LABEL --start-ns NS --end-ns NS [--layout gray8|rgb24|rgba32|yuv420p8] [--maximum-source-bytes N] [--maximum-decoded-bytes N] [--maximum-frames N] [--maximum-hls-resources N] [--maximum-hls-resource-bytes N] [--maximum-hls-total-bytes N]\n"
+      << "  codec video ingest --archive FILE --video --source URI --label LABEL --start-ns NS --end-ns NS [video options] [--video ...]\n"
       << "  codec video export ARCHIVE --stream UUID --output FILE [--maximum-frames N] [--maximum-input-bytes N] [--maximum-output-bytes N]\n"
       << "  codec inspect ARCHIVE\n"
       << "  codec verify ARCHIVE [--level full]\n"
@@ -252,6 +254,9 @@ int video_command(const Strings& arguments) {
     return 2;
   }
   const Strings tail(arguments.begin() + 1, arguments.end());
+  if (tail.size() >= 3U && tail[0] == "--archive" && tail[2] == "--video") {
+    return codec::cli::grouped_video_ingest_command(tail);
+  }
   const auto source = option(tail, "--source");
   const auto archive = option(tail, "--archive");
   const auto label = option(tail, "--label");

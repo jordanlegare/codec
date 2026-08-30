@@ -1,4 +1,6 @@
 #ifdef CODEC_HAS_FFMPEG_VIDEO
+#include "hls_policy.hpp"
+
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -45,11 +47,19 @@ int codec_avcodec_receive_frame(AVCodecContext* codec, AVFrame* frame);
 
 }  // namespace
 
+namespace codec::profiles::video::detail {
+
+Result<void> codec_require_same_hls_origin(const HlsOrigin& primary,
+                                           std::string_view child_uri);
+
+}  // namespace codec::profiles::video::detail
+
 #define avformat_open_input codec_avformat_open_input
 #define avformat_find_stream_info codec_avformat_find_stream_info
 #define av_find_best_stream codec_av_find_best_stream
 #define av_read_frame codec_av_read_frame
 #define avcodec_receive_frame codec_avcodec_receive_frame
+#define require_same_hls_origin codec_require_same_hls_origin
 #endif
 
 #define ffmpeg_video_ingest_available ffmpeg_video_ingest_available_hls_embedded
@@ -59,6 +69,7 @@ int codec_avcodec_receive_frame(AVCodecContext* codec, AVFrame* frame);
 #undef ffmpeg_video_ingest_available
 
 #ifdef CODEC_HAS_FFMPEG_VIDEO
+#undef require_same_hls_origin
 #undef avcodec_receive_frame
 #undef av_read_frame
 #undef av_find_best_stream
@@ -242,4 +253,23 @@ int codec_avcodec_receive_frame(AVCodecContext* codec, AVFrame* frame) {
 }
 
 }  // namespace
+
+namespace codec::profiles::video::detail {
+
+Result<void> codec_require_same_hls_origin(const HlsOrigin& primary,
+                                           std::string_view child_uri) {
+  if (hls_boundary.active && hls_callback_failed(hls_boundary.session)) {
+    const auto* session =
+        static_cast<const codec::profiles::video::HlsCaptureSession*>(
+            hls_boundary.session);
+    if (session != nullptr && session->callback_error.has_value()) {
+      return *session->callback_error;
+    }
+    return fail(ErrorCode::internal,
+                "HLS ingest stopped after a prior resource failure");
+  }
+  return require_same_hls_origin(primary, child_uri);
+}
+
+}  // namespace codec::profiles::video::detail
 #endif

@@ -3,6 +3,7 @@ set -euo pipefail
 
 codec_bin=${1:?codec binary path required}
 expected_version=${2:?expected CODEC version required}
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 test_dir=$(mktemp -d)
 record_pid=
 feed_a_pid=
@@ -168,3 +169,5 @@ if grep -Eq 'w0_ed25519|w1_reference|w2_reference|w2_policy' \
   echo "capabilities still advertise watermarking" >&2
   exit 1
 fi
+
+bash "$script_dir/video_cli_integration.sh" "$codec_bin"

@@ -10,7 +10,7 @@ option(CODEC_BUILD_EXAMPLES "Build CODEC examples" ON)
 option(CODEC_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 option(CODEC_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 option(CODEC_ENABLE_FFMPEG_VIDEO
-  "Enable the optional FFmpeg Video Profile ingest backend" OFF)
+  "Enable the optional FFmpeg Video Profile ingest backend" ON)
 set(CODEC_ONNXRUNTIME_ROOT "" CACHE PATH
     "Optional ONNX Runtime distribution root for the Audio CPU backend")
 
@@ -203,6 +203,7 @@ if(CODEC_BUILD_TESTS)
     tests/test_transport_xor_recovery.cpp
     tests/test_video_ffmpeg_ingest.cpp
     tests/test_video_ffmpeg_ingest_limits.cpp
+    tests/test_video_ffmpeg_layouts.cpp
     tests/test_video_profile.cpp
     tests/test_video_state_reader.cpp
   )

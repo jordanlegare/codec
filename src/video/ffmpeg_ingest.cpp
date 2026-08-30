@@ -450,29 +450,54 @@ Result<RawVideoFrameState> canonicalize_frame(const AVFrame& frame,
                                     "FFmpeg cannot create the pixel conversion context");
   }
 
-  std::vector<std::byte> pixels(*bytes);
-  std::array<std::uint8_t*, 4> destination_data{};
-  std::array<int, 4> destination_lines{};
-  const auto filled = av_image_fill_arrays(
-      destination_data.data(), destination_lines.data(),
-      reinterpret_cast<std::uint8_t*>(pixels.data()), destination_format,
-      frame.width, frame.height, 1);
-  if (filled < 0) {
-    return ffmpeg_decode_error("FFmpeg cannot lay out the canonical frame",
-                               filled);
-  }
-  if (static_cast<std::size_t>(filled) != pixels.size()) {
-    return fail<RawVideoFrameState>(
-        ErrorCode::decode,
-        "FFmpeg canonical frame size does not match the H.1 layout");
+  struct AlignedImage {
+    std::array<std::uint8_t*, 4> data{};
+    std::array<int, 4> lines{};
+
+    ~AlignedImage() {
+      if (data[0] != nullptr) av_freep(&data[0]);
+    }
+  };
+
+  AlignedImage destination;
+  constexpr int destination_alignment = 32;
+  const auto allocated = av_image_alloc(
+      destination.data.data(), destination.lines.data(), frame.width,
+      frame.height, destination_format, destination_alignment);
+  if (allocated < 0) {
+    return ffmpeg_decode_error("FFmpeg cannot allocate the aligned frame",
+                               allocated);
   }
 
   const auto scaled = sws_scale(
       scaler.get(), frame.data, frame.linesize, 0, frame.height,
-      destination_data.data(), destination_lines.data());
+      destination.data.data(), destination.lines.data());
   if (scaled != frame.height) {
     return fail<RawVideoFrameState>(ErrorCode::decode,
                                     "FFmpeg did not convert the complete video frame");
+  }
+
+  if (*bytes > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+    return fail<RawVideoFrameState>(ErrorCode::resource_exhausted,
+                                    "canonical video frame exceeds FFmpeg copy bounds");
+  }
+  std::vector<std::byte> pixels(*bytes);
+  const std::array<const std::uint8_t*, 4> compact_source{
+      destination.data[0], destination.data[1], destination.data[2],
+      destination.data[3]};
+  const auto copied = av_image_copy_to_buffer(
+      reinterpret_cast<std::uint8_t*>(pixels.data()),
+      static_cast<int>(pixels.size()), compact_source.data(),
+      destination.lines.data(), destination_format, frame.width, frame.height,
+      1);
+  if (copied < 0) {
+    return ffmpeg_decode_error("FFmpeg cannot compact the canonical frame",
+                               copied);
+  }
+  if (static_cast<std::size_t>(copied) != pixels.size()) {
+    return fail<RawVideoFrameState>(
+        ErrorCode::decode,
+        "FFmpeg compact frame size does not match the H.1 layout");
   }
 
   RawVideoFrameState state{

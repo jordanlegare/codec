@@ -704,6 +704,31 @@ The C++ Audio profile provides, among other APIs:
 
 No production neural model is bundled.
 
+## Video Stream Profile — Stage H.1
+
+The current C++ tree includes a dependency-free Video Stream Profile
+foundation in `<codec/profiles/video.hpp>`:
+
+- deterministic, bounded `VPD1` video descriptors;
+- deterministic `VFR1` raw-frame S1 state for Gray8, RGB24, RGBA32, and
+  planar YUV420P8;
+- exact profile-local record codes used through CODA's existing raw-code
+  archive boundary;
+- a verified reader that returns VFR1 as S1 only when its canonical bytes and
+  exact provenance to committed same-stream S0 records validate;
+- raw preservation, extraction, and repair of unknown future profile codes
+  without interpretation.
+
+Stage G trust/selective-disclosure work is explicitly deferred and is not
+claimed complete. Stage H is active at H.1; telemetry, sensor,
+document/event, network/system, domain schemas, model bundles, and concrete
+integrations remain later milestones.
+
+H.1 does **not** provide FFmpeg or GStreamer integration, container demuxing,
+encoded-video decoding, playback, transcoding/export, a CLI video command,
+inference, or a video model. It makes no codec-compatibility, model-quality,
+throughput, latency, or scale claim.
+
 ## Stage E transport and recovery
 
 The C++ library includes the bounded Stage E profile:
@@ -755,7 +780,7 @@ Applications may supply their own implementations behind the library interfaces.
 
 The current executable uses a **CODA development profile**, not a frozen normative CODA v1 binary standard. The code deliberately identifies the executable profile separately so that the project can evolve without pretending that this development layout is a permanently frozen interoperability contract.
 
-The same caution applies to development-profile `CMX1`, `XRF1`, `CDP1`, `DRQ1`, and `DRS1` structures: they have deterministic tested encodings in this implementation, but v0.3.0 should not be treated as a promise that all future major versions will preserve every development-profile byte layout indefinitely.
+The same caution applies to development-profile `VPD1`, `VFR1`, `CMX1`, `XRF1`, `CDP1`, `DRQ1`, and `DRS1` structures: they have deterministic tested encodings in this implementation, but the current 0.x line should not be treated as a promise that all future major versions will preserve every development-profile byte layout indefinitely.
 
 Within a given v0.3.0 workflow, integrity checks and exact-source extraction are the relevant guarantees to test.
 
@@ -796,6 +821,8 @@ This README is the user-facing guide. Repository-maintenance and architecture ma
 - [`AI_WORKSHEET.md`](AI_WORKSHEET.md) — current implementation/verification work record.
 - [`docs/superpowers/specs/2026-08-18-generalized-coda-direction-design.md`](docs/superpowers/specs/2026-08-18-generalized-coda-direction-design.md) — detailed stream-first architecture rationale.
 - [Approved reduced-CLI removal design](docs/superpowers/specs/2026-08-30-water%6dark-and-stream-cli-removal-design.md) — explicit superseding removal decision.
+- [Stage H.1 Video Profile design](docs/superpowers/specs/2026-08-30-stage-h1-video-profile-design.md) — approved profile boundary and exact-state contract.
+- [Stage H.1 implementation plan](docs/superpowers/plans/2026-08-30-stage-h1-video-profile.md) — test-first implementation and verification steps.
 
 A small machine-readable project block is retained here because repository CI verifies version/documentation continuity:
 

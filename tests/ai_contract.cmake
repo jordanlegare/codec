@@ -38,6 +38,7 @@ read_required("CHANGELOG.md" changelog_contents)
 read_required("include/codec/archive.hpp" archive_header_contents)
 read_required("include/codec/result.hpp" result_header_contents)
 read_required("include/codec/codec_c.h" c_header_contents)
+read_required("include/codec/profiles/video.hpp" video_header_contents)
 read_required("src/archive/archive.cpp" archive_source_contents)
 read_required("src/core/sha256.cpp" core_source_contents)
 read_required("src/capi/codec_c.cpp" capi_source_contents)
@@ -118,6 +119,10 @@ require_reference("README.md" "${readme_contents}" "AGENTS.md")
 require_reference("README.md" "${readme_contents}" "AI_WORKSHEET.md")
 require_reference("README.md" "${readme_contents}"
   "docs/superpowers/specs/2026-08-18-generalized-coda-direction-design.md")
+require_reference("README.md" "${readme_contents}"
+  "docs/superpowers/specs/2026-08-30-stage-h1-video-profile-design.md")
+require_reference("README.md" "${readme_contents}"
+  "docs/superpowers/plans/2026-08-30-stage-h1-video-profile.md")
 require_reference("CONTRIBUTING.md" "${contributing_contents}" "README.md")
 require_reference("CONTRIBUTING.md" "${contributing_contents}" "AI_WORKSHEET.md")
 require_reference("CONTRIBUTING.md" "${contributing_contents}" "AGENTS.md")
@@ -158,6 +163,33 @@ foreach(retired_cli_text IN ITEMS
   if(NOT retired_offset EQUAL -1)
     message(FATAL_ERROR
       "README.md still advertises retired surface: ${retired_cli_text}")
+  endif()
+endforeach()
+
+foreach(required_video_contract IN ITEMS
+    "video_profile_descriptor_record_type = 0x0100"
+    "raw_video_frame_state_record_type = 0x0101"
+    "query_verified_raw_video_frames"
+    "Video Stream Profile — Stage H.1"
+    "Stage G trust/selective-disclosure work is explicitly deferred"
+    "does **not** provide FFmpeg or GStreamer integration")
+  string(FIND "${video_header_contents}\n${readme_contents}"
+    "${required_video_contract}" video_contract_offset)
+  if(video_contract_offset EQUAL -1)
+    message(FATAL_ERROR
+      "Stage H.1 contract is missing: ${required_video_contract}")
+  endif()
+endforeach()
+
+foreach(forbidden_video_dependency IN ITEMS
+    "find_package(FFmpeg"
+    "libavcodec"
+    "gstreamer")
+  string(FIND "${cmake_contents}" "${forbidden_video_dependency}"
+    dependency_offset)
+  if(NOT dependency_offset EQUAL -1)
+    message(FATAL_ERROR
+      "Stage H.1 must remain dependency-free: ${forbidden_video_dependency}")
   endif()
 endforeach()
 

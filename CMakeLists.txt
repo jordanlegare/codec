@@ -10,7 +10,7 @@ option(CODEC_BUILD_EXAMPLES "Build CODEC examples" ON)
 option(CODEC_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 option(CODEC_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 option(CODEC_ENABLE_FFMPEG_VIDEO
-  "Enable the optional FFmpeg Video Profile ingest backend" OFF)
+  "Enable the optional FFmpeg Video Profile ingest backend" ON)
 set(CODEC_ONNXRUNTIME_ROOT "" CACHE PATH
     "Optional ONNX Runtime distribution root for the Audio CPU backend")
 

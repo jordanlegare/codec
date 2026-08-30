@@ -498,8 +498,6 @@ Result<FfmpegVideoIngestReport> ingest_video_ffmpeg(
       .source = *source,
       .states = {},
       .provenance = {},
-      .secondary_descriptors = {},
-      .secondary_sources = {},
       .profile_error = std::nullopt,
   };
   const auto finish_profile_error =

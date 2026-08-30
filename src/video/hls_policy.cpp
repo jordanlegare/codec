@@ -44,6 +44,7 @@ Result<HlsOrigin> invalid_origin(ErrorCode code, std::string message) {
 }
 
 struct CurlUrl {
+  CurlUrl() = default;
   CURLU* value{curl_url()};
   ~CurlUrl() {
     if (value != nullptr) curl_url_cleanup(value);

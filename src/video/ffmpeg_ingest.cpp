@@ -790,7 +790,7 @@ Result<FfmpegVideoIngestReport> ingest_video_ffmpeg(
 
   std::vector<std::byte> source_bytes;
   source_bytes.reserve(static_cast<std::size_t>(
-      std::min<std::uint64_t>(request.maximum_source_bytes, 16U * 1024U * 1024U))));
+      std::min<std::uint64_t>(request.maximum_source_bytes, 16U * 1024U * 1024U)));
   auto captured = prepared->run(
       [&source_bytes, &request](std::span<const std::byte> bytes) -> Result<void> {
         if (bytes.size() > request.maximum_source_bytes - source_bytes.size()) {

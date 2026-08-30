@@ -135,7 +135,12 @@ int codec_avformat_open_input(AVFormatContext** context, const char* url,
     opened = avformat_open_input(context, url, format, options);
   }
 
-  if (hls_callback_failed(hls_boundary.session)) return AVERROR_EXIT;
+  if (hls_callback_failed(hls_boundary.session)) {
+    if (opened >= 0 && context != nullptr && *context != nullptr) {
+      avformat_close_input(context);
+    }
+    return AVERROR_EXIT;
+  }
   return opened;
 }
 

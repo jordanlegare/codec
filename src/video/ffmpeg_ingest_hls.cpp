@@ -390,9 +390,15 @@ Result<DecodedVideo> decode_hls_video_bytes(
                   "decoded HLS exceeds the configured aggregate byte limit");
     }
     decoded_bytes += frame_bytes;
+    std::vector<RecordInfo> secondary_frontier;
+    secondary_frontier.reserve(session.resources.size());
+    for (const auto& resource : session.resources) {
+      secondary_frontier.push_back(resource->source_record);
+    }
     decoded.frames.push_back(DecodedCandidate{
         .state = std::move(*state),
         .best_effort_timestamp = frame->best_effort_timestamp,
+        .secondary_frontier = std::move(secondary_frontier),
     });
     return {};
   };
@@ -541,7 +547,7 @@ Result<FfmpegVideoIngestReport> ingest_video_ffmpeg(
 
   const auto configuration_hash = ffmpeg_configuration_hash(request.output_layout);
   const auto created_utc_ns = provenance_created_utc_ns();
-  const std::array inputs{*source};
+  const std::array direct_inputs{*source};
   report.states.reserve(decoded->frames.size());
   report.provenance.reserve(decoded->frames.size());
   for (std::size_t index = 0; index < decoded->frames.size(); ++index) {
@@ -554,17 +560,36 @@ Result<FfmpegVideoIngestReport> ingest_video_ffmpeg(
     if (!state_record) return state_record.error();
 
     const ProvenanceProcess process{
-        .operation = "codec.video.raw-frame.canonicalize",
+        .operation = hls ? "codec.video.raw-frame.canonicalize.hls"
+                         : "codec.video.raw-frame.canonicalize",
         .implementation_id = "codec.video",
         .implementation_version = "1",
         .implementation_hash = std::nullopt,
         .configuration_hash = configuration_hash,
         .created_utc_ns = created_utc_ns,
-        .details_type = "application/vnd.codec.video.canonicalization.v1",
+        .details_type =
+            hls ? "application/vnd.codec.video.hls-canonicalization.v1"
+                : "application/vnd.codec.video.canonicalization.v1",
         .details = {std::byte{0x01}},
     };
-    auto provenance = writer.append_stream_provenance(
-        *state_record, TruthClass::state_exact, inputs, process);
+    Result<RecordInfo> provenance = [&]() -> Result<RecordInfo> {
+      if (!hls) {
+        return writer.append_stream_provenance(
+            *state_record, TruthClass::state_exact, direct_inputs, process);
+      }
+      const auto& frontier = decoded->frames[index].secondary_frontier;
+      if (frontier.empty()) {
+        return fail<RecordInfo>(
+            ErrorCode::internal,
+            "decoded HLS frame has no preserved secondary source frontier");
+      }
+      std::vector<RecordInfo> hls_inputs;
+      hls_inputs.reserve(1U + frontier.size());
+      hls_inputs.push_back(*source);
+      hls_inputs.insert(hls_inputs.end(), frontier.begin(), frontier.end());
+      return writer.append_stream_provenance(
+          *state_record, TruthClass::state_exact, hls_inputs, process);
+    }();
     if (!provenance) return provenance.error();
     report.states.push_back(*state_record);
     report.provenance.push_back(*provenance);

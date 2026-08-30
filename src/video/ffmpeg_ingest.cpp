@@ -512,6 +512,7 @@ Result<RawVideoFrameState> canonicalize_frame(const AVFrame& frame,
 struct DecodedCandidate {
   RawVideoFrameState state;
   std::int64_t best_effort_timestamp{AV_NOPTS_VALUE};
+  std::vector<RecordInfo> secondary_frontier{};
 };
 
 struct DecodedVideo {
@@ -628,6 +629,7 @@ Result<DecodedVideo> decode_video_bytes(
     decoded.frames.push_back(DecodedCandidate{
         .state = std::move(*state),
         .best_effort_timestamp = frame->best_effort_timestamp,
+        .secondary_frontier = {},
     });
     return {};
   };

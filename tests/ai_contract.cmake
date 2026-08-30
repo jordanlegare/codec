@@ -43,6 +43,8 @@ read_required("src/archive/archive.cpp" archive_source_contents)
 read_required("src/core/sha256.cpp" core_source_contents)
 read_required("src/capi/codec_c.cpp" capi_source_contents)
 read_required("src/distributed/wire.cpp" wire_source_contents)
+read_required("src/video/frame_state.cpp" video_frame_state_contents)
+read_required("src/video/frame_state_reader.cpp" video_frame_reader_contents)
 
 foreach(retired_symbol IN ITEMS
     "watermark_statement"
@@ -170,26 +172,43 @@ foreach(required_video_contract IN ITEMS
     "video_profile_descriptor_record_type = 0x0100"
     "raw_video_frame_state_record_type = 0x0101"
     "query_verified_raw_video_frames"
+    "ffmpeg_video_ingest_available"
     "Video Stream Profile — Stage H.1"
-    "Stage G trust/selective-disclosure work is explicitly deferred"
-    "does **not** provide FFmpeg or GStreamer integration")
+    "Stage G trust/selective-disclosure work is explicitly deferred")
   string(FIND "${video_header_contents}\n${readme_contents}"
     "${required_video_contract}" video_contract_offset)
   if(video_contract_offset EQUAL -1)
     message(FATAL_ERROR
-      "Stage H.1 contract is missing: ${required_video_contract}")
+      "Stage H.1/video integration contract is missing: ${required_video_contract}")
   endif()
 endforeach()
 
-foreach(forbidden_video_dependency IN ITEMS
-    "find_package(FFmpeg"
-    "libavcodec"
-    "gstreamer")
-  string(FIND "${cmake_contents}" "${forbidden_video_dependency}"
-    dependency_offset)
+set(video_foundation_contents
+  "${video_header_contents}\n${video_frame_state_contents}\n${video_frame_reader_contents}")
+foreach(forbidden_video_foundation_dependency IN ITEMS
+    "#include <libav"
+    "AVCodecContext"
+    "AVFormatContext"
+    "#include <gst/")
+  string(FIND "${video_foundation_contents}"
+    "${forbidden_video_foundation_dependency}" dependency_offset)
   if(NOT dependency_offset EQUAL -1)
     message(FATAL_ERROR
-      "Stage H.1 must remain dependency-free: ${forbidden_video_dependency}")
+      "Stage H.1 foundation must remain media-library independent: ${forbidden_video_foundation_dependency}")
+  endif()
+endforeach()
+
+foreach(required_optional_video_build_contract IN ITEMS
+    "CODEC_ENABLE_FFMPEG_VIDEO"
+    "libavformat"
+    "libavcodec"
+    "libavutil"
+    "libswscale")
+  string(FIND "${cmake_contents}" "${required_optional_video_build_contract}"
+    optional_video_offset)
+  if(optional_video_offset EQUAL -1)
+    message(FATAL_ERROR
+      "Optional FFmpeg video build contract is missing: ${required_optional_video_build_contract}")
   endif()
 endforeach()
 

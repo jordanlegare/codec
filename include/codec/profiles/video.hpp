@@ -5,8 +5,10 @@
 #include <compare>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <optional>
 #include <span>
+#include <string>
 #include <vector>
 
 namespace codec::profiles::video {
@@ -103,5 +105,38 @@ struct VerifiedRawVideoFrame {
 
 Result<std::vector<VerifiedRawVideoFrame>> query_verified_raw_video_frames(
     const CodaArchive& archive, const VideoFrameQuery& query = {});
+
+struct FfmpegVideoIngestRequest {
+  std::string source_uri;
+  std::filesystem::path archive_path;
+  StreamDescriptor descriptor;
+  std::int64_t start_ns{};
+  std::int64_t end_ns{};
+  PixelLayout output_layout{PixelLayout::yuv420p8};
+  std::size_t capture_chunk_bytes{256U * 1024U};
+  std::uint64_t maximum_source_bytes{1024ULL * 1024ULL * 1024ULL};
+  std::uint64_t maximum_decoded_bytes{1024ULL * 1024ULL * 1024ULL};
+  std::size_t maximum_frames{4096};
+  std::uint32_t maximum_redirects{5};
+  bool deny_private_network{true};
+};
+
+struct FfmpegVideoIngestReport {
+  std::filesystem::path archive_path;
+  RecordInfo descriptor;
+  RecordInfo source;
+  std::vector<RecordInfo> states;
+  std::vector<RecordInfo> provenance;
+  std::optional<Error> profile_error;
+
+  bool state_exact() const noexcept {
+    return !states.empty() && states.size() == provenance.size() &&
+           !profile_error.has_value();
+  }
+};
+
+bool ffmpeg_video_ingest_available() noexcept;
+Result<FfmpegVideoIngestReport> ingest_video_ffmpeg(
+    const FfmpegVideoIngestRequest& request);
 
 }  // namespace codec::profiles::video

@@ -187,3 +187,71 @@ TEST(video_hls_ingest_preserves_manifest_and_segments_before_decode) {
 
   std::filesystem::remove(archive_path);
 }
+
+TEST(video_hls_ingest_reopens_same_url_as_distinct_snapshots) {
+  if (!video::ffmpeg_video_ingest_available()) return;
+
+  const auto segment = fixture("hls_4x4_seg0.ts.b64");
+  const auto manifest = bytes(
+      "#EXTM3U\n"
+      "#EXT-X-VERSION:3\n"
+      "#EXT-X-TARGETDURATION:1\n"
+      "#EXT-X-MEDIA-SEQUENCE:0\n"
+      "#EXTINF:1.000000,\n"
+      "same.ts\n"
+      "#EXTINF:1.000000,\n"
+      "same.ts\n"
+      "#EXT-X-ENDLIST\n");
+  HlsHttpFixture server({
+      {"/live/playlist.m3u8",
+       HlsHttpResponse{.status = 200,
+                       .content_type = "application/vnd.apple.mpegurl",
+                       .body = manifest}},
+      {"/live/same.ts",
+       HlsHttpResponse{.status = 200,
+                       .content_type = "video/mp2t",
+                       .body = segment}},
+  });
+
+  const auto archive_path = test_path("reopened-segment.coda");
+  std::filesystem::remove(archive_path);
+  const auto stream = codec::derive_stream_id("video-hls-reopened-segment");
+  const video::FfmpegVideoIngestRequest request{
+      .source_uri = server.url("/live/playlist.m3u8"),
+      .archive_path = archive_path,
+      .descriptor = codec::StreamDescriptor{
+          .id = stream,
+          .type = codec::StreamType::video,
+          .label = "HLS reopened segment fixture",
+          .source_id = "fixture",
+          .payload_type = "application/vnd.apple.mpegurl",
+      },
+      .start_ns = 0,
+      .end_ns = 2'000'000'000,
+      .output_layout = video::PixelLayout::yuv420p8,
+      .maximum_frames = 4,
+      .deny_private_network = false,
+  };
+
+  auto report = video::ingest_video_ffmpeg(request);
+  EXPECT_TRUE(report);
+  if (!report) return;
+  EXPECT_TRUE(report->state_exact());
+  EXPECT_EQ(report->secondary_descriptors.size(), std::size_t{2});
+  EXPECT_EQ(report->secondary_sources.size(), std::size_t{2});
+  EXPECT_EQ(server.requests("/live/same.ts"), std::size_t{2});
+
+  auto archive = codec::CodaArchive::open(archive_path);
+  EXPECT_TRUE(archive);
+  if (archive && report->secondary_sources.size() == 2U) {
+    const auto first = archive->read_payload(report->secondary_sources[0]);
+    const auto second = archive->read_payload(report->secondary_sources[1]);
+    EXPECT_TRUE(first);
+    EXPECT_TRUE(second);
+    if (first) EXPECT_EQ(*first, segment);
+    if (second) EXPECT_EQ(*second, segment);
+    EXPECT_TRUE(report->secondary_sources[0].stream !=
+                report->secondary_sources[1].stream);
+  }
+  std::filesystem::remove(archive_path);
+}

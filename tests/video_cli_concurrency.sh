@@ -199,3 +199,75 @@ if find "$test_dir" -maxdepth 1 -name 'partial.coda.video-*.tmp' -print -quit | 
   echo "partial grouped ingest leaked staging archives" >&2
   exit 1
 fi
+
+# A profile failure after S0 preservation is a usable staged stream. It must be
+# merged beside successful streams and reported distinctly from a hard error.
+printf 'not media\n' > "$test_dir/malformed.bin"
+profile_archive="$test_dir/profile-partial.coda"
+set +e
+"$codec_bin" video ingest \
+  --archive "$profile_archive" \
+  --video \
+    --source "$fixture" \
+    --label camera-profile-good \
+    --start-ns 0 \
+    --end-ns 1000000000 \
+    --layout yuv420p8 \
+    --maximum-frames 4 \
+  --video \
+    --source "$test_dir/malformed.bin" \
+    --label camera-profile-bad \
+    --start-ns 0 \
+    --end-ns 1000000000 \
+    --layout gray8 \
+    --maximum-frames 4 \
+  > "$test_dir/profile-partial.jsonl" 2> "$test_dir/profile-partial.stderr"
+profile_status=$?
+set -e
+if [ "$profile_status" -ne 1 ]; then
+  echo "profile-error grouped ingest should exit 1, got $profile_status" >&2
+  exit 1
+fi
+
+test -s "$profile_archive"
+"$codec_bin" verify "$profile_archive" --level full > "$test_dir/profile-partial-verify.json"
+grep -q '"ok":true' "$test_dir/profile-partial-verify.json"
+
+python3 - "$test_dir/profile-partial.jsonl" "$profile_archive" "$test_dir/profile-good-stream.txt" <<'PY'
+import json
+import sys
+
+records = [json.loads(line) for line in open(sys.argv[1], encoding="utf-8") if line.strip()]
+if len(records) != 2:
+    raise SystemExit(f"expected two profile-partial JSON lines, got {len(records)}")
+if [record["archive"] for record in records] != [sys.argv[2], sys.argv[2]]:
+    raise SystemExit("profile-partial groups did not report the shared archive")
+if [record["status"] for record in records] != ["ok", "profile_error"]:
+    raise SystemExit(f"unexpected profile-partial statuses: {[record['status'] for record in records]}")
+if not records[0]["state_exact"] or not records[0]["preserved"]:
+    raise SystemExit("successful profile-partial stream lost verified S1")
+failed = records[1]
+if failed["profile_error"] != "decode" or failed["state_exact"]:
+    raise SystemExit("malformed profile stream was not reported as a decode profile_error")
+if failed["preserved"] is not True or failed["frames"] != 0 or failed["source_bytes"] <= 0:
+    raise SystemExit("profile-error stream did not retain its preserved S0 source")
+open(sys.argv[3], "w", encoding="utf-8").write(records[0]["stream_id"] + "\n")
+PY
+
+profile_good_stream=$(cat "$test_dir/profile-good-stream.txt")
+profile_export="$test_dir/profile-good.mp4"
+"$codec_bin" video export "$profile_archive" \
+  --stream "$profile_good_stream" \
+  --output "$profile_export" \
+  --maximum-frames 4 \
+  --maximum-input-bytes 1048576 \
+  --maximum-output-bytes 1048576 \
+  > "$test_dir/profile-export.json"
+grep -q '"payload_type":"video/mp4"' "$test_dir/profile-export.json"
+grep -q '"frames":1' "$test_dir/profile-export.json"
+test -s "$profile_export"
+
+if find "$test_dir" -maxdepth 1 -name 'profile-partial.coda.video-*.tmp' -print -quit | grep -q .; then
+  echo "profile-error grouped ingest leaked staging archives" >&2
+  exit 1
+fi

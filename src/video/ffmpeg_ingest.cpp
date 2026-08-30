@@ -560,6 +560,8 @@ Result<DecodedVideo> decode_video_bytes(
                                copied);
   }
   codec->thread_count = 1;
+  codec->max_pixels =
+      static_cast<std::int64_t>(VideoDecodeLimits{}.maximum_pixels);
   const auto decoder_opened = avcodec_open2(codec.get(), decoder, nullptr);
   if (decoder_opened < 0) {
     return ffmpeg_decode_error("FFmpeg cannot open the selected video decoder",
@@ -701,15 +703,23 @@ Result<std::vector<std::pair<std::int64_t, std::int64_t>>> map_frame_times(
         return fail<std::vector<std::pair<std::int64_t, std::int64_t>>>(
             ErrorCode::decode, "video frame timestamp regressed before its origin");
       }
-      relative = av_rescale_q(timestamp - base_timestamp, decoded.time_base,
+      if (base_timestamp < 0 &&
+          timestamp >
+              std::numeric_limits<std::int64_t>::max() + base_timestamp) {
+        return fail<std::vector<std::pair<std::int64_t, std::int64_t>>>(
+            ErrorCode::resource_exhausted,
+            "video frame timestamp delta overflows");
+      }
+      const auto timestamp_delta = timestamp - base_timestamp;
+      relative = av_rescale_q(timestamp_delta, decoded.time_base,
                               nanosecond_time_base);
     }
     if (relative < 0 || (index != 0U && relative <= previous_relative)) {
       return fail<std::vector<std::pair<std::int64_t, std::int64_t>>>(
           ErrorCode::decode, "video frame timestamps are not strictly monotonic");
     }
-    if (relative >
-        std::numeric_limits<std::int64_t>::max() - request.start_ns) {
+    if (request.start_ns >
+        std::numeric_limits<std::int64_t>::max() - relative) {
       return fail<std::vector<std::pair<std::int64_t, std::int64_t>>>(
           ErrorCode::resource_exhausted, "video frame timestamp overflows");
     }

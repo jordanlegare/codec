@@ -2,7 +2,7 @@
 
 **Channel-Oriented Decomposition, Extraction, and Capture**
 
-CODEC is a C++20 preservation-first capture and archive engine for temporal data streams. The `codec` command-line program can capture one or more local, standard-input, HTTP, or HTTPS sources into a CODA archive, verify archive integrity, list and extract exact source streams, repair a damaged trailing archive segment into a new file, and issue or detect the reference audio watermark format.
+CODEC is a C++20 preservation-first capture and archive engine for temporal data streams. The `codec` command-line program can record one or more local, standard-input, HTTP, or HTTPS feeds into a CODA archive, verify or inspect archive integrity, list feeds, extract exact source bytes by feed, and repair a damaged trailing archive segment into a new file.
 
 Version **0.3.0** also contains substantially more functionality in the installed C++ library than is exposed through the CLI, including generic stream/provenance APIs, transport multiplexing and bounded XOR recovery, audio-profile processing, and the Stage F.1-F.7 distributed-processing primitives.
 
@@ -20,7 +20,7 @@ It distinguishes three truth classes:
 | **S1** | An exact canonical state defined by a registered profile, such as deterministic PCM16 state in the Audio Stream Profile. |
 | **D** | A derived, inferred, transformed, or analytical result that carries provenance back to supporting records. |
 
-For a normal CLI user, the most important behavior is that `codec record` writes S0 source bytes to a `.coda` archive and `codec extract ... --fidelity source-exact` reconstructs those source bytes.
+For a normal CLI user, the most important behavior is that `codec record` writes S0 source bytes to a `.coda` archive and `codec extract --feed ...` reconstructs those source bytes with source-exact fidelity by default.
 
 ## What you can do from the CLI in v0.3.0
 
@@ -32,13 +32,9 @@ For a normal CLI user, the most important behavior is that `codec record` writes
 | Verify a CODA archive | `codec verify` |
 | Verify and show basic archive information | `codec inspect` |
 | List legacy feed descriptors | `codec list feeds` |
-| List generic streams | `codec list streams` |
 | Extract exact source bytes | `codec extract` |
 | Follow exact source bytes while an archive is still growing | `codec extract --follow` |
 | Rebuild the valid committed prefix of a damaged archive into a new archive | `codec repair` |
-| Generate an Ed25519 watermark statement key pair | `codec watermark keygen` |
-| Embed a reference W1/W2 acoustic code and create a signed statement | `codec watermark issue` |
-| Detect reference watermark candidates | `codec watermark detect` |
 
 The CLI writes machine-readable JSON or JSON Lines to standard output for successful operations. Human-readable errors go to standard error.
 
@@ -252,7 +248,6 @@ The principal CLI exit statuses in v0.3.0 are:
 | `1` | General runtime/library error such as I/O, protocol, archive, key, or processing failure. |
 | `2` | Invalid or missing command-line arguments, unknown command, or malformed identifier. |
 | `3` | `verify`/`inspect` completed verification but the archive verification report is not OK. |
-| `4` | `watermark detect` completed successfully but found no watermark observations. |
 
 Library errors are printed as:
 
@@ -279,10 +274,6 @@ Example shape:
   "file_capture":true,
   "http_capture":true,
   "pcm16_wav":true,
-  "w0_ed25519":true,
-  "w1_reference":true,
-  "w2_reference":true,
-  "w2_policy":"qualified_paths_only",
   "neural_separation":false,
   "gpu_inference":false
 }
@@ -297,10 +288,6 @@ Fields:
 | `file_capture` | Local file/stdin capture is present. |
 | `http_capture` | HTTP/HTTPS source capture is present. |
 | `pcm16_wav` | PCM16 RIFF/WAVE support is present. |
-| `w0_ed25519` | Ed25519/COSE signed statement support is present. |
-| `w1_reference` | Reference W1 acoustic watermark implementation is present. |
-| `w2_reference` | Reference W2 acoustic watermark implementation is present. |
-| `w2_policy` | W2 is only valid on qualified high-bandwidth audio paths; the reference implementation enforces its sample-rate/Nyquist requirements. |
 | `neural_separation` | `false`: no production neural separation model/default CLI runtime is bundled. |
 | `gpu_inference` | `false`: no GPU inference backend is provided. |
 
@@ -520,56 +507,12 @@ Fields:
 
 ---
 
-## `codec list streams`
-
-```bash
-codec list streams ARCHIVE
-```
-
-Outputs one JSON object per stream:
-
-```json
-{
-  "stream_id":"...",
-  "type":0,
-  "label":"news",
-  "source_id":"...",
-  "payload_type":"...",
-  "fidelity":"S0"
-}
-```
-
-Fields:
-
-| Field | Meaning |
-|---|---|
-| `stream_id` | Logical `StreamId`; use this value with `codec extract --stream`. |
-| `type` | Numeric generic stream type value. |
-| `label` | Human-readable stream label. |
-| `source_id` | Source identifier recorded in the generic stream descriptor/projection. |
-| `payload_type` | Generic payload-type descriptor. Legacy feed projections may leave this unspecified. |
-| `fidelity` | `S0`. |
-
----
-
 ## `codec extract`
 
-Extract exact source bytes by feed label or logical stream ID:
+Extract exact source bytes by feed label:
 
 ```bash
-codec extract ARCHIVE \
-  --feed LABEL \
-  --fidelity source-exact \
-  --output FILE
-```
-
-or:
-
-```bash
-codec extract ARCHIVE \
-  --stream STREAM_ID \
-  --fidelity source-exact \
-  --output FILE
+codec extract ARCHIVE --feed LABEL [--fidelity source-exact] [--follow] --output FILE
 ```
 
 ### Switches
@@ -577,26 +520,15 @@ codec extract ARCHIVE \
 | Argument | Required | Meaning |
 |---|---:|---|
 | `ARCHIVE` | yes | Source CODA archive. |
-| `--feed LABEL` | exactly one selector | Select by legacy feed label. |
-| `--stream STREAM_ID` | exactly one selector | Select by 36-character UUID-style stream ID. |
-| `--fidelity source-exact` | recommended explicit spelling | `source-exact` is the only supported extraction fidelity in the v0.3.0 CLI. The parser also treats an omitted fidelity as source-exact, but scripts should specify it explicitly. |
+| `--feed LABEL` | yes | Select by feed label. |
+| `--fidelity source-exact` | no | `source-exact` is the only supported extraction fidelity in the v0.3.0 CLI. It is the default when omitted; the explicit spelling remains accepted for existing scripts. |
 | `--output FILE` | yes | Destination file. |
 | `--follow` | no | Follow the verified committed prefix while the archive is still being written. |
 
-`--feed` and `--stream` are mutually exclusive and exactly one must be supplied.
-
 ### Normal extraction output
-
-By feed:
 
 ```json
 {"feed":"news","fidelity":"source_exact","bytes":123456}
-```
-
-By stream:
-
-```json
-{"stream_id":"...","fidelity":"source_exact","bytes":123456}
 ```
 
 `bytes` is the number of exact S0 payload bytes written to the output file.
@@ -606,7 +538,6 @@ By stream:
 ```bash
 codec extract live.coda \
   --feed LABEL1 \
-  --fidelity source-exact \
   --follow \
   --output live.bin
 ```
@@ -671,180 +602,6 @@ These are recovery counters, not an estimate of semantic data quality.
 
 ---
 
-# Watermark commands
-
-The v0.3.0 watermark CLI is a **reference implementation**, not an authoritative identity system. Detection events explicitly report `"authoritative":false`.
-
-## `codec watermark keygen`
-
-Generate an Ed25519 key pair for signed feed statements:
-
-```bash
-codec watermark keygen \
-  --private issuer.key \
-  --public issuer.pub
-```
-
-### Switches
-
-| Switch | Required | Meaning |
-|---|---:|---|
-| `--private KEY` | yes | Private-key output path. |
-| `--public KEY` | yes | Public-key output path. |
-
-Output:
-
-```json
-{"algorithm":"Ed25519","private_key_written":true,"public_key_written":true}
-```
-
-Protect the private key as a signing credential; CODEC does not provide a key-management service.
-
----
-
-## `codec watermark issue`
-
-Embed a 16-bit reference acoustic code into a PCM16 WAV derivative and create a signed statement:
-
-```bash
-codec watermark issue INPUT.wav \
-  --output OUTPUT.wav \
-  --statement feed.cose \
-  --private-key issuer.key \
-  --feed-uuid 7c2b2f74-7e31-4a1d-b469-d88d63fc8fcb \
-  --code 0x4a31 \
-  --issuer example \
-  --key-id example-1 \
-  --issued-at 1700000000 \
-  --not-before 1700000000 \
-  --expires-at 1800000000 \
-  --w1
-```
-
-### Switches
-
-| Argument | Required | Meaning |
-|---|---:|---|
-| `INPUT.wav` | yes | PCM16 RIFF/WAVE input. |
-| `--output OUTPUT.wav` | yes | Derived watermarked WAV output. The input file is not overwritten by this command. |
-| `--statement FILE` | yes | COSE Sign1 statement output. |
-| `--private-key KEY` | yes | Ed25519 private key used to sign the statement. |
-| `--feed-uuid UUID` | yes | Claimed feed identity string stored in the statement. |
-| `--code UINT16` | yes | 16-bit acoustic code. Decimal and conventional base-prefixed values such as `0x4a31` are accepted. |
-| `--issuer NAME` | yes | Issuer text included in the signed statement. |
-| `--key-id ID` | yes | Key identifier included in the signed statement. |
-| `--issued-at SEC` | yes | Signed issue time in integer seconds. |
-| `--not-before SEC` | yes | Signed not-before time in integer seconds. |
-| `--expires-at SEC` | yes | Signed expiry time in integer seconds. |
-| `--w1` | band selector | Select W1. W1 is also the default if `--w2` is absent. |
-| `--w2` | band selector | Select W2. Do not specify both `--w1` and `--w2`. |
-
-### Reference watermark policy
-
-The CLI uses the default `WatermarkPolicy`; these policy values are not command-line switches in v0.3.0:
-
-| Parameter | Default |
-|---|---:|
-| Embed amplitude | -42 dBFS |
-| Bit duration | 20 ms |
-| W1 frequencies | 17.5 kHz / 18.5 kHz |
-| W2 frequencies | 26 kHz / 28 kHz |
-| W2 minimum sample rate | 96 kHz |
-| Nyquist guard | 2 kHz |
-| Detector minimum confidence threshold | 0.30 |
-
-A watermark message frame contains 40 bits, so at the default 20 ms bit duration one complete watermark frame spans 0.8 seconds. W2 requires a sufficiently high sample-rate/Nyquist-qualified path; it is not intended for ordinary 44.1/48 kHz audio.
-
-### Issue output metrics
-
-```json
-{
-  "band":"W1",
-  "code":18993,
-  "frames_embedded":3,
-  "derived_audio":true,
-  "original_modified":false
-}
-```
-
-| Field | Meaning |
-|---|---|
-| `band` | Reference carrier band selected by the command. |
-| `code` | Embedded 16-bit acoustic code as an integer. |
-| `frames_embedded` | Number of complete watermark message frames embedded. With the default policy this is the count of complete 0.8-second watermark frames that fit in the input; it is not the number of PCM audio frames. |
-| `derived_audio` | Always `true` for this operation: the output is a derivative. |
-| `original_modified` | `false`: the command writes a separate output path rather than rewriting the input WAV. |
-
----
-
-## `codec watermark detect`
-
-```bash
-codec watermark detect INPUT.wav \
-  [--statement feed.cose --public-key issuer.pub] \
-  [--at SEC] \
-  [--format jsonl]
-```
-
-### Switches
-
-| Argument | Required | Meaning |
-|---|---:|---|
-| `INPUT.wav` | yes | PCM16 WAV to scan. |
-| `--statement FILE` | optional pair | Signed statement to verify and correlate with detected code. Must be supplied together with `--public-key`. |
-| `--public-key KEY` | optional pair | Ed25519 public key. Must be supplied together with `--statement`. |
-| `--at SEC` | no | Verification time in integer seconds. Defaults to the current system time. |
-| `--format jsonl` | no | Documented output spelling. v0.3.0 already emits JSON Lines and does not implement another format selector. |
-
-The implementation also accepts `codec watermark watch ...` as an alias for `detect`; in v0.3.0 it is the same **one-shot scan**, not a continuous watcher.
-
-### Detection output
-
-One JSON object is emitted per observation. A statement-bound example can look like:
-
-```json
-{
-  "state":"signature_bound_candidate",
-  "band":"W1",
-  "code":18993,
-  "confidence":0.73,
-  "start_frame":0,
-  "end_frame":48000,
-  "confirmation_hops":3,
-  "detection_statistic":"goertzel_bin_dominance",
-  "waveform_spike":false,
-  "authoritative":false,
-  "replay_check":"unavailable_in_stateless_reference_detector",
-  "statement_state":"valid",
-  "claimed_feed_uuid":"7c2b2f74-7e31-4a1d-b469-d88d63fc8fcb",
-  "issuer":"example"
-}
-```
-
-### Detection fields/metrics
-
-| Field | Meaning |
-|---|---|
-| `state` | `candidate` or `signature_bound_candidate`. The latter requires a valid statement matching the code plus at least three matching observations/hops. |
-| `band` | Detected W1/W2 carrier band. |
-| `code` | Detected 16-bit acoustic code. |
-| `confidence` | Reference detector confidence statistic. It is **not** a calibrated probability of identity or authenticity. |
-| `start_frame` | First PCM audio-frame index for the observation. |
-| `end_frame` | Exclusive end PCM audio-frame index for the observation. |
-| `confirmation_hops` | Count of observations with the same band and code in the current scan. |
-| `detection_statistic` | `goertzel_bin_dominance` in the reference detector. |
-| `waveform_spike` | Currently reported as `false`; this path does not promote a waveform spike as identity evidence. |
-| `authoritative` | Always `false` in this stateless reference detector. |
-| `replay_check` | `unavailable_in_stateless_reference_detector`; v0.3.0 does not perform stateful replay detection here. |
-| `statement_state` | If a statement was supplied: `valid`, `invalid_signature`, `not_yet_valid`, `expired`, or `malformed`. If none was supplied: `absent`. |
-| `claimed_feed_uuid` | Feed UUID claimed by a parsed statement. It is a claim, not independent proof. |
-| `issuer` | Emitted when the observation is bound to a valid matching signed statement. |
-| `statement_error` | Present when statement parsing/verification fails as malformed. |
-
-If no observations are found, the command emits no observation objects and exits with status `4`.
-
----
-
 # Practical workflows
 
 ## Capture, verify, list, and extract
@@ -856,29 +613,10 @@ codec record \
 
 codec verify session.coda --level full
 codec list feeds session.coda
-codec list streams session.coda
 
-codec extract session.coda \
-  --feed news \
-  --fidelity source-exact \
-  --output recovered.bin
+codec extract session.coda --feed news --output recovered.bin
 
 cmp input.bin recovered.bin
-```
-
-## Extract using a stream ID
-
-```bash
-codec list streams session.coda
-```
-
-Copy the `stream_id`, then:
-
-```bash
-codec extract session.coda \
-  --stream 01234567-89ab-cdef-0123-456789abcdef \
-  --fidelity source-exact \
-  --output recovered.bin
 ```
 
 ## Follow a live recording
@@ -894,11 +632,7 @@ codec record \
 Terminal 2:
 
 ```bash
-codec extract live.coda \
-  --feed live \
-  --fidelity source-exact \
-  --follow \
-  --output live-copy.bin
+codec extract live.coda --feed live --follow --output live-copy.bin
 ```
 
 The follower reads only verified committed source records and exits after the recorder commits the final archive index.
@@ -913,40 +647,9 @@ codec verify repaired.coda --level full
 
 Keep the original damaged archive if it is evidentiary material; `repair` intentionally produces a separate file.
 
-## Reference watermark lifecycle
-
-```bash
-codec watermark keygen \
-  --private issuer.key \
-  --public issuer.pub
-
-codec watermark issue input.wav \
-  --output marked.wav \
-  --statement feed.cose \
-  --private-key issuer.key \
-  --feed-uuid 7c2b2f74-7e31-4a1d-b469-d88d63fc8fcb \
-  --code 0x4a31 \
-  --issuer demo \
-  --key-id demo-1 \
-  --issued-at 1700000000 \
-  --not-before 1700000000 \
-  --expires-at 1800000000 \
-  --w1
-
-codec watermark detect marked.wav \
-  --statement feed.cose \
-  --public-key issuer.pub \
-  --at 1750000000 \
-  --format jsonl
-```
-
-Treat the resulting detection as reference evidence only; the CLI marks it non-authoritative and does not perform stateful replay protection.
-
----
-
 # Understanding CODEC metrics
 
-CODEC's CLI outputs mostly **integrity, byte-count, record-count, and detector statistics**. They are not throughput/latency benchmarks.
+CODEC's CLI outputs mostly **integrity, byte-count, and record-count statistics**. They are not throughput/latency benchmarks.
 
 Examples:
 
@@ -955,8 +658,6 @@ Examples:
 - `verified_payload_bytes` measures payload volume covered by successful archive verification.
 - `valid_prefix_bytes` measures the verified committed file prefix.
 - `recovered_records` and `discarded_tail_bytes` describe archive repair results.
-- `frames_embedded` counts complete watermark message frames embedded, not PCM audio frames.
-- watermark `confidence` is a detector statistic, not a probability that an identity claim is true.
 
 v0.3.0 does **not** publish or claim measured:
 
@@ -1067,8 +768,6 @@ CODEC includes integrity and preservation mechanisms, but integrity evidence is 
 Keep these distinctions in mind:
 
 - SHA-256 archive/frame/envelope hashes detect corruption under their defined structures; an active attacker who can rewrite data can generally recompute an unkeyed hash.
-- Watermark detections are explicitly non-authoritative reference signals.
-- Signed watermark statements authenticate a statement under a supplied Ed25519 key; key distribution/trust policy remains the caller's responsibility.
 - The CLI blocks private HTTP capture targets by default and refuses redirects, but this does not make arbitrary remote content trustworthy.
 - Distributed F.1-F.7 labels and wire envelopes do not authenticate workers.
 - There is no encrypted remote-worker protocol in v0.3.0.
@@ -1096,6 +795,7 @@ This README is the user-facing guide. Repository-maintenance and architecture ma
 - [`AGENTS.md`](AGENTS.md) — machine-readable repository instructions for repository-aware agents.
 - [`AI_WORKSHEET.md`](AI_WORKSHEET.md) — current implementation/verification work record.
 - [`docs/superpowers/specs/2026-08-18-generalized-coda-direction-design.md`](docs/superpowers/specs/2026-08-18-generalized-coda-direction-design.md) — detailed stream-first architecture rationale.
+- [Approved reduced-CLI removal design](docs/superpowers/specs/2026-08-30-water%6dark-and-stream-cli-removal-design.md) — explicit superseding removal decision.
 
 A small machine-readable project block is retained here because repository CI verifies version/documentation continuity:
 

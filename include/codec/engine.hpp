@@ -53,9 +53,6 @@ struct Capabilities {
   bool file_capture{true};
   bool http_capture{true};
   bool pcm16_wav{true};
-  bool w0_ed25519{true};
-  bool w1_reference{true};
-  bool w2_reference{true};
   bool neural_separation{false};
   bool gpu_inference{false};
 };

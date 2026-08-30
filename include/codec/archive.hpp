@@ -31,8 +31,6 @@ enum class RecordType : std::uint16_t {
   stream_descriptor = 5,
   stream_timing = 6,
   stream_provenance = 7,
-  watermark_statement = 20,
-  watermark_observation = 21,
   feed_identity_event = 22,
   audit_event = 30,
   final_index = 0xfffe,

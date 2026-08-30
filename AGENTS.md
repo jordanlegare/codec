@@ -30,7 +30,7 @@ Do not resume a task merely because a previous chat said it was active. Determin
 
 - Complete one bounded change class from the worksheet at a time.
 - Follow the README roadmap order; do not skip an unmet predecessor gate.
-- Prefer generic `Stream*` primitives. Keep PCM, watermark, separation, and identity behavior inside the Audio Stream Profile; existing `Feed*` names may remain only for v0.1 compatibility.
+- Prefer generic `Stream*` primitives. Keep PCM, separation, and identity behavior inside the Audio Stream Profile; existing `Feed*` names may remain only for v0.1 compatibility.
 - Preserve accepted S0 before optional interpretation. Keep exact profile-defined S1 separate from provenance-bearing, probabilistic D artifacts.
 - Make unavailable capabilities explicit. Never fabricate models, fidelity, identity, recovery, scale, deployment, or release evidence.
 - Write the proof first for behavioral changes, then implement the smallest coherent change.

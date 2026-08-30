@@ -20,6 +20,20 @@ cleanup() {
 }
 trap cleanup EXIT
 
+expect_status_2() {
+  local stdout_path=$1
+  local stderr_path=$2
+  shift 2
+  set +e
+  "$@" > "$stdout_path" 2> "$stderr_path"
+  local status=$?
+  set -e
+  if [ "$status" -ne 2 ]; then
+    echo "expected status 2, got $status: $*" >&2
+    return 1
+  fi
+}
+
 printf 'internet audio source bytes\n' > "$test_dir/input.bin"
 "$codec_bin" capabilities > "$test_dir/capabilities.json"
 grep -Fq "\"version\":\"$expected_version\"" "$test_dir/capabilities.json"
@@ -31,36 +45,26 @@ grep -q '"neural_separation":false' "$test_dir/capabilities.json"
 "$codec_bin" list feeds "$test_dir/session.coda" > "$test_dir/feeds.jsonl"
 grep -q '"label":"news"' "$test_dir/feeds.jsonl"
 "$codec_bin" extract "$test_dir/session.coda" --feed news \
-  --fidelity source-exact --output "$test_dir/extracted.bin"
+  --output "$test_dir/extracted.bin" > "$test_dir/extract.json"
+grep -q '"fidelity":"source_exact"' "$test_dir/extract.json"
 cmp "$test_dir/input.bin" "$test_dir/extracted.bin"
 
-if "$codec_bin" extract "$test_dir/session.coda" \
-    --stream 00000000-0000-0000-0000-000000000001 \
-    --fidelity source-exact --output "$test_dir/missing.bin" \
-    > "$test_dir/missing.stdout" 2> "$test_dir/missing.stderr"; then
-  echo "missing stream ID unexpectedly succeeded" >&2
-  exit 1
-fi
-grep -q 'stream ID not found' "$test_dir/missing.stderr"
+"$codec_bin" extract "$test_dir/session.coda" --feed news \
+  --fidelity source-exact --output "$test_dir/explicit-extracted.bin"
+cmp "$test_dir/input.bin" "$test_dir/explicit-extracted.bin"
 
-"$codec_bin" list streams "$test_dir/session.coda" > "$test_dir/streams.jsonl"
-grep -q '"label":"news"' "$test_dir/streams.jsonl"
-stream_id=$(python3 - "$test_dir/streams.jsonl" <<'PY'
-import json, sys
-with open(sys.argv[1], encoding="utf-8") as f:
-    print(json.loads(next(f))["stream_id"])
-PY
-)
-"$codec_bin" extract "$test_dir/session.coda" --stream "$stream_id" \
-  --fidelity source-exact --output "$test_dir/stream-extracted.bin"
-cmp "$test_dir/input.bin" "$test_dir/stream-extracted.bin"
-if "$codec_bin" extract "$test_dir/session.coda" --stream not-a-stream-id \
-    --fidelity source-exact --output "$test_dir/invalid.bin" \
-    > "$test_dir/invalid.stdout" 2> "$test_dir/invalid.stderr"; then
-  echo "malformed stream ID unexpectedly succeeded" >&2
-  exit 1
-fi
-grep -q 'invalid stream ID' "$test_dir/invalid.stderr"
+expect_status_2 "$test_dir/list-streams.stdout" \
+  "$test_dir/list-streams.stderr" \
+  "$codec_bin" list streams "$test_dir/session.coda"
+grep -q 'list supports: list feeds' "$test_dir/list-streams.stderr"
+
+printf 'sentinel output\n' > "$test_dir/stream-output.bin"
+cp "$test_dir/stream-output.bin" "$test_dir/expected-sentinel.bin"
+expect_status_2 "$test_dir/stream.stdout" "$test_dir/stream.stderr" \
+  "$codec_bin" extract "$test_dir/session.coda" \
+  --stream 00000000-0000-0000-0000-000000000001 \
+  --output "$test_dir/stream-output.bin"
+cmp "$test_dir/expected-sentinel.bin" "$test_dir/stream-output.bin"
 
 # E.3: follow a selected feed from a still-growing, concurrently multiplexed
 # archive. Both FIFO writers keep their source open until the test confirms
@@ -100,7 +104,7 @@ done
 [ -e "$test_dir/b-written" ]
 
 "$codec_bin" extract "$test_dir/live.coda" --feed LABEL1 \
-  --fidelity source-exact --follow --output "$test_dir/live-alpha.bin" \
+  --follow --output "$test_dir/live-alpha.bin" \
   > "$test_dir/live-follow.json" 2> "$test_dir/live-follow.err" &
 follow_pid=$!
 
@@ -133,6 +137,8 @@ wait "$feed_a_pid"; feed_a_pid=
 wait "$feed_b_pid"; feed_b_pid=
 wait "$record_pid"; record_pid=
 wait "$follow_pid"; follow_pid=
+grep -q '"fidelity":"source_exact"' "$test_dir/live-follow.json"
+grep -q '"follow":true' "$test_dir/live-follow.json"
 printf 'alpha-live\n' > "$test_dir/expected-alpha.bin"
 cmp "$test_dir/expected-alpha.bin" "$test_dir/live-alpha.bin"
 
@@ -145,27 +151,20 @@ PY
 "$codec_bin" repair "$test_dir/damaged.coda" --output "$test_dir/repaired.coda"
 "$codec_bin" verify "$test_dir/repaired.coda" --level full
 
-python3 - "$test_dir/input.wav" <<'PY'
-import math, struct, sys, wave
-with wave.open(sys.argv[1], "wb") as f:
-    f.setnchannels(1)
-    f.setsampwidth(2)
-    f.setframerate(48000)
-    samples = [int(1000 * math.sin(2 * math.pi * 440 * i / 48000))
-               for i in range(48000 * 3)]
-    f.writeframes(b"".join(struct.pack("<h", x) for x in samples))
-PY
-
-"$codec_bin" watermark keygen --private "$test_dir/issuer.key" \
+expect_status_2 "$test_dir/watermark.stdout" "$test_dir/watermark.stderr" \
+  "$codec_bin" watermark keygen --private "$test_dir/issuer.key" \
   --public "$test_dir/issuer.pub"
-"$codec_bin" watermark issue "$test_dir/input.wav" \
-  --output "$test_dir/marked.wav" --statement "$test_dir/feed.cose" \
-  --private-key "$test_dir/issuer.key" \
-  --feed-uuid 7c2b2f74-7e31-4a1d-b469-d88d63fc8fcb \
-  --code 0x4a31 --issuer integration --key-id integration-1 \
-  --issued-at 1000 --not-before 1000 --expires-at 2000 --w1
-"$codec_bin" watermark detect "$test_dir/marked.wav" \
-  --statement "$test_dir/feed.cose" --public-key "$test_dir/issuer.pub" \
-  --at 1500 --format jsonl > "$test_dir/events.jsonl"
-grep -q '"state":"signature_bound_candidate"' "$test_dir/events.jsonl"
-grep -q '"authoritative":false' "$test_dir/events.jsonl"
+[ ! -e "$test_dir/issuer.key" ]
+[ ! -e "$test_dir/issuer.pub" ]
+
+"$codec_bin" --help > "$test_dir/help.txt"
+if grep -Eq 'codec watermark|codec list streams|extract .*--stream' \
+    "$test_dir/help.txt"; then
+  echo "help still advertises a retired CLI surface" >&2
+  exit 1
+fi
+if grep -Eq 'w0_ed25519|w1_reference|w2_reference|w2_policy' \
+    "$test_dir/capabilities.json"; then
+  echo "capabilities still advertise watermarking" >&2
+  exit 1
+fi

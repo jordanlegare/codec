@@ -1,6 +1,6 @@
 # Contributing to CODEC
 
-CODEC is a preservation-first, stream-first system. Changes must keep exact accepted S0, exact profile-defined S1, and provenance-bearing derived D output distinct. Generic core behavior must remain payload-type agnostic; audio decoding, watermarking, separation, and feed identity belong to the Audio Stream Profile. A watermark candidate must never become authoritative identity merely because it was detected or signature-bound.
+CODEC is a preservation-first, stream-first system. Changes must keep exact accepted S0, exact profile-defined S1, and provenance-bearing derived D output distinct. Generic core behavior must remain payload-type agnostic; audio decoding, separation, and feed identity belong to the Audio Stream Profile.
 
 Before editing, follow the repository-wide bootstrap in [`AGENTS.md`](AGENTS.md), read the architectural manifest in [`README.md`](README.md), and complete the work record and proof contract in [`AI_WORKSHEET.md`](AI_WORKSHEET.md). Recover current state from the exact checked-out SHA, open work, and current CI rather than relying on a previous conversation.
 

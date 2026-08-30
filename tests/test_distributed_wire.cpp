@@ -391,6 +391,12 @@ TEST(distributed_wire_structurally_round_trips_source_exact_output) {
   EXPECT_EQ(round_trip.outputs.front().truth, codec::TruthClass::source_exact);
 }
 
+static_assert(static_cast<int>(codec::ErrorCode::identity_not_enrolled) == 15);
+static_assert(static_cast<int>(codec::ErrorCode::identity_uncalibrated) == 16);
+static_assert(static_cast<int>(codec::ErrorCode::cancelled) == 17);
+static_assert(static_cast<int>(codec::ErrorCode::resource_exhausted) == 18);
+static_assert(static_cast<int>(codec::ErrorCode::internal) == 19);
+
 TEST(distributed_wire_error_reply_round_trips_all_current_error_codes) {
   const std::array codes{
       codec::ErrorCode::invalid_argument,
@@ -402,11 +408,6 @@ TEST(distributed_wire_error_reply_round_trips_all_current_error_codes) {
       codec::ErrorCode::archive_corrupt,
       codec::ErrorCode::model_incompatible,
       codec::ErrorCode::inference,
-      codec::ErrorCode::watermark_model_missing,
-      codec::ErrorCode::watermark_code_ambiguous,
-      codec::ErrorCode::watermark_signature_invalid,
-      codec::ErrorCode::watermark_replay_suspected,
-      codec::ErrorCode::watermark_path_unqualified,
       codec::ErrorCode::identity_not_enrolled,
       codec::ErrorCode::identity_uncalibrated,
       codec::ErrorCode::cancelled,

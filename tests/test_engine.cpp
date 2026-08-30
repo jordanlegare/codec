@@ -283,8 +283,6 @@ TEST(generic_stream_recording_preserves_capture_security_boundaries) {
 TEST(capabilities_never_claim_an_unloaded_neural_backend) {
   const auto capabilities = codec::Engine::capabilities();
   EXPECT_TRUE(capabilities.coda_archive);
-  EXPECT_TRUE(capabilities.w0_ed25519);
-  EXPECT_TRUE(capabilities.w1_reference);
   EXPECT_FALSE(capabilities.neural_separation);
   EXPECT_FALSE(capabilities.gpu_inference);
 }

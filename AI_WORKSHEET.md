@@ -6,48 +6,74 @@ Canonical work loop for ChatGPT, Codex, and other agentic contributors.
 
 > Read `README.md` first. Read deeper design docs only when the task touches their subject. Do not reread large historical plans unless they are directly relevant.
 
-## Active work record — Release v0.3.0
+## Active work record — Remove watermark and generic-stream CLI surfaces
 
 ```yaml
-task: Cut CODEC v0.3.0 from the F.7-complete tree without adding Stage F.8 functionality.
+task: Remove the complete watermark feature and the generic stream list/extract CLI surfaces, make source-exact the documented feed-extraction default, and retain generic stream library infrastructure and all unrelated CLI behavior.
 base_ref: origin/main
-base_head_sha: 1c4ad9e18b86630b2809468e69e7582bd7842e92
-work_branch: automation/release-v0.3.0
+base_head_sha: a73b15c474b6974bf74b2c622b81bdcafee7890c
+work_branch: codex/remove-watermark-stream-cli-exec
 current_version: 0.3.0
-active_roadmap_stage: F — F.1-F.7 are implemented as bounded C++ library/package primitives; concrete remote networking and user-facing distributed CLI orchestration remain planned.
+active_roadmap_stage: F — F.1-F.7 remain implemented C++ library/package primitives; this user-directed removal retires the Audio Profile watermark capability and generic stream CLI exposure without removing the generic stream substrate.
 continuity_evidence:
-  - git_head: release preparation starts from F.7-complete main at 1c4ad9e18b86630b2809468e69e7582bd7842e92
-  - open_prs: none existed before release preparation; release work is PR 41
-  - exact_head_ci: CLI-version RED head 49984dc8d442d0d7a93f5a46e741accec0a14304 failed only codec-cli-integration; GREEN head f3b5e0c8883f81744ef21a8651d14bd9b414d139 passed GCC, Clang, installed-package consumers, and sanitizers in CI 294
-  - roadmap_issue: issue 10 remains the canonical roadmap evidence log; F.8 is not part of this release
+  - git_head: clean main at a73b15c474b6974bf74b2c622b81bdcafee7890c before the work branch was created
+  - open_prs: none returned by the GitHub repository query at task start
+  - exact_head_ci: no pull-request-triggered workflow runs returned for the exact base head
+  - roadmap_issue: issue 10 is the unique exact-title CODEC v1.0 roadmap execution log; runtime code and tests remain authoritative
 roadmap_issue_title: CODEC v1.0 roadmap execution log
-scope: docs
-current_behavior_verified_from: [code, tests, cli, changelog]
-new_capability_claim: CODEC v0.3.0 packages the F.7-complete implementation and the CLI now reports the configured project version; no new distributed execution capability is introduced by the release cut.
-change_class: documentation_only
+scope: [watermark, core, docs]
+touched_truth_classes: []
+current_behavior_verified_from: [code, tests, cli, cmake, changelog]
+new_capability_claim: none; this change removes capabilities and CLI surfaces
+change_class: profile_specific_behavior
+verification:
+  tested_pre_record_sha: 2428f82fddd672fb2f99020207a0a10da4537661
+  release_configure: pass
+  release_build: pass
+  tests: pass
+  sanitizer_build: pass
+  sanitizer_tests: pass
+  installed_package_consumers: pass
+  cli_capabilities: pass
+  targeted_proof: pass
+  ci_evidence:
+    provider: GitHub Actions
+    workflow: CI
+    run_id: 33307668406
+    run_number: 304
+    exact_head_sha: 2428f82fddd672fb2f99020207a0a10da4537661
+    jobs:
+      sanitizers: pass
+      build_gcc: pass
+      build_clang: pass
+    package_consumers:
+      gcc: pass
+      clang: pass
 ```
 
 ```text
-BEFORE: The F.7-complete tree is still versioned 0.2.0 and the CLI independently reports stale 0.1.0 literals.
-AFTER: Package, README, changelog, usage banner, --version, and capabilities version metadata agree on 0.3.0; runtime semantics remain the F.7-complete tree.
+BEFORE: CODEC exposes watermark CLI/library behavior plus generic `list streams` and `extract --stream` CLI selection.
+AFTER: Watermark implementation and public surfaces are absent; the CLI lists and extracts only by feed with source-exact fidelity defaulted, while generic stream C++ APIs and unrelated CLI behavior remain available.
 ```
 
 ```yaml
 proof:
-  regression_test: tests/cli_integration.sh requires capabilities.version to equal CMake PROJECT_VERSION
-  exactness_test: n/a — no S0/S1/D or archive-format change
-  compatibility_test: full CTest plus installed-package consumers on GCC and Clang
-  failure_path_test: RED CI 292 proves the stale CLI version was detected before production repair
-  security_test: n/a — no network/authentication/session behavior is added
+  regression_test: tests/cli_integration.sh proves removed commands fail and regular/follow feed extraction succeeds without --fidelity
+  exactness_test: existing byte-exact feed extraction and live-follow tests remain green
+  compatibility_test: retired archive record codes remain preservable as unknown raw codes; non-watermark distributed wire error numbers remain stable
+  failure_path_test: watermark, list streams, and extract --stream return status 2 without creating output
+  security_test: removed signing/key paths leave no callable watermark credential surface; existing capture security tests remain green
   benchmark: n/a — no performance or scale claim
 ```
 
 Invariant decisions:
 
-- [x] S0/S1/D, CODA, provenance, Stage E, F.1-F.7, C ABI, and distributed-wire semantics are unchanged.
-- [x] v0.3.0 includes the existing Unreleased E.4/E.5 and F.1-F.7 changes.
-- [x] F.1-F.7 remain C++ library/package capabilities; this release does not expose distributed execution through the CLI.
-- [x] Concrete socket/HTTP/gRPC remote-worker transport, endpoint policy, authentication/session security, discovery, retry/failover, concurrency, deployment, and F.8 remain unimplemented.
+- [x] Accepted S0, profile-defined S1, D provenance, archive envelopes, and generic stream library semantics are unchanged.
+- [x] Generic `Stream*`, query, extraction, follow, processing, transport, recovery, and distributed primitives remain public C++ capabilities.
+- [x] Retired archive codes 20 and 21 remain readable, verifiable, repairable, and raw-extractable as unknown compatible record types.
+- [x] Retired distributed error slots 10-14 are not reassigned; every retained error preserves its existing wire number.
+- [x] `record`, `verify`, `inspect`, `repair`, `list feeds`, and `extract --feed` behavior remains unchanged apart from truthful capability/help documentation.
+- [x] Historical release notes remain historical truth; current manifests receive explicit removal language.
 
 ## 0. Work record
 

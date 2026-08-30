@@ -124,19 +124,6 @@ audio_profile::Pcm16WavIngestRequest ingest_request(
 
 static_assert(std::is_same_v<audio_profile::WavPcm16, codec::WavPcm16>);
 static_assert(std::is_same_v<audio_profile::Pcm16State, codec::Pcm16State>);
-static_assert(std::is_same_v<audio_profile::CarrierBand, codec::CarrierBand>);
-static_assert(std::is_same_v<audio_profile::WatermarkPolicy,
-                             codec::WatermarkPolicy>);
-static_assert(std::is_same_v<audio_profile::WatermarkEmbedReport,
-                             codec::WatermarkEmbedReport>);
-static_assert(std::is_same_v<audio_profile::WatermarkObservation,
-                             codec::WatermarkObservation>);
-static_assert(std::is_same_v<audio_profile::FeedStatement,
-                             codec::FeedStatement>);
-static_assert(std::is_same_v<audio_profile::StatementState,
-                             codec::StatementState>);
-static_assert(std::is_same_v<audio_profile::StatementVerification,
-                             codec::StatementVerification>);
 static_assert(std::is_same_v<audio_profile::SeparationRequest,
                              codec::SeparationRequest>);
 static_assert(std::is_same_v<audio_profile::SeparationResult,
@@ -151,12 +138,6 @@ TEST(audio_profile_facade_uses_existing_audio_implementation) {
   audio.samples = {1, 2, 3, 4};
 
   EXPECT_EQ(audio.frames(), 2U);
-  EXPECT_EQ(std::string(audio_profile::carrier_band_name(
-                audio_profile::CarrierBand::w1)),
-            std::string("W1"));
-  EXPECT_EQ(std::string(audio_profile::statement_state_name(
-                audio_profile::StatementState::valid)),
-            std::string("valid"));
 
   auto backend = audio_profile::default_separation_backend();
   EXPECT_TRUE(static_cast<bool>(backend));

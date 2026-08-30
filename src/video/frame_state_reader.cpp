@@ -10,12 +10,16 @@
 namespace codec::profiles::video {
 namespace {
 
-constexpr std::string_view kOperation =
+constexpr std::string_view kDirectOperation =
     "codec.video.raw-frame.canonicalize";
+constexpr std::string_view kHlsOperation =
+    "codec.video.raw-frame.canonicalize.hls";
 constexpr std::string_view kImplementation = "codec.video";
 constexpr std::string_view kImplementationVersion = "1";
-constexpr std::string_view kDetailsType =
+constexpr std::string_view kDirectDetailsType =
     "application/vnd.codec.video.canonicalization.v1";
+constexpr std::string_view kHlsDetailsType =
+    "application/vnd.codec.video.hls-canonicalization.v1";
 
 bool matches_link(const RecordInfo& record, const ProvenanceRecordLink& link) {
   return record.stream == link.stream && record.type_code() == link.type &&
@@ -41,12 +45,26 @@ bool intervals_overlap(const RecordInfo& left, const RecordInfo& right) {
   return left.start_ns < right.end_ns && right.start_ns < left.end_ns;
 }
 
-bool valid_process(const ProvenanceProcess& process) {
-  return process.operation == kOperation &&
-         process.implementation_id == kImplementation &&
-         process.implementation_version == kImplementationVersion &&
-         process.details_type == kDetailsType && process.details.size() == 1 &&
-         process.details.front() == std::byte{0x01};
+enum class VideoProvenanceContract { direct, hls };
+
+Result<VideoProvenanceContract> classify_video_process(
+    const ProvenanceProcess& process) {
+  const bool common = process.implementation_id == kImplementation &&
+                      process.implementation_version ==
+                          kImplementationVersion &&
+                      process.details.size() == 1 &&
+                      process.details.front() == std::byte{0x01};
+  if (common && process.operation == kDirectOperation &&
+      process.details_type == kDirectDetailsType) {
+    return VideoProvenanceContract::direct;
+  }
+  if (common && process.operation == kHlsOperation &&
+      process.details_type == kHlsDetailsType) {
+    return VideoProvenanceContract::hls;
+  }
+  return fail<VideoProvenanceContract>(
+      ErrorCode::archive_corrupt,
+      "verified video frame process violates the Video Profile contract");
 }
 
 struct Candidate {
@@ -116,6 +134,7 @@ Result<std::vector<VerifiedRawVideoFrame>> query_verified_raw_video_frames(
 
   auto records = archive.records();
   if (!records) return records.error();
+  std::optional<std::vector<StreamDescriptor>> stream_descriptors;
 
   std::vector<Candidate> candidates;
   candidates.reserve(selected->size());
@@ -126,11 +145,8 @@ Result<std::vector<VerifiedRawVideoFrame>> query_verified_raw_video_frames(
           ErrorCode::archive_corrupt,
           "verified video frame must have at least one direct S0 input");
     }
-    if (!valid_process(provenance.process)) {
-      return fail<std::vector<VerifiedRawVideoFrame>>(
-          ErrorCode::archive_corrupt,
-          "verified video frame process violates the Video Profile contract");
-    }
+    auto contract = classify_video_process(provenance.process);
+    if (!contract) return contract.error();
 
     auto state_record = resolve_record(*records, provenance.subject, "subject");
     if (!state_record) return state_record.error();
@@ -142,7 +158,23 @@ Result<std::vector<VerifiedRawVideoFrame>> query_verified_raw_video_frames(
 
     std::vector<RecordInfo> source_records;
     source_records.reserve(provenance.inputs.size());
-    for (const auto& input_link : provenance.inputs) {
+    if (*contract == VideoProvenanceContract::hls &&
+        provenance.inputs.size() < 2) {
+      return fail<std::vector<VerifiedRawVideoFrame>>(
+          ErrorCode::archive_corrupt,
+          "verified HLS video frame requires a primary and child S0 input");
+    }
+    if (*contract == VideoProvenanceContract::hls &&
+        !stream_descriptors.has_value()) {
+      auto loaded = archive.streams();
+      if (!loaded) return loaded.error();
+      stream_descriptors = std::move(*loaded);
+    }
+
+    std::vector<StreamId> hls_child_streams;
+    for (std::size_t input_index = 0;
+         input_index < provenance.inputs.size(); ++input_index) {
+      const auto& input_link = provenance.inputs[input_index];
       if (input_link.stream == provenance.subject.stream &&
           input_link.type == provenance.subject.type &&
           input_link.sequence == provenance.subject.sequence &&
@@ -153,12 +185,60 @@ Result<std::vector<VerifiedRawVideoFrame>> query_verified_raw_video_frames(
       }
       auto source_record = resolve_record(*records, input_link, "source");
       if (!source_record) return source_record.error();
+
+      if (*contract == VideoProvenanceContract::direct) {
+        if (source_record->type != RecordType::source_bytes ||
+            source_record->stream != state_record->stream ||
+            !intervals_overlap(*source_record, *state_record)) {
+          return fail<std::vector<VerifiedRawVideoFrame>>(
+              ErrorCode::archive_corrupt,
+              "verified video frame lineage violates the Video Profile contract");
+        }
+        source_records.push_back(*source_record);
+        continue;
+      }
+
+      if (input_index == 0U) {
+        if (source_record->type != RecordType::source_bytes ||
+            source_record->stream != state_record->stream ||
+            !intervals_overlap(*source_record, *state_record)) {
+          return fail<std::vector<VerifiedRawVideoFrame>>(
+              ErrorCode::archive_corrupt,
+              "verified HLS video frame primary lineage is invalid");
+        }
+        source_records.push_back(*source_record);
+        continue;
+      }
+
       if (source_record->type != RecordType::source_bytes ||
-          source_record->stream != state_record->stream ||
+          source_record->stream == state_record->stream ||
           !intervals_overlap(*source_record, *state_record)) {
         return fail<std::vector<VerifiedRawVideoFrame>>(
             ErrorCode::archive_corrupt,
-            "verified video frame lineage violates the Video Profile contract");
+            "verified HLS video frame child lineage is invalid");
+      }
+
+      if (std::find(hls_child_streams.begin(), hls_child_streams.end(),
+                    source_record->stream) != hls_child_streams.end()) {
+        return fail<std::vector<VerifiedRawVideoFrame>>(
+            ErrorCode::archive_corrupt,
+            "verified HLS video frame repeats a child stream");
+      }
+      hls_child_streams.push_back(source_record->stream);
+
+      std::size_t descriptor_count = 0;
+      const StreamDescriptor* child_descriptor = nullptr;
+      for (const auto& descriptor : *stream_descriptors) {
+        if (descriptor.id != source_record->stream) continue;
+        ++descriptor_count;
+        child_descriptor = &descriptor;
+      }
+      if (descriptor_count != 1U || child_descriptor == nullptr ||
+          child_descriptor->type != StreamType::opaque ||
+          child_descriptor->source_id != "codec.video.hls-resource") {
+        return fail<std::vector<VerifiedRawVideoFrame>>(
+            ErrorCode::archive_corrupt,
+            "verified HLS video frame child descriptor is invalid");
       }
       source_records.push_back(*source_record);
     }

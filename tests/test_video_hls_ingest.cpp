@@ -191,7 +191,8 @@ TEST(video_hls_ingest_preserves_manifest_and_segments_before_decode) {
 TEST(video_hls_ingest_reopens_same_url_as_distinct_snapshots) {
   if (!video::ffmpeg_video_ingest_available()) return;
 
-  const auto segment = fixture("hls_4x4_seg0.ts.b64");
+  const auto segment0 = fixture("hls_4x4_seg0.ts.b64");
+  const auto segment1 = fixture("hls_4x4_seg1.ts.b64");
   const auto manifest = bytes(
       "#EXTM3U\n"
       "#EXT-X-VERSION:3\n"
@@ -210,7 +211,8 @@ TEST(video_hls_ingest_reopens_same_url_as_distinct_snapshots) {
       {"/live/same.ts",
        HlsHttpResponse{.status = 200,
                        .content_type = "video/mp2t",
-                       .body = segment}},
+                       .body = segment0,
+                       .subsequent_bodies = {segment1}}},
   });
 
   const auto archive_path = test_path("reopened-segment.coda");
@@ -248,8 +250,10 @@ TEST(video_hls_ingest_reopens_same_url_as_distinct_snapshots) {
     const auto second = archive->read_payload(report->secondary_sources[1]);
     EXPECT_TRUE(first);
     EXPECT_TRUE(second);
-    if (first) EXPECT_EQ(*first, segment);
-    if (second) EXPECT_EQ(*second, segment);
+    if (first) EXPECT_EQ(*first, segment0);
+    if (second) EXPECT_EQ(*second, segment1);
+    EXPECT_TRUE(report->secondary_sources[0].hash !=
+                report->secondary_sources[1].hash);
     EXPECT_TRUE(report->secondary_sources[0].stream !=
                 report->secondary_sources[1].stream);
   }

@@ -341,11 +341,6 @@ Result<std::uint16_t> error_code_to_wire(ErrorCode code) {
     case ErrorCode::archive_corrupt: return std::uint16_t{7};
     case ErrorCode::model_incompatible: return std::uint16_t{8};
     case ErrorCode::inference: return std::uint16_t{9};
-    case ErrorCode::watermark_model_missing: return std::uint16_t{10};
-    case ErrorCode::watermark_code_ambiguous: return std::uint16_t{11};
-    case ErrorCode::watermark_signature_invalid: return std::uint16_t{12};
-    case ErrorCode::watermark_replay_suspected: return std::uint16_t{13};
-    case ErrorCode::watermark_path_unqualified: return std::uint16_t{14};
     case ErrorCode::identity_not_enrolled: return std::uint16_t{15};
     case ErrorCode::identity_uncalibrated: return std::uint16_t{16};
     case ErrorCode::cancelled: return std::uint16_t{17};
@@ -370,11 +365,6 @@ Result<ErrorCode> error_code_from_wire(std::uint16_t code) {
     case 7: return ErrorCode::archive_corrupt;
     case 8: return ErrorCode::model_incompatible;
     case 9: return ErrorCode::inference;
-    case 10: return ErrorCode::watermark_model_missing;
-    case 11: return ErrorCode::watermark_code_ambiguous;
-    case 12: return ErrorCode::watermark_signature_invalid;
-    case 13: return ErrorCode::watermark_replay_suspected;
-    case 14: return ErrorCode::watermark_path_unqualified;
     case 15: return ErrorCode::identity_not_enrolled;
     case 16: return ErrorCode::identity_uncalibrated;
     case 17: return ErrorCode::cancelled;

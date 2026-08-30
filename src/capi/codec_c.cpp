@@ -36,13 +36,7 @@ codec_status_t status_for(codec::ErrorCode code) {
     case codec::ErrorCode::resource_exhausted:
       return CODEC_STATUS_RESOURCE_EXHAUSTED;
     case codec::ErrorCode::decode: return CODEC_STATUS_DECODE;
-    case codec::ErrorCode::watermark_code_ambiguous:
-    case codec::ErrorCode::watermark_signature_invalid:
-    case codec::ErrorCode::watermark_replay_suspected:
-    case codec::ErrorCode::watermark_path_unqualified:
-      return CODEC_STATUS_WATERMARK;
     case codec::ErrorCode::model_incompatible:
-    case codec::ErrorCode::watermark_model_missing:
       return CODEC_STATUS_UNAVAILABLE;
     default: return CODEC_STATUS_INTERNAL;
   }

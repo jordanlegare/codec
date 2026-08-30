@@ -1162,8 +1162,6 @@ const char* record_type_name(RecordType type) noexcept {
     case RecordType::stream_descriptor: return "stream_descriptor";
     case RecordType::stream_timing: return "stream_timing";
     case RecordType::stream_provenance: return "stream_provenance";
-    case RecordType::watermark_statement: return "watermark_statement";
-    case RecordType::watermark_observation: return "watermark_observation";
     case RecordType::feed_identity_event: return "feed_identity_event";
     case RecordType::audit_event: return "audit_event";
     case RecordType::final_index: return "final_index";

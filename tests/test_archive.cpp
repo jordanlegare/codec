@@ -395,6 +395,37 @@ TEST(repair_preserves_unknown_record_type_code_and_payload) {
   std::filesystem::remove(repaired);
 }
 
+TEST(retired_watermark_record_codes_remain_opaque_and_repairable) {
+  const auto source = test_path("retired-record-source.coda");
+  const auto repaired = test_path("retired-record-output.coda");
+  std::filesystem::remove(source);
+  std::filesystem::remove(repaired);
+  const auto stream = stream_id(7);
+  const std::array<codec::RecordTypeCode, 2> retired{20, 21};
+  const std::array payloads{bytes("retired-20"), bytes("retired-21")};
+
+  auto writer = std::move(*codec::CodaWriter::create(source));
+  for (std::size_t index = 0; index < retired.size(); ++index) {
+    EXPECT_TRUE(writer.append_raw(retired[index], stream,
+                                  static_cast<std::int64_t>(index),
+                                  static_cast<std::int64_t>(index + 1),
+                                  payloads[index]));
+  }
+  EXPECT_TRUE(writer.finalize());
+
+  auto repair = codec::CodaArchive::repair(source, repaired);
+  EXPECT_TRUE(repair);
+  auto archive = std::move(*codec::CodaArchive::open(repaired));
+  EXPECT_TRUE(archive.verify().ok);
+  for (std::size_t index = 0; index < retired.size(); ++index) {
+    auto extracted = archive.extract_stream_raw(stream, retired[index]);
+    EXPECT_TRUE(extracted);
+    EXPECT_EQ(*extracted, payloads[index]);
+  }
+  std::filesystem::remove(source);
+  std::filesystem::remove(repaired);
+}
+
 TEST(generic_record_query_combines_filters_and_time_boundaries) {
   const auto path = test_path("generic-record-query.coda");
   std::filesystem::remove(path);

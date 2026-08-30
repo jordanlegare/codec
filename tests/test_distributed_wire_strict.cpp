@@ -141,6 +141,13 @@ TEST(distributed_wire_error_rejects_unknown_code_and_flags_with_valid_digest) {
 
   // Error fields start at body offset 8: wire code at 64, retryable at 66,
   // reserved at 67.
+  for (std::uint16_t retired = 10; retired <= 14; ++retired) {
+    auto encoded = *base;
+    encoded[64] = static_cast<std::byte>(retired & 0xffU);
+    encoded[65] = static_cast<std::byte>(retired >> 8U);
+    refresh_digest(encoded);
+    expect_reply_protocol(encoded);
+  }
   {
     auto encoded = *base;
     encoded[64] = std::byte{0xff};

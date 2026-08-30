@@ -148,11 +148,6 @@ const char* error_code_name(ErrorCode code) noexcept {
     case ErrorCode::archive_corrupt: return "archive_corrupt";
     case ErrorCode::model_incompatible: return "model_incompatible";
     case ErrorCode::inference: return "inference";
-    case ErrorCode::watermark_model_missing: return "watermark_model_missing";
-    case ErrorCode::watermark_code_ambiguous: return "watermark_code_ambiguous";
-    case ErrorCode::watermark_signature_invalid: return "watermark_signature_invalid";
-    case ErrorCode::watermark_replay_suspected: return "watermark_replay_suspected";
-    case ErrorCode::watermark_path_unqualified: return "watermark_path_unqualified";
     case ErrorCode::identity_not_enrolled: return "identity_not_enrolled";
     case ErrorCode::identity_uncalibrated: return "identity_uncalibrated";
     case ErrorCode::cancelled: return "cancelled";

@@ -9,25 +9,20 @@ namespace codec {
 
 enum class ErrorCode {
   ok = 0,
-  invalid_argument,
-  unauthorized_source,
-  network,
-  protocol,
-  decode,
-  archive_io,
-  archive_corrupt,
-  model_incompatible,
-  inference,
-  watermark_model_missing,
-  watermark_code_ambiguous,
-  watermark_signature_invalid,
-  watermark_replay_suspected,
-  watermark_path_unqualified,
-  identity_not_enrolled,
-  identity_uncalibrated,
-  cancelled,
-  resource_exhausted,
-  internal,
+  invalid_argument = 1,
+  unauthorized_source = 2,
+  network = 3,
+  protocol = 4,
+  decode = 5,
+  archive_io = 6,
+  archive_corrupt = 7,
+  model_incompatible = 8,
+  inference = 9,
+  identity_not_enrolled = 15,
+  identity_uncalibrated = 16,
+  cancelled = 17,
+  resource_exhausted = 18,
+  internal = 19,
 };
 
 struct Error {
@@ -89,4 +84,3 @@ inline Result<void> fail(ErrorCode code, std::string message,
 const char* error_code_name(ErrorCode code) noexcept;
 
 }  // namespace codec
-

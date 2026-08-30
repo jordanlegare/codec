@@ -45,6 +45,7 @@ video::RawVideoFrameState frame(std::uint8_t luma) {
           .transfer = video::TransferCharacteristics::bt709,
           .matrix = video::MatrixCoefficients::bt709,
       },
+      .pixels = {},
   };
   output.pixels.assign(16U * 16U, static_cast<std::byte>(luma));
   output.pixels.insert(output.pixels.end(), 8U * 8U, std::byte{0x80});
@@ -123,6 +124,7 @@ TEST(video_export_verified_vfr1_to_mp4) {
   EXPECT_TRUE(archive);
   const video::VideoFrameQuery query{
       .stream = fixture.stream,
+      .time = std::nullopt,
       .maximum_results = 8,
       .maximum_encoded_bytes = 1024 * 1024,
   };
@@ -155,6 +157,7 @@ TEST(video_export_refuses_unverified_vfr1) {
   auto exported = video::export_verified_video_mp4(
       *archive,
       video::VideoFrameQuery{.stream = fixture.stream,
+                             .time = std::nullopt,
                              .maximum_results = 8,
                              .maximum_encoded_bytes = 1024 * 1024},
       video::VideoMp4ExportLimits{.maximum_output_bytes = 1024 * 1024});
@@ -172,6 +175,7 @@ TEST(video_export_rejects_zero_output_limit) {
   auto exported = video::export_verified_video_mp4(
       *archive,
       video::VideoFrameQuery{.stream = fixture.stream,
+                             .time = std::nullopt,
                              .maximum_results = 8,
                              .maximum_encoded_bytes = 1024 * 1024},
       video::VideoMp4ExportLimits{.maximum_output_bytes = 0});

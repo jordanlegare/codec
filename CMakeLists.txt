@@ -212,6 +212,7 @@ if(CODEC_BUILD_TESTS)
     tests/test_video_ffmpeg_ingest.cpp
     tests/test_video_ffmpeg_ingest_limits.cpp
     tests/test_video_ffmpeg_layouts.cpp
+    tests/test_video_hls_ingest.cpp
     tests/test_video_hls_policy.cpp
     tests/test_video_profile.cpp
     tests/test_video_state_reader.cpp

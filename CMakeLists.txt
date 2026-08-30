@@ -70,6 +70,7 @@ add_library(codec_core
   src/transport/recovery.cpp
   src/transport/streaming_repair.cpp
   src/transport/xor_recovery.cpp
+  src/video/ffmpeg_export.cpp
   src/video/ffmpeg_ingest.cpp
   src/video/ffmpeg_ingest_dispatch.cpp
   src/video/hls_policy.cpp

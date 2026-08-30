@@ -2,11 +2,11 @@
 
 **Channel-Oriented Decomposition, Extraction, and Capture**
 
-CODEC is a C++20 preservation-first capture and archive engine for temporal data streams. The `codec` command-line program can record one or more local, standard-input, HTTP, or HTTPS feeds into a CODA archive, verify or inspect archive integrity, list feeds, extract exact source bytes by feed, and repair a damaged trailing archive segment into a new file.
+CODEC is a C++20 preservation-first capture and archive engine for temporal data streams. The `codec` command-line program can record one or more local, standard-input, HTTP, or HTTPS feeds into a CODA archive, verify or inspect archive integrity, list feeds, extract exact source bytes by feed, repair a damaged trailing archive segment into a new file, and explicitly ingest encoded video through the Stage H.1 FFmpeg bridge.
 
-The current development tree, based on **v0.3.0**, contains substantially more functionality in the installed C++ library than is exposed through the CLI, including generic stream/provenance APIs, transport multiplexing and bounded XOR recovery, audio-profile processing, the unreleased Stage H.1 Video Stream Profile foundation with an optional FFmpeg ingest bridge, and the Stage F.1-F.7 distributed-processing primitives.
+The current development tree, based on **v0.3.0**, contains substantially more functionality in the installed C++ library than is exposed through the CLI, including generic stream/provenance APIs, transport multiplexing and bounded XOR recovery, audio-profile processing, the unreleased Stage H.1 Video Stream Profile foundation with an FFmpeg ingest bridge enabled by default at build time, and the Stage F.1-F.7 distributed-processing primitives.
 
-> **Important scope:** the distributed Stage F.1-F.7 implementation and the development-tree optional FFmpeg Video Profile ingest bridge are C++ library/package capabilities. There is no `codec distributed ...` CLI command, no built-in remote HTTP/gRPC worker service, and no CLI mode that automatically decodes recorded video into S1 frames.
+> **Important scope:** the distributed Stage F.1-F.7 implementation remains a C++ library/package capability with no `codec distributed ...` command or built-in remote HTTP/gRPC worker service. Video has a dedicated `codec video ingest` command when the FFmpeg backend is built. Generic `codec record` remains S0-only capture and never automatically decodes recorded video into S1 frames.
 
 ## What CODEC is for
 
@@ -29,6 +29,7 @@ For a normal CLI user, the most important behavior is that `codec record` writes
 | Show version | `codec --version` |
 | Show runtime capability flags | `codec capabilities` |
 | Record one or more feeds | `codec record` |
+| Explicitly preserve and canonicalize encoded video | `codec video ingest` |
 | Verify a CODA archive | `codec verify` |
 | Verify and show basic archive information | `codec inspect` |
 | List legacy feed descriptors | `codec list feeds` |
@@ -46,7 +47,7 @@ The CLI writes machine-readable JSON or JSON Lines to standard output for succes
 
 The project CI for v0.3.0 builds and tests on **Ubuntu Linux** with both **GCC** and **Clang**. The implementation is currently POSIX-oriented; native Windows is not a validated v0.3.0 target.
 
-Minimum project requirements:
+Default project requirements:
 
 - CMake **3.20+**
 - C++20 compiler
@@ -54,9 +55,10 @@ Minimum project requirements:
 - libcurl
 - pkg-config
 - libFLAC development headers/library
+- FFmpeg `libavformat`, `libavcodec`, `libavutil`, and `libswscale` development headers/libraries
 - a build tool such as Ninja or Make
 
-FFmpeg development libraries are optional and are required only when `CODEC_ENABLE_FFMPEG_VIDEO=ON`.
+The FFmpeg Video Profile backend defaults to enabled. A dependency-free Video Profile foundation build remains supported by configuring `-DCODEC_ENABLE_FFMPEG_VIDEO=OFF`; that explicit opt-out does not require the FFmpeg development libraries.
 
 ### Ubuntu/Debian setup
 
@@ -73,18 +75,14 @@ sudo apt-get install -y \
   ca-certificates \
   libssl-dev \
   libcurl4-openssl-dev \
-  libflac-dev
-```
-
-To enable the optional FFmpeg Video Profile ingest backend, also install:
-
-```bash
-sudo apt-get install -y \
+  libflac-dev \
   libavformat-dev \
   libavcodec-dev \
   libavutil-dev \
   libswscale-dev
 ```
+
+For a build that intentionally excludes the FFmpeg ingest bridge, the four `libav*`/`libswscale` packages above may be omitted and CMake must be configured with `-DCODEC_ENABLE_FFMPEG_VIDEO=OFF`.
 
 To build with Clang as well:
 
@@ -102,6 +100,17 @@ cd codec
 
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel
+```
+
+The default configure above enables the FFmpeg Video Profile backend and therefore requires the FFmpeg development modules listed above.
+
+For the explicit dependency-free video build:
+
+```bash
+cmake -S . -B build-no-ffmpeg -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCODEC_ENABLE_FFMPEG_VIDEO=OFF
+cmake --build build-no-ffmpeg --parallel
 ```
 
 The executable is then:
@@ -137,7 +146,7 @@ These are the CODEC-specific CMake configuration switches in the current develop
 | `CODEC_BUILD_EXAMPLES` | `ON` | Build the example programs, including `codec_capture_example`. |
 | `CODEC_WARNINGS_AS_ERRORS` | `OFF` | Promote compiler warnings to errors (`-Werror` or `/WX`). CI enables this. |
 | `CODEC_ENABLE_SANITIZERS` | `OFF` | For GCC/Clang, compile/link with AddressSanitizer and UndefinedBehaviorSanitizer. |
-| `CODEC_ENABLE_FFMPEG_VIDEO` | `OFF` | Enable the optional FFmpeg-backed Video Profile ingest bridge; requires `libavformat`, `libavcodec`, `libavutil`, and `libswscale` development packages discoverable through pkg-config. |
+| `CODEC_ENABLE_FFMPEG_VIDEO` | `ON` | Enable the FFmpeg-backed Video Profile ingest bridge; requires `libavformat`, `libavcodec`, `libavutil`, and `libswscale` development packages discoverable through pkg-config. Set to `OFF` for the dependency-free Video Profile foundation build. |
 | `CODEC_ONNXRUNTIME_ROOT` | empty | Optional path to an extracted ONNX Runtime distribution used by the Audio CPU separation backend. |
 
 Useful standard CMake switches include:
@@ -194,14 +203,13 @@ If `CODEC_ONNXRUNTIME_ROOT` is supplied but the expected header/shared library c
 
 Even when this optional backend is compiled, `codec capabilities` still reports `"neural_separation":false` in v0.3.0. That flag means CODEC does not bundle a production model or default neural-separation runtime path for the CLI; the optional backend is activated through the C++ API with caller-supplied model/runtime material.
 
-## Optional FFmpeg Video Profile ingest backend
+## FFmpeg Video Profile ingest backend — enabled by default
 
-The H.1 Video Stream Profile schema and verified reader remain usable without FFmpeg. To compile the optional preservation-first encoded-video ingest bridge, install the four FFmpeg development modules listed above and configure with:
+The H.1 Video Stream Profile schema and verified reader remain usable without FFmpeg, but the normal build now enables the preservation-first encoded-video ingest bridge by default. Install the four FFmpeg development modules listed above and configure normally:
 
 ```bash
 cmake -S . -B build -G Ninja \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DCODEC_ENABLE_FFMPEG_VIDEO=ON
+  -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 ```
@@ -216,9 +224,17 @@ When enabled, the installed C++ API exposes `codec::profiles::video::ingest_vide
 - writes each successful `VFR1` frame as S1 with direct exact same-stream S0 provenance;
 - finalizes a valid source-only archive with `profile_error` populated when media demux/decode/canonicalization fails after S0 preservation.
 
-The backend does not change `codec record`: the CLI remains generic S0 capture and still requires `--feed LABEL=URI`. There is no automatic CLI MP4-to-VFR1 decoding mode.
+The bridge does not change `codec record`: generic recording remains S0 capture and still requires `--feed LABEL=URI`. Encoded-video interpretation is explicit through `codec video ingest`; there is no automatic `codec record` MP4-to-VFR1 decoding mode.
 
-When the library is built with `CODEC_ENABLE_FFMPEG_VIDEO=OFF`, `ffmpeg_video_ingest_available()` reports `false` and a valid `ingest_video_ffmpeg()` request fails explicitly with `model_incompatible` before creating an archive.
+To disable FFmpeg at build time:
+
+```bash
+cmake -S . -B build-no-ffmpeg -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCODEC_ENABLE_FFMPEG_VIDEO=OFF
+```
+
+With `CODEC_ENABLE_FFMPEG_VIDEO=OFF`, `ffmpeg_video_ingest_available()` reports `false` and a valid `ingest_video_ffmpeg()` or `codec video ingest` request fails explicitly with `model_incompatible` before creating an archive.
 
 ## Install CODEC
 
@@ -261,7 +277,7 @@ cmake -S . -B build \
   -DCMAKE_PREFIX_PATH=/path/to/codec/install
 ```
 
-The consumer must always be able to resolve CODEC's public OpenSSL 3 Crypto, CURL, pkg-config, and FLAC dependencies. If the installed CODEC library was built with `CODEC_ENABLE_FFMPEG_VIDEO=ON`, its package configuration also recreates the required FFmpeg pkg-config targets so static consumers resolve `libavformat`, `libavcodec`, `libavutil`, and `libswscale` correctly.
+The consumer must always be able to resolve CODEC's public OpenSSL 3 Crypto, CURL, pkg-config, and FLAC dependencies. A default CODEC installation also requires the FFmpeg pkg-config modules because the installed package recreates `libavformat`, `libavcodec`, `libavutil`, and `libswscale` targets for consumers. An installation built explicitly with `CODEC_ENABLE_FFMPEG_VIDEO=OFF` does not add those FFmpeg package requirements.
 
 ---
 
@@ -330,7 +346,44 @@ Fields:
 | `neural_separation` | `false`: no production neural separation model/default CLI runtime is bundled. |
 | `gpu_inference` | `false`: no GPU inference backend is provided. |
 
-These are capability declarations, not performance measurements. The optional FFmpeg C++ ingest backend is queried through `ffmpeg_video_ingest_available()` rather than a new CLI capability field.
+These are capability declarations, not performance measurements. The FFmpeg C++ ingest backend is queried through `ffmpeg_video_ingest_available()` rather than a new CLI capability field.
+
+---
+
+## `codec video ingest`
+
+Explicitly capture one encoded-video source, preserve its accepted bytes as S0, and attempt Stage H.1 raw-frame S1 canonicalization:
+
+```bash
+codec video ingest \
+  --source URI \
+  --archive FILE \
+  --label LABEL \
+  --start-ns NS \
+  --end-ns NS \
+  [--layout gray8|rgb24|rgba32|yuv420p8] \
+  [--maximum-source-bytes N] \
+  [--maximum-decoded-bytes N] \
+  [--maximum-frames N]
+```
+
+`--source`, `--archive`, `--label`, `--start-ns`, and `--end-ns` are required. The interval must have positive duration. The default output layout is `yuv420p8`; the default source and decoded-byte limits are 1 GiB each, and the default frame limit is 4096.
+
+On successful S1 canonicalization, the command exits `0` and prints JSON including `stream_id`, `layout`, `source_bytes`, `frames`, `provenance`, and `"state_exact":true`. If S0 capture succeeds but media demux/decode/canonicalization fails, CODEC finalizes a valid source-only archive, reports `profile_error` in JSON, and exits `1`. With an FFmpeg-disabled build, the command fails with `model_incompatible` before archive creation.
+
+The command derives a stable stream ID from the label and source identity but does not persist the raw source URI/path in `StreamDescriptor::source_id`. FFmpeg decodes only the already captured bytes; secondary FFmpeg file/network opens are denied.
+
+Example:
+
+```bash
+codec video ingest \
+  --source ./camera.mp4 \
+  --archive camera.coda \
+  --label camera \
+  --start-ns 0 \
+  --end-ns 10000000000 \
+  --layout yuv420p8
+```
 
 ---
 
@@ -473,7 +526,7 @@ codec record \
   --feed 'camera3800=https://www.quebec511.info/Carte/Fenetres/camera.ashx?id=3800&format=mp4'
 ```
 
-That command preserves the remote response as S0. It does not invoke the optional C++ FFmpeg profile bridge automatically.
+That command preserves the remote response as S0. It does not invoke the FFmpeg profile bridge automatically; use `codec video ingest` when explicit encoded-video canonicalization is desired.
 
 ---
 
@@ -763,11 +816,11 @@ The current C++ tree includes a media-library-independent Video Stream Profile f
 - a verified reader that returns VFR1 as S1 only when its canonical bytes and exact provenance to committed same-stream S0 records validate;
 - raw preservation, extraction, and repair of unknown future profile codes without interpretation.
 
-On top of that foundation, builds configured with `CODEC_ENABLE_FFMPEG_VIDEO=ON` provide the optional bounded FFmpeg ingest bridge described above. It accepts one CODEC-authorized source snapshot, preserves the exact encoded/container bytes as S0, demuxes/decodes only those captured bytes, converts frames to an existing H.1 canonical layout, and emits each successful frame with exact `state_exact` provenance to the same-stream S0 source. The verified reader therefore consumes the bridge output through the same H.1 contract rather than a second FFmpeg-specific state model.
+On top of that foundation, default builds provide the bounded FFmpeg ingest bridge described above. It accepts one CODEC-authorized source snapshot, preserves the exact encoded/container bytes as S0, demuxes/decodes only those captured bytes, converts frames to an existing H.1 canonical layout, and emits each successful frame with exact `state_exact` provenance to the same-stream S0 source. The verified reader therefore consumes the bridge output through the same H.1 contract rather than a second FFmpeg-specific state model. Builds configured with `CODEC_ENABLE_FFMPEG_VIDEO=OFF` retain the media-library-independent H.1 schema and verified reader without the FFmpeg integration.
 
 Stage G trust/selective-disclosure work is explicitly deferred and is not claimed complete. Stage H is active at H.1; telemetry, sensor, document/event, network/system, domain schemas, and model-bundle work remain later milestones.
 
-H.1 still does **not** provide GStreamer integration, playback, transcoding/export, a CLI video command or automatic `codec record` decoding, HLS/DASH secondary retrieval, arbitrary FFmpeg protocol access, GPU decode, streaming inference, or a video model. It makes no general codec-compatibility, model-quality, throughput, latency, or scale claim; actual encoded-media support depends on the linked FFmpeg build.
+H.1 still does **not** provide GStreamer integration, playback, transcoding/export, automatic `codec record` decoding, HLS/DASH secondary retrieval, arbitrary FFmpeg protocol access, GPU decode, streaming inference, or a video model. It makes no general codec-compatibility, model-quality, throughput, latency, or scale claim; actual encoded-media support depends on the linked FFmpeg build.
 
 ## Stage E transport and recovery
 
@@ -834,7 +887,7 @@ Keep these distinctions in mind:
 
 - SHA-256 archive/frame/envelope hashes detect corruption under their defined structures; an active attacker who can rewrite data can generally recompute an unkeyed hash.
 - The CLI blocks private HTTP capture targets by default and refuses redirects, but this does not make arbitrary remote content trustworthy.
-- The optional FFmpeg bridge decodes only already captured bytes and blocks libavformat secondary protocol I/O with both a reject-all direct `io_open` hook and an inherited whitelist containing no real FFmpeg URL protocol; that limits authorization expansion but does not make hostile media trustworthy or provide a decoder sandbox.
+- The default-enabled FFmpeg bridge decodes only already captured bytes and blocks libavformat secondary protocol I/O with both a reject-all direct `io_open` hook and an inherited whitelist containing no real FFmpeg URL protocol; that limits authorization expansion but does not make hostile media trustworthy or provide a decoder sandbox.
 - Distributed F.1-F.7 labels and wire envelopes do not authenticate workers.
 - There is no encrypted remote-worker protocol in v0.3.0.
 - There are no published production-scale throughput, availability, or durability guarantees.

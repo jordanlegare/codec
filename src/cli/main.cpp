@@ -2,6 +2,7 @@
 #include <codec/archive_follow.hpp>
 #include <codec/engine.hpp>
 #include <codec/profiles/video.hpp>
+#include <codec/profiles/video_export.hpp>
 
 #include "../core/internal.hpp"
 
@@ -34,6 +35,7 @@ void usage(std::ostream& output) {
       << "  codec capabilities\n"
       << "  codec record --archive FILE --feed LABEL=URI [--feed ...]\n"
       << "  codec video ingest --source URI --archive FILE --label LABEL --start-ns NS --end-ns NS [--layout gray8|rgb24|rgba32|yuv420p8] [--maximum-source-bytes N] [--maximum-decoded-bytes N] [--maximum-frames N] [--maximum-hls-resources N] [--maximum-hls-resource-bytes N] [--maximum-hls-total-bytes N]\n"
+      << "  codec video export ARCHIVE --stream UUID --output FILE [--maximum-frames N] [--maximum-input-bytes N] [--maximum-output-bytes N]\n"
       << "  codec inspect ARCHIVE\n"
       << "  codec verify ARCHIVE [--level full]\n"
       << "  codec list feeds ARCHIVE\n"
@@ -140,9 +142,113 @@ std::string_view video_layout_name(codec::profiles::video::PixelLayout layout) {
   return "unknown";
 }
 
+int video_export_command(const Strings& arguments) {
+  namespace video = codec::profiles::video;
+
+  if (arguments.empty()) {
+    std::cerr << "codec: video export requires an archive\n";
+    return 2;
+  }
+  const auto archive_path = arguments.front();
+  const Strings tail(arguments.begin() + 1, arguments.end());
+  const auto stream_text = option(tail, "--stream");
+  const auto output_text = option(tail, "--output");
+  if (!stream_text || !output_text || stream_text->empty() ||
+      output_text->empty()) {
+    std::cerr << "codec: video export requires ARCHIVE, --stream, and --output\n";
+    return 2;
+  }
+
+  std::size_t maximum_frames = 1024U;
+  std::uint64_t maximum_input_bytes = 1024ULL * 1024ULL * 1024ULL;
+  std::uint64_t maximum_output_bytes = 1024ULL * 1024ULL * 1024ULL;
+  if (const auto value = option(tail, "--maximum-frames")) {
+    std::uint64_t parsed = 0U;
+    if (!parse_decimal(*value, parsed) || parsed == 0U ||
+        parsed >
+            static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())) {
+      std::cerr << "codec: video export --maximum-frames must be a positive process-sized integer\n";
+      return 2;
+    }
+    maximum_frames = static_cast<std::size_t>(parsed);
+  }
+  if (const auto value = option(tail, "--maximum-input-bytes")) {
+    if (!parse_decimal(*value, maximum_input_bytes) ||
+        maximum_input_bytes == 0U) {
+      std::cerr << "codec: video export --maximum-input-bytes must be a positive integer\n";
+      return 2;
+    }
+  }
+  if (const auto value = option(tail, "--maximum-output-bytes")) {
+    if (!parse_decimal(*value, maximum_output_bytes) ||
+        maximum_output_bytes == 0U) {
+      std::cerr << "codec: video export --maximum-output-bytes must be a positive integer\n";
+      return 2;
+    }
+  }
+
+  auto archive = codec::CodaArchive::open(std::string{archive_path});
+  if (!archive) return print_error(archive.error());
+  auto descriptors = archive->streams();
+  if (!descriptors) return print_error(descriptors.error());
+
+  std::optional<codec::StreamId> selected_stream;
+  for (const auto& descriptor : *descriptors) {
+    if (descriptor.type != codec::StreamType::video ||
+        codec::to_string(descriptor.id) != *stream_text) {
+      continue;
+    }
+    if (selected_stream) {
+      return print_error(codec::Error{
+          codec::ErrorCode::archive_corrupt,
+          "duplicate video stream descriptor: " + std::string{*stream_text},
+          false});
+    }
+    selected_stream = descriptor.id;
+  }
+  if (!selected_stream) {
+    return print_error(codec::Error{
+        codec::ErrorCode::invalid_argument,
+        "video stream ID not found: " + std::string{*stream_text}, false});
+  }
+
+  auto exported = video::export_verified_video_mp4(
+      *archive,
+      video::VideoFrameQuery{
+          .stream = *selected_stream,
+          .time = std::nullopt,
+          .maximum_results = maximum_frames,
+          .maximum_encoded_bytes = maximum_input_bytes,
+          .decode_limits = {},
+      },
+      video::VideoMp4ExportLimits{
+          .maximum_output_bytes = maximum_output_bytes,
+      });
+  if (!exported) return print_error(exported.error());
+
+  const std::filesystem::path output_path{std::string{*output_text}};
+  auto written = write_bytes(output_path, exported->output.payload);
+  if (!written) return print_error(written.error());
+
+  std::cout << "{\"archive\":\""
+            << codec::detail::json_escape(std::string{archive_path})
+            << "\",\"stream_id\":\"" << codec::to_string(*selected_stream)
+            << "\",\"output\":\""
+            << codec::detail::json_escape(output_path.string())
+            << "\",\"payload_type\":\""
+            << codec::detail::json_escape(exported->output.payload_type)
+            << "\",\"frames\":" << exported->state_records.size()
+            << ",\"bytes\":" << exported->output.payload.size() << "}\n";
+  return 0;
+}
+
 int video_command(const Strings& arguments) {
+  if (!arguments.empty() && arguments.front() == "export") {
+    return video_export_command(
+        Strings(arguments.begin() + 1, arguments.end()));
+  }
   if (arguments.empty() || arguments.front() != "ingest") {
-    std::cerr << "codec: video supports: video ingest\n";
+    std::cerr << "codec: video supports: video ingest, video export\n";
     return 2;
   }
   const Strings tail(arguments.begin() + 1, arguments.end());
@@ -476,7 +582,7 @@ int repair_command(const Strings& arguments) {
             << ",\"recovered_payload_bytes\":"
             << report->recovered_payload_bytes
             << ",\"discarded_tail_bytes\":"
-            << report->discarded_tail_bytes << "}\n";
+            << report.discarded_tail_bytes << "}\n";
   return 0;
 }
 

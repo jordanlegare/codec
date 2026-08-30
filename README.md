@@ -4,9 +4,9 @@
 
 CODEC is a C++20 preservation-first capture and archive engine for temporal data streams. The `codec` command-line program can record one or more local, standard-input, HTTP, or HTTPS feeds into a CODA archive, verify or inspect archive integrity, list feeds, extract exact source bytes by feed, and repair a damaged trailing archive segment into a new file.
 
-Version **0.3.0** also contains substantially more functionality in the installed C++ library than is exposed through the CLI, including generic stream/provenance APIs, transport multiplexing and bounded XOR recovery, audio-profile processing, the Stage H.1 Video Stream Profile foundation with an optional FFmpeg ingest bridge, and the Stage F.1-F.7 distributed-processing primitives.
+The current development tree, based on **v0.3.0**, contains substantially more functionality in the installed C++ library than is exposed through the CLI, including generic stream/provenance APIs, transport multiplexing and bounded XOR recovery, audio-profile processing, the unreleased Stage H.1 Video Stream Profile foundation with an optional FFmpeg ingest bridge, and the Stage F.1-F.7 distributed-processing primitives.
 
-> **Important scope:** the distributed Stage F.1-F.7 implementation and the optional FFmpeg Video Profile ingest bridge are C++ library/package capabilities. There is no `codec distributed ...` CLI command, no built-in remote HTTP/gRPC worker service, and no CLI mode that automatically decodes recorded video into S1 frames.
+> **Important scope:** the distributed Stage F.1-F.7 implementation and the development-tree optional FFmpeg Video Profile ingest bridge are C++ library/package capabilities. There is no `codec distributed ...` CLI command, no built-in remote HTTP/gRPC worker service, and no CLI mode that automatically decodes recorded video into S1 frames.
 
 ## What CODEC is for
 
@@ -129,7 +129,7 @@ The normal test configuration includes the C++ unit suite, C API test, real CLI 
 
 ## CMake switches
 
-These are the CODEC-specific CMake configuration switches in v0.3.0:
+These are the CODEC-specific CMake configuration switches in the current development tree:
 
 | Switch | Default | Meaning |
 |---|---:|---|
@@ -211,7 +211,7 @@ When enabled, the installed C++ API exposes `codec::profiles::video::ingest_vide
 - captures the accepted file/HTTP/HTTPS source through CODEC's existing bounded capture policy;
 - commits the exact encoded/container representation as S0 before media interpretation;
 - decodes only those already captured in-memory bytes through FFmpeg custom AVIO;
-- denies FFmpeg secondary resource opens instead of allowing demuxers to fetch nested files or network resources independently;
+- blocks libavformat secondary protocol I/O with a reject-all secondary-open callback plus an inherited whitelist containing no real FFmpeg URL protocol, instead of allowing nested file or network retrieval;
 - canonicalizes decoded frames to an explicitly requested H.1 Gray8, RGB24, RGBA32, or planar YUV420P8 layout;
 - writes each successful `VFR1` frame as S1 with direct exact same-stream S0 provenance;
 - finalizes a valid source-only archive with `profile_error` populated when media demux/decode/canonicalization fails after S0 preservation.
@@ -250,8 +250,8 @@ project(my_codec_app LANGUAGES CXX)
 find_package(codec CONFIG REQUIRED)
 
 add_executable(my_codec_app main.cpp)
-target_compile_features(my_codec_app PRIVATE cxx_std_20)
-target_link_libraries(my_codec_app PRIVATE codec::codec)
+target_compile_features(codec_package_consumer PRIVATE cxx_std_20)
+target_link_libraries(codec_package_consumer PRIVATE codec::codec)
 ```
 
 If CODEC was installed into a non-system prefix:
@@ -681,7 +681,10 @@ codec record \
 Terminal 2:
 
 ```bash
-codec extract live.coda --feed live --follow --output live-copy.bin
+codec extract live.coda \
+  --feed live \
+  --follow \
+  --output live-copy.bin
 ```
 
 The follower reads only verified committed source records and exits after the recorder commits the final archive index.
@@ -724,7 +727,7 @@ If you need those operational metrics, benchmark the exact workload, machine, st
 
 # C++ library capabilities beyond the CLI
 
-The installed `codec::codec` library in v0.3.0 exposes significantly more than the command-line program. These APIs are useful to application developers but should not be mistaken for CLI functionality.
+The current development-tree installed `codec::codec` library exposes significantly more than the v0.3.0 command-line program. These APIs are useful to application developers but should not be mistaken for CLI functionality; released versus unreleased scope is called out below.
 
 ## Generic archive and stream APIs
 
@@ -834,7 +837,7 @@ Keep these distinctions in mind:
 
 - SHA-256 archive/frame/envelope hashes detect corruption under their defined structures; an active attacker who can rewrite data can generally recompute an unkeyed hash.
 - The CLI blocks private HTTP capture targets by default and refuses redirects, but this does not make arbitrary remote content trustworthy.
-- The optional FFmpeg bridge decodes only already captured bytes and denies secondary demuxer resource opens; that limits authorization expansion but does not make hostile media trustworthy or provide a decoder sandbox.
+- The optional FFmpeg bridge decodes only already captured bytes and blocks libavformat secondary protocol I/O with both a reject-all direct `io_open` hook and an inherited whitelist containing no real FFmpeg URL protocol; that limits authorization expansion but does not make hostile media trustworthy or provide a decoder sandbox.
 - Distributed F.1-F.7 labels and wire envelopes do not authenticate workers.
 - There is no encrypted remote-worker protocol in v0.3.0.
 - There are no published production-scale throughput, availability, or durability guarantees.

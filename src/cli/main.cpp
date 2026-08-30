@@ -582,7 +582,7 @@ int repair_command(const Strings& arguments) {
             << ",\"recovered_payload_bytes\":"
             << report->recovered_payload_bytes
             << ",\"discarded_tail_bytes\":"
-            << report.discarded_tail_bytes << "}\n";
+            << report->discarded_tail_bytes << "}\n";
   return 0;
 }
 

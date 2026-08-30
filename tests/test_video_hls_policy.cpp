@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <limits>
 #include <span>
 #include <string>
 #include <string_view>
@@ -122,5 +123,48 @@ TEST(video_hls_request_rejects_zero_hls_limits_before_archive_mutation) {
       EXPECT_EQ(result.error().code, codec::ErrorCode::invalid_argument);
     }
     EXPECT_FALSE(std::filesystem::exists(archive));
+  }
+}
+
+TEST(video_hls_request_rejects_unrepresentable_hls_limits_before_archive_mutation) {
+  const auto root = std::filesystem::temp_directory_path();
+  const auto ordinal_archive = root / "codec-video-hls-ordinal-overflow.coda";
+  std::filesystem::remove(ordinal_archive);
+  auto ordinal_request = valid_request(ordinal_archive);
+  ordinal_request.maximum_hls_resources = 1'000'000U;
+  auto ordinal_result = video::ingest_video_ffmpeg(ordinal_request);
+  EXPECT_FALSE(ordinal_result);
+  if (!ordinal_result) {
+    EXPECT_EQ(ordinal_result.error().code, codec::ErrorCode::invalid_argument);
+  }
+  EXPECT_FALSE(std::filesystem::exists(ordinal_archive));
+
+  if constexpr (std::numeric_limits<std::uint64_t>::max() >
+                std::numeric_limits<std::size_t>::max()) {
+    const auto per_resource_archive =
+        root / "codec-video-hls-resource-byte-overflow.coda";
+    std::filesystem::remove(per_resource_archive);
+    auto per_resource_request = valid_request(per_resource_archive);
+    per_resource_request.maximum_hls_resource_bytes =
+        static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max()) + 1U;
+    auto per_resource_result = video::ingest_video_ffmpeg(per_resource_request);
+    EXPECT_FALSE(per_resource_result);
+    if (!per_resource_result) {
+      EXPECT_EQ(per_resource_result.error().code,
+                codec::ErrorCode::invalid_argument);
+    }
+    EXPECT_FALSE(std::filesystem::exists(per_resource_archive));
+
+    const auto total_archive = root / "codec-video-hls-total-byte-overflow.coda";
+    std::filesystem::remove(total_archive);
+    auto total_request = valid_request(total_archive);
+    total_request.maximum_hls_total_bytes =
+        static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max()) + 1U;
+    auto total_result = video::ingest_video_ffmpeg(total_request);
+    EXPECT_FALSE(total_result);
+    if (!total_result) {
+      EXPECT_EQ(total_result.error().code, codec::ErrorCode::invalid_argument);
+    }
+    EXPECT_FALSE(std::filesystem::exists(total_archive));
   }
 }

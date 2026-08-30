@@ -124,6 +124,16 @@ int hls_io_open(AVFormatContext* context, AVIOContext** output,
       return AVERROR(EACCES);
     }
 
+    if (requested_uri == session->request->source_uri) {
+      auto primary = make_hls_memory_avio(session->primary_bytes);
+      if (!primary) {
+        remember_hls_callback_error(*session, primary.error());
+        return AVERROR(ENOMEM);
+      }
+      *output = *primary;
+      return 0;
+    }
+
     if (session->resources.size() >= session->request->maximum_hls_resources) {
       remember_hls_callback_error(
           *session,

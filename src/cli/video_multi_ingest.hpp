@@ -18,6 +18,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -438,21 +439,39 @@ inline int grouped_video_ingest_command(
   }
 
   detail::TemporaryVideoArchives temporary;
-  std::vector<profiles::video::FfmpegVideoIngestReport> reports;
-  reports.reserve(groups->size());
   temporary.paths.reserve(groups->size());
+  std::vector<std::optional<profiles::video::FfmpegVideoIngestReport>> reports(
+      groups->size());
+  std::vector<std::optional<Error>> errors(groups->size());
 
   for (std::size_t index = 0; index < groups->size(); ++index) {
-    auto& group = (*groups)[index];
     auto temporary_path = destination;
     temporary_path += ".video-" + std::to_string(index) + ".tmp";
     auto temporary_valid = detail::require_new_archive_path(temporary_path);
-    if (!temporary_valid) return detail::print_grouped_error(temporary_valid.error());
+    if (!temporary_valid) {
+      return detail::print_grouped_error(temporary_valid.error());
+    }
     temporary.paths.push_back(temporary_path);
-    group.request.archive_path = temporary_path;
-    auto report = profiles::video::ingest_video_ffmpeg(group.request);
-    if (!report) return detail::print_grouped_error(report.error());
-    reports.push_back(std::move(*report));
+    (*groups)[index].request.archive_path = temporary_path;
+  }
+
+  std::vector<std::jthread> workers;
+  workers.reserve(groups->size());
+  for (std::size_t index = 0; index < groups->size(); ++index) {
+    workers.emplace_back([&, index] {
+      auto report =
+          profiles::video::ingest_video_ffmpeg((*groups)[index].request);
+      if (!report) {
+        errors[index] = report.error();
+        return;
+      }
+      reports[index] = std::move(*report);
+    });
+  }
+  for (auto& worker : workers) worker.join();
+
+  for (const auto& error : errors) {
+    if (error) return detail::print_grouped_error(*error);
   }
 
   auto merged = detail::merge_group_archives(destination, temporary.paths);
@@ -464,8 +483,13 @@ inline int grouped_video_ingest_command(
 
   bool profile_error = false;
   for (std::size_t index = 0; index < reports.size(); ++index) {
-    detail::print_group_report(reports[index], (*groups)[index], destination);
-    profile_error = profile_error || reports[index].profile_error.has_value();
+    if (!reports[index]) {
+      return detail::print_grouped_error(
+          Error{ErrorCode::internal,
+                "grouped video worker produced no report or error", false});
+    }
+    detail::print_group_report(*reports[index], (*groups)[index], destination);
+    profile_error = profile_error || reports[index]->profile_error.has_value();
   }
   return profile_error ? 1 : 0;
 }

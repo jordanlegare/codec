@@ -98,9 +98,11 @@ No decode error removes or rewrites accepted S0.
 
 ## FFmpeg isolation boundary
 
-FFmpeg is never handed the original `source_uri`. The demuxer receives a custom `AVIOContext` backed by the captured byte vector. The read callback only advances within that immutable span; the seek callback supports bounded seeks and `AVSEEK_SIZE`.
+FFmpeg is never handed the original `source_uri`. The primary demuxer receives a custom `AVIOContext` backed by the captured byte vector. The read callback only advances within that immutable span; the seek callback supports bounded seeks and `AVSEEK_SIZE`.
 
-The format context installs an `io_open` callback that rejects all secondary resource opens. This prevents playlists, manifests, or demuxers from using FFmpeg's own URL protocols to fetch nested network/file resources. Sources that require secondary resources therefore become source-only archives with a profile decode error rather than expanding CODEC's authorization surface.
+The primary format context installs two independent restrictions for libavformat secondary I/O: an `io_open` callback that rejects direct secondary opens, and a `protocol_whitelist` containing no real FFmpeg URL protocol. The whitelist is intentionally inherited by nested format contexts created by demuxers such as concat, covering the case where a nested context does not inherit the parent `io_open` callback. Inputs that require nested file/network/protocol retrieval therefore fail closed and leave a source-only archive with a profile decode error instead of expanding CODEC's authorization surface.
+
+This boundary limits libavformat resource acquisition during interpretation; it is not a decoder sandbox and does not claim that hostile encoded media is safe to decode in-process.
 
 ## Stream selection and decode
 
@@ -175,7 +177,7 @@ With FFmpeg enabled the tests prove:
 - `query_verified_raw_video_frames()` returns that frame and exact source link;
 - malformed encoded bytes produce a finalized source-only archive with `profile_error`;
 - resource limits and invalid requests fail safely;
-- a secondary-open-requiring input cannot escape custom AVIO authorization.
+- a probeable `ffconcat` input referencing a child media file cannot cause libavformat to open that nested file, while the original ffconcat bytes remain exact S0 in a source-only archive.
 
 Without FFmpeg enabled the tests prove availability is false and a valid ingest request returns explicit backend unavailability without creating an archive.
 

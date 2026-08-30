@@ -1,6 +1,7 @@
 #include "test.hpp"
 
 #include <codec/profiles/video.hpp>
+#include <codec/profiles/video_export.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -60,6 +61,12 @@ std::size_t expected_layout_bytes(video::PixelLayout layout) {
   return 0U;
 }
 
+bool has_mp4_ftyp(const std::vector<std::byte>& payload) {
+  return payload.size() >= 8U && payload[4] == std::byte{'f'} &&
+         payload[5] == std::byte{'t'} && payload[6] == std::byte{'y'} &&
+         payload[7] == std::byte{'p'};
+}
+
 }  // namespace
 
 TEST(video_ffmpeg_ingest_canonicalizes_every_supported_layout_safely) {
@@ -116,6 +123,25 @@ TEST(video_ffmpeg_ingest_canonicalizes_every_supported_layout_safely) {
             EXPECT_EQ(frames->front().state.pixels.size(),
                       expected_layout_bytes(layouts[index]));
           }
+        }
+
+        auto exported = video::export_verified_video_mp4(
+            *archive,
+            video::VideoFrameQuery{
+                .stream = stream,
+                .time = std::nullopt,
+                .maximum_results = 4,
+                .maximum_encoded_bytes = 1024U * 1024U,
+                .decode_limits = {},
+            },
+            video::VideoMp4ExportLimits{
+                .maximum_output_bytes = 1024U * 1024U,
+            });
+        EXPECT_TRUE(exported);
+        if (exported) {
+          EXPECT_EQ(exported->output.payload_type, std::string{"video/mp4"});
+          EXPECT_TRUE(has_mp4_ftyp(exported->output.payload));
+          EXPECT_EQ(exported->state_records.size(), std::size_t{1});
         }
       }
     }

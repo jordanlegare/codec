@@ -70,6 +70,7 @@ add_library(codec_core
   src/transport/recovery.cpp
   src/transport/streaming_repair.cpp
   src/transport/xor_recovery.cpp
+  src/video/ffmpeg_export.cpp
   src/video/ffmpeg_ingest.cpp
   src/video/ffmpeg_ingest_dispatch.cpp
   src/video/hls_policy.cpp
@@ -209,6 +210,7 @@ if(CODEC_BUILD_TESTS)
     tests/test_transport_recovery_integration.cpp
     tests/test_transport_streaming_repair.cpp
     tests/test_transport_xor_recovery.cpp
+    tests/test_video_export.cpp
     tests/test_video_ffmpeg_ingest.cpp
     tests/test_video_ffmpeg_ingest_limits.cpp
     tests/test_video_ffmpeg_layouts.cpp

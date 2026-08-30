@@ -171,3 +171,4 @@ if grep -Eq 'w0_ed25519|w1_reference|w2_reference|w2_policy' \
 fi
 
 bash "$script_dir/video_cli_integration.sh" "$codec_bin"
+bash "$script_dir/video_cli_concurrency.sh" "$codec_bin"

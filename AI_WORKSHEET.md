@@ -18,7 +18,7 @@ active_roadmap_stage: H — H.1 Video Stream Profile foundation is merged; this 
 continuity_evidence:
   - git_head: GitHub main at 226e7d099a3ebaf8fc12b38a8464881ed7608b04 when the branch was created
   - open_prs: none at task start
-  - exact_head_ci: H.1 merge head is repository truth; this branch requires its own RED/GREEN/final exact-head evidence
+  - exact_head_ci: security regression RED at 9c416fde4f64253ba3c530d8df9af2e98c833441 in CI run 336; hardened implementation GREEN at 956bfd1277137232fbc0e7ae79e854518c7c98c9 in CI run 337; final documentation/evidence head still requires its own exact-head CI before merge
   - roadmap_issue: issue 10 is the unique exact-title CODEC v1.0 roadmap execution log; runtime code and tests remain authoritative
 roadmap_issue_title: CODEC v1.0 roadmap execution log
 scope: [other-profile, docs]
@@ -27,14 +27,14 @@ current_behavior_verified_from: [code, tests, cmake, changelog, H.1 design]
 new_capability_claim: When explicitly built with supported FFmpeg development libraries, CODEC can ingest one encoded video source into a CODA archive, preserve the exact accepted source bytes as S0, decode bounded video frames to one H.1 canonical pixel layout, and attach exact same-stream S0 provenance to each VFR1 S1 frame.
 change_class: profile_specific_behavior
 verification:
-  tdd_red_run: pending
-  release_configure: pending
-  release_build: pending
-  tests: pending
-  sanitizer_build: pending
-  sanitizer_tests: pending
-  package_consumer: pending
-  final_exact_head_ci: pending
+  tdd_red_run: pass — CI run 336 at 9c416fde4f64253ba3c530d8df9af2e98c833441 proved an ffconcat nested child file could be opened through a nested libavformat context
+  release_configure: pass — CI run 337 at 956bfd1277137232fbc0e7ae79e854518c7c98c9
+  release_build: pass — GCC and Clang CI run 337
+  tests: pass — GCC and Clang CI run 337, including ordinary MP4 decode and nested-resource denial regression
+  sanitizer_build: pass — ASan/UBSan CI run 337
+  sanitizer_tests: pass — ASan/UBSan CI run 337
+  package_consumer: pass — GCC and Clang install/package-consumer CI run 337; FFmpeg-disabled install/package-consumer also pass
+  final_exact_head_ci: pending — must run after the final documentation/evidence commit and before merge
 ```
 
 ```text
@@ -44,11 +44,11 @@ AFTER: An optional FFmpeg-backed profile integration can capture a bounded encod
 
 ```yaml
 proof:
-  regression_test: tests/test_video_ffmpeg_ingest.cpp proves optional backend availability, deterministic fixture ingest, source preservation, canonical frame decode, frame timing, and verified-reader retrieval
+  regression_test: tests/test_video_ffmpeg_ingest.cpp proves optional backend availability, deterministic fixture ingest, source preservation, canonical frame decode, frame timing, and verified-reader retrieval; tests/test_video_ffmpeg_ingest_limits.cpp proves aggregate decoded-byte limits and nested demuxer resource denial
   exactness_test: extracted S0 bytes equal the input media fixture byte-for-byte; emitted VFR1 payloads decode to exact bounded canonical pixels and re-encode identically
   compatibility_test: existing H.1 VPD1/VFR1, CLI, C ABI, audio, archive, transport, recovery, and distributed tests remain green; no generic RecordType or CODA envelope changes
-  failure_path_test: backend-unavailable build, invalid request, no video stream, malformed media, unsupported/oversized dimensions, decode failure, and output-path conflicts fail explicitly; preservation-first ingest finalizes source-only archive when decoding fails after S0 commit
-  security_test: FFmpeg input is decoded only from already captured bounded in-memory S0 bytes; FFmpeg is not allowed to open arbitrary nested URLs/protocols on CODEC's behalf
+  failure_path_test: backend-unavailable build, invalid request, no video stream, malformed media, unsupported/oversized dimensions, decode failure, output-path conflicts, aggregate decoded-byte exhaustion, and nested secondary-resource requirements fail explicitly; preservation-first ingest finalizes source-only archive when decoding fails after S0 commit
+  security_test: FFmpeg interprets only already captured bounded in-memory S0 bytes; direct libavformat secondary opens are rejected and an inherited protocol whitelist containing no real FFmpeg URL protocol blocks nested contexts such as concat from opening child files/network resources
   benchmark: n/a — no performance, latency, codec coverage, or scale claim
 ```
 
@@ -57,7 +57,7 @@ Invariant decisions:
 - [x] Accepted encoded/container/source bytes remain byte-exact S0 and are committed before optional decode interpretation.
 - [x] VFR1 remains S1 only under the existing H.1 canonical frame contract and exact same-stream provenance.
 - [x] FFmpeg integration is profile-owned and compile-time optional; no media-specific field or dependency enters generic CODEC/CODA structures.
-- [x] FFmpeg demux/decode consumes the captured in-memory bytes through a custom AVIO reader rather than reopening the source URI, preventing nested protocol/network access during interpretation.
+- [x] FFmpeg demux/decode consumes the captured in-memory bytes through custom AVIO rather than reopening the source URI; direct secondary opens are denied and nested libavformat contexts inherit a protocol whitelist containing no real URL protocol.
 - [x] Initial canonical decode target is YUV420P8 when conversion is required; direct supported layouts may be copied only when their exact byte layout matches the H.1 canonical representation.
 - [x] Audio/subtitle/data streams are ignored by this integration; playback, transcoding/export, streaming inference, models, and quality/performance claims remain out of scope.
 - [x] Builds without FFmpeg remain valid and expose explicit backend unavailability rather than silently changing H.1 behavior.

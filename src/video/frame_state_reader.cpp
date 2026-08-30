@@ -45,7 +45,8 @@ bool valid_process(const ProvenanceProcess& process) {
   return process.operation == kOperation &&
          process.implementation_id == kImplementation &&
          process.implementation_version == kImplementationVersion &&
-         process.details_type == kDetailsType;
+         process.details_type == kDetailsType && process.details.size() == 1 &&
+         process.details.front() == std::byte{0x01};
 }
 
 struct Candidate {

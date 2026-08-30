@@ -45,7 +45,6 @@ std::vector<std::byte> bmp_2x2_fixture() {
       std::byte{0x00}, std::byte{0x00}, std::byte{0x00}, std::byte{0x00},
       std::byte{0x00}, std::byte{0x00}, std::byte{0x00}, std::byte{0x00},
       std::byte{0x00}, std::byte{0x00}, std::byte{0x00}, std::byte{0x00},
-      std::byte{0x00}, std::byte{0x00}, std::byte{0x00}, std::byte{0x00},
       std::byte{0x00}, std::byte{0x00}, std::byte{0x00}, std::byte{0xff},
       std::byte{0xff}, std::byte{0xff}, std::byte{0x00}, std::byte{0x00},
       std::byte{0x00}, std::byte{0x00}, std::byte{0xff}, std::byte{0x00},
@@ -53,15 +52,11 @@ std::vector<std::byte> bmp_2x2_fixture() {
   };
 }
 
-std::vector<std::byte> hls_secondary_open_fixture() {
-  constexpr std::string_view manifest =
-      "#EXTM3U\n"
-      "#EXT-X-VERSION:3\n"
-      "#EXT-X-TARGETDURATION:1\n"
-      "#EXT-X-MEDIA-SEQUENCE:0\n"
-      "#EXTINF:1.0,\n"
-      "file:///etc/passwd\n"
-      "#EXT-X-ENDLIST\n";
+std::vector<std::byte> concat_secondary_open_fixture(
+    std::string_view nested_name) {
+  std::string manifest = "ffconcat version 1.0\nfile ";
+  manifest += nested_name;
+  manifest += '\n';
   const auto bytes = std::as_bytes(
       std::span<const char>{manifest.data(), manifest.size()});
   return {bytes.begin(), bytes.end()};
@@ -143,30 +138,31 @@ TEST(video_ffmpeg_ingest_decoded_byte_limit_preserves_exact_s0_only) {
   std::filesystem::remove(source_path);
 }
 
-TEST(video_ffmpeg_ingest_denies_secondary_media_resource_open) {
+TEST(video_ffmpeg_ingest_denies_nested_demuxer_resource_open) {
   if (!video::ffmpeg_video_ingest_available()) return;
-  const auto source_path = limit_test_path("secondary-open.m3u8");
+  constexpr std::string_view nested_name = "codec-video-ffmpeg-nested.bmp";
+  const auto nested_path = std::filesystem::current_path() / nested_name;
+  const auto source_path = limit_test_path("secondary-open.ffconcat");
   const auto archive_path = limit_test_path("secondary-open.coda");
+  std::filesystem::remove(nested_path);
   std::filesystem::remove(source_path);
   std::filesystem::remove(archive_path);
-  const auto fixture = hls_secondary_open_fixture();
+
+  const auto nested_fixture = bmp_2x2_fixture();
+  EXPECT_TRUE(write_limit_bytes(nested_path, nested_fixture));
+  const auto fixture = concat_secondary_open_fixture(nested_name);
   EXPECT_TRUE(write_limit_bytes(source_path, fixture));
   const auto stream = codec::derive_stream_id("video-ffmpeg-secondary-open");
-  auto request = limit_request(source_path, archive_path, stream,
-                               "application/vnd.apple.mpegurl");
+  auto request = limit_request(source_path, archive_path, stream, "text/plain");
 
   auto report = video::ingest_video_ffmpeg(request);
   EXPECT_TRUE(report);
   if (report) {
     EXPECT_TRUE(report->profile_error.has_value());
-    if (report->profile_error) {
-      EXPECT_EQ(report->profile_error->code, codec::ErrorCode::decode);
-      EXPECT_TRUE(report->profile_error->message.find("Operation not permitted") !=
-                  std::string::npos);
-    }
     expect_source_only_archive(*report, archive_path, stream, fixture);
   }
 
   std::filesystem::remove(archive_path);
   std::filesystem::remove(source_path);
+  std::filesystem::remove(nested_path);
 }

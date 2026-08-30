@@ -6,74 +6,59 @@ Canonical work loop for ChatGPT, Codex, and other agentic contributors.
 
 > Read `README.md` first. Read deeper design docs only when the task touches their subject. Do not reread large historical plans unless they are directly relevant.
 
-## Active work record — Remove watermark and generic-stream CLI surfaces
+## Active work record — Stage H.1 Video Stream Profile foundation
 
 ```yaml
-task: Remove the complete watermark feature and the generic stream list/extract CLI surfaces, make source-exact the documented feed-extraction default, and retain generic stream library infrastructure and all unrelated CLI behavior.
-base_ref: origin/main
-base_head_sha: a73b15c474b6974bf74b2c622b81bdcafee7890c
-work_branch: codex/remove-watermark-stream-cli-exec
+task: Add the Stage H.1 dependency-free Video Stream Profile foundation.
+base_ref: main
+base_head_sha: 2fa8da9fab514d77aa525be0cc6ed940e6569d67
+work_branch: codex/stage-h1-video-profile
 current_version: 0.3.0
-active_roadmap_stage: F — F.1-F.7 remain implemented C++ library/package primitives; this user-directed removal retires the Audio Profile watermark capability and generic stream CLI exposure without removing the generic stream substrate.
+active_roadmap_stage: H.1 — Video Stream Profile foundation; Stage G is explicitly deferred and is not claimed complete.
 continuity_evidence:
-  - git_head: clean main at a73b15c474b6974bf74b2c622b81bdcafee7890c before the work branch was created
-  - open_prs: none returned by the GitHub repository query at task start
-  - exact_head_ci: no pull-request-triggered workflow runs returned for the exact base head
+  - git_head: GitHub main at 2fa8da9fab514d77aa525be0cc6ed940e6569d67 when the branch was created
+  - open_prs: none before H.1; PR 45 is the sole active H.1 pull request
+  - exact_head_ci: TDD RED run 308 failed only on missing VPD1/VFR1 functions; intermediate GREEN runs 309 and 313 passed GCC, Clang, full tests/install/package consumer, and sanitizers on their exact heads
   - roadmap_issue: issue 10 is the unique exact-title CODEC v1.0 roadmap execution log; runtime code and tests remain authoritative
 roadmap_issue_title: CODEC v1.0 roadmap execution log
-scope: [watermark, core, docs]
-touched_truth_classes: []
-current_behavior_verified_from: [code, tests, cli, cmake, changelog]
-new_capability_claim: none; this change removes capabilities and CLI surfaces
+scope: [other-profile, docs]
+touched_truth_classes: [S0, S1]
+current_behavior_verified_from: [code, tests, cmake, changelog, generalized_coda_design]
+new_capability_claim: Deterministic bounded video descriptors and raw-frame S1 records can be encoded, archived under profile-owned raw codes, and returned only with exact verified same-stream S0 provenance.
 change_class: profile_specific_behavior
 verification:
-  tested_pre_record_sha: 2428f82fddd672fb2f99020207a0a10da4537661
-  release_configure: pass
-  release_build: pass
-  tests: pass
-  sanitizer_build: pass
-  sanitizer_tests: pass
-  installed_package_consumers: pass
-  cli_capabilities: pass
-  targeted_proof: pass
-  ci_evidence:
-    provider: GitHub Actions
-    workflow: CI
-    run_id: 33307668406
-    run_number: 304
-    exact_head_sha: 2428f82fddd672fb2f99020207a0a10da4537661
-    jobs:
-      sanitizers: pass
-      build_gcc: pass
-      build_clang: pass
-    package_consumers:
-      gcc: pass
-      clang: pass
+  local_focused_compile: pass with GCC warnings-as-errors for new production and test translation units
+  local_focused_codec: pass; 6 deterministic VPD1/VFR1 tests, 0 failures
+  local_full_cmake: unavailable; cmake and ctest are not installed in this runner
+  tdd_red_run: 33309510535 on cfe4f3d293d7aec08a07c5165ef4aa4edbaff63c
+  task1_green_run: 33309651253 on 3cfe3e3c1196cd35eb9d65a26171e4fa9c883d4e
+  task2_green_run: 33310148414 on f463280ee576834643395803f908bf8b8a727c0d
+  final_exact_head_ci: required before merge and recorded in issue 10
 ```
 
 ```text
-BEFORE: CODEC exposes watermark CLI/library behavior plus generic `list streams` and `extract --stream` CLI selection.
-AFTER: Watermark implementation and public surfaces are absent; the CLI lists and extracts only by feed with source-exact fidelity defaulted, while generic stream C++ APIs and unrelated CLI behavior remain available.
+BEFORE: CODEC's stable generic substrate identifies video streams but provides no installed Video Profile schema or verified video S1 state.
+AFTER: The installed Video Profile deterministically encodes bounded VPD1 descriptors and VFR1 raw-frame S1, preserves profile records through generic raw-code archive paths, and returns only canonical frames with the exact versioned process contract and direct same-stream S0 provenance.
 ```
 
 ```yaml
 proof:
-  regression_test: tests/cli_integration.sh proves removed commands fail and regular/follow feed extraction succeeds without --fidelity
-  exactness_test: existing byte-exact feed extraction and live-follow tests remain green
-  compatibility_test: retired archive record codes remain preservable as unknown raw codes; non-watermark distributed wire error numbers remain stable
-  failure_path_test: watermark, list streams, and extract --stream return status 2 without creating output
-  security_test: removed signing/key paths leave no callable watermark credential surface; existing capture security tests remain green
+  regression_test: tests/test_video_profile.cpp and tests/test_video_state_reader.cpp cover deterministic schemas, real archive/provenance queries, and malformed lineage
+  exactness_test: golden VPD1/VFR1 bytes plus exact Gray8, RGB24, RGBA32, and YUV420P8 encode/decode/encode round trips
+  compatibility_test: profile-local codes avoid generic RecordType changes; unknown future profile code 0x0102 survives exact extraction and non-mutating repair; existing C ABI/CLI/audio tests remain green
+  failure_path_test: invalid geometry, enums, versions, reserved bytes, lengths, overflow/bounds, malformed archived state, wrong process identity/details, and invalid S0 lineage fail closed
+  security_test: no network, credential, authorization, decoder, model, or executable-media surface is added
   benchmark: n/a — no performance or scale claim
 ```
 
 Invariant decisions:
 
-- [x] Accepted S0, profile-defined S1, D provenance, archive envelopes, and generic stream library semantics are unchanged.
-- [x] Generic `Stream*`, query, extraction, follow, processing, transport, recovery, and distributed primitives remain public C++ capabilities.
-- [x] Retired archive codes 20 and 21 remain readable, verifiable, repairable, and raw-extractable as unknown compatible record types.
-- [x] Retired distributed error slots 10-14 are not reassigned; every retained error preserves its existing wire number.
-- [x] `record`, `verify`, `inspect`, `repair`, `list feeds`, and `extract --feed` behavior remains unchanged apart from truthful capability/help documentation.
-- [x] Historical release notes remain historical truth; current manifests receive explicit removal language.
+- [x] Accepted encoded/container/source bytes remain S0; VFR1 is returned as S1 only with exact validated provenance.
+- [x] Video-only fields, schemas, and record codes remain under `codec::profiles::video`; generic CODA semantics and `RecordType` are unchanged.
+- [x] Profile failure cannot corrupt or block generic verification, raw extraction, or repair of committed records.
+- [x] Retired archive codes 20/21 and distributed error slots 10-14 remain compatibility tombstones.
+- [x] No FFmpeg/GStreamer dependency, demuxer, decoder, playback, export, CLI, inference, model, quality, performance, scale, or Stage G completion claim is added.
+- [x] H.2 telemetry and later verticals remain unimplemented until separately designed and proven.
 
 ## 0. Work record
 

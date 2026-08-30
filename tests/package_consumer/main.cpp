@@ -4,6 +4,7 @@
 #include <codec/integrity.hpp>
 #include <codec/processing.hpp>
 #include <codec/profiles/audio.hpp>
+#include <codec/profiles/video.hpp>
 #include <codec/recovery.hpp>
 #include <codec/streaming_repair.hpp>
 #include <codec/transport.hpp>
@@ -71,9 +72,102 @@ class PackageDistributedProcessor final : public codec::StreamProcessor {
   }
 };
 
+bool video_profile_package_round_trip() {
+  const auto path = std::filesystem::temp_directory_path() /
+                    "codec-package-consumer-video.coda";
+  std::filesystem::remove(path);
+  const auto stream = codec::derive_stream_id("package-consumer/video");
+  const codec::profiles::video::RawVideoFrameState expected{
+      .descriptor = codec::profiles::video::VideoProfileDescriptor{
+          .coded_width = 2,
+          .coded_height = 2,
+          .pixel_layout = codec::profiles::video::PixelLayout::rgb24,
+          .sample_aspect_ratio_numerator = 1,
+          .sample_aspect_ratio_denominator = 1,
+          .nominal_frame_rate_numerator = 24,
+          .nominal_frame_rate_denominator = 1,
+          .color_range = codec::profiles::video::ColorRange::full,
+          .color_primaries = codec::profiles::video::ColorPrimaries::bt709,
+          .transfer =
+              codec::profiles::video::TransferCharacteristics::bt709,
+          .matrix = codec::profiles::video::MatrixCoefficients::bt709,
+      },
+      .pixels = {
+          std::byte{0x01}, std::byte{0x02}, std::byte{0x03},
+          std::byte{0x04}, std::byte{0x05}, std::byte{0x06},
+          std::byte{0x07}, std::byte{0x08}, std::byte{0x09},
+          std::byte{0x0a}, std::byte{0x0b}, std::byte{0x0c},
+      },
+  };
+  auto encoded = codec::profiles::video::encode_raw_video_frame_state(
+      expected);
+  if (!encoded) return false;
+  auto decoded = codec::profiles::video::decode_raw_video_frame_state(
+      *encoded);
+  if (!decoded || *decoded != expected) return false;
+
+  auto created = codec::CodaWriter::create(path);
+  if (!created) return false;
+  auto writer = std::move(*created);
+  if (!writer.append_stream_descriptor(
+          codec::StreamDescriptor{
+              .id = stream,
+              .type = codec::StreamType::video,
+              .label = "package video",
+              .source_id = "package-consumer",
+              .payload_type =
+                  "application/vnd.codec.video.raw-frame.v1",
+          },
+          10)) {
+    return false;
+  }
+  const std::vector<std::byte> source_bytes{
+      std::byte{0x91}, std::byte{0x92}, std::byte{0x93}};
+  auto source = writer.append(codec::RecordType::source_bytes, stream, 10,
+                              20, source_bytes);
+  auto state = writer.append_raw(
+      codec::profiles::video::raw_video_frame_state_record_type, stream, 10,
+      20, *encoded);
+  if (!source || !state) return false;
+  const std::array inputs{*source};
+  const codec::ProvenanceProcess process{
+      .operation = "codec.video.raw-frame.canonicalize",
+      .implementation_id = "codec.video",
+      .implementation_version = "1",
+      .implementation_hash = std::nullopt,
+      .configuration_hash = std::nullopt,
+      .created_utc_ns = 30,
+      .details_type = "application/vnd.codec.video.canonicalization.v1",
+      .details = {std::byte{0x01}},
+  };
+  if (!writer.append_stream_provenance(
+          *state, codec::TruthClass::state_exact, inputs, process) ||
+      !writer.finalize()) {
+    return false;
+  }
+
+  auto archive = codec::CodaArchive::open(path);
+  if (!archive) return false;
+  auto frames = codec::profiles::video::query_verified_raw_video_frames(
+      *archive, codec::profiles::video::VideoFrameQuery{
+                    .stream = stream,
+                    .time = std::nullopt,
+                    .maximum_results = 1,
+                    .maximum_encoded_bytes = 1024,
+                });
+  const auto valid = frames && frames->size() == 1 &&
+                     frames->front().state == expected &&
+                     frames->front().source_records.size() == 1 &&
+                     frames->front().source_records.front().hash ==
+                         source->hash;
+  std::filesystem::remove(path);
+  return valid;
+}
+
 }  // namespace
 
 int main() {
+  if (!video_profile_package_round_trip()) return 1;
   const codec::profiles::audio::Pcm16FlacExportLimits limits{};
   const codec::profiles::audio::OfflinePcm16SeparationRequest offline{};
   const codec::profiles::audio::OfflinePcm16SeparationLimits offline_limits{};

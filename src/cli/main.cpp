@@ -33,7 +33,7 @@ void usage(std::ostream& output) {
       << "Usage:\n"
       << "  codec capabilities\n"
       << "  codec record --archive FILE --feed LABEL=URI [--feed ...]\n"
-      << "  codec video ingest --source URI --archive FILE --label LABEL --start-ns NS --end-ns NS [--layout gray8|rgb24|rgba32|yuv420p8] [--maximum-source-bytes N] [--maximum-decoded-bytes N] [--maximum-frames N]\n"
+      << "  codec video ingest --source URI --archive FILE --label LABEL --start-ns NS --end-ns NS [--layout gray8|rgb24|rgba32|yuv420p8] [--maximum-source-bytes N] [--maximum-decoded-bytes N] [--maximum-frames N] [--maximum-hls-resources N] [--maximum-hls-resource-bytes N] [--maximum-hls-total-bytes N]\n"
       << "  codec inspect ARCHIVE\n"
       << "  codec verify ARCHIVE [--level full]\n"
       << "  codec list feeds ARCHIVE\n"
@@ -176,6 +176,9 @@ int video_command(const Strings& arguments) {
   std::uint64_t maximum_source_bytes = 1024ULL * 1024ULL * 1024ULL;
   std::uint64_t maximum_decoded_bytes = 1024ULL * 1024ULL * 1024ULL;
   std::size_t maximum_frames = 4096U;
+  std::size_t maximum_hls_resources = 256U;
+  std::uint64_t maximum_hls_resource_bytes = 64ULL * 1024ULL * 1024ULL;
+  std::uint64_t maximum_hls_total_bytes = 1024ULL * 1024ULL * 1024ULL;
   if (const auto value = option(tail, "--maximum-source-bytes")) {
     if (!parse_decimal(*value, maximum_source_bytes) || maximum_source_bytes == 0U) {
       std::cerr << "codec: video ingest --maximum-source-bytes must be a positive integer\n";
@@ -196,6 +199,30 @@ int video_command(const Strings& arguments) {
       return 2;
     }
     maximum_frames = static_cast<std::size_t>(parsed);
+  }
+  if (const auto value = option(tail, "--maximum-hls-resources")) {
+    std::uint64_t parsed = 0U;
+    if (!parse_decimal(*value, parsed) || parsed == 0U ||
+        parsed >
+            static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())) {
+      std::cerr << "codec: video ingest --maximum-hls-resources must be a positive process-sized integer\n";
+      return 2;
+    }
+    maximum_hls_resources = static_cast<std::size_t>(parsed);
+  }
+  if (const auto value = option(tail, "--maximum-hls-resource-bytes")) {
+    if (!parse_decimal(*value, maximum_hls_resource_bytes) ||
+        maximum_hls_resource_bytes == 0U) {
+      std::cerr << "codec: video ingest --maximum-hls-resource-bytes must be a positive integer\n";
+      return 2;
+    }
+  }
+  if (const auto value = option(tail, "--maximum-hls-total-bytes")) {
+    if (!parse_decimal(*value, maximum_hls_total_bytes) ||
+        maximum_hls_total_bytes == 0U) {
+      std::cerr << "codec: video ingest --maximum-hls-total-bytes must be a positive integer\n";
+      return 2;
+    }
   }
 
   std::string identity = "codec.video.cli\n";
@@ -219,9 +246,23 @@ int video_command(const Strings& arguments) {
       .maximum_source_bytes = maximum_source_bytes,
       .maximum_decoded_bytes = maximum_decoded_bytes,
       .maximum_frames = maximum_frames,
+      .maximum_hls_resources = maximum_hls_resources,
+      .maximum_hls_resource_bytes = maximum_hls_resource_bytes,
+      .maximum_hls_total_bytes = maximum_hls_total_bytes,
   };
   auto report = codec::profiles::video::ingest_video_ffmpeg(request);
   if (!report) return print_error(report.error());
+
+  std::uint64_t secondary_source_bytes = 0U;
+  for (const auto& secondary : report->secondary_sources) {
+    if (secondary.payload_size >
+        std::numeric_limits<std::uint64_t>::max() - secondary_source_bytes) {
+      return print_error(codec::Error{
+          codec::ErrorCode::internal,
+          "video ingest secondary source byte count overflowed", false});
+    }
+    secondary_source_bytes += secondary.payload_size;
+  }
 
   std::cout << "{\"archive\":\""
             << codec::detail::json_escape(report->archive_path.string())
@@ -230,6 +271,9 @@ int video_command(const Strings& arguments) {
             << "\",\"source_bytes\":" << report->source.payload_size
             << ",\"frames\":" << report->states.size()
             << ",\"provenance\":" << report->provenance.size()
+            << ",\"secondary_sources\":"
+            << report->secondary_sources.size()
+            << ",\"secondary_source_bytes\":" << secondary_source_bytes
             << ",\"state_exact\":"
             << (report->state_exact() ? "true" : "false");
   if (report->profile_error) {

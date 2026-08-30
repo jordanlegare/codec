@@ -26,6 +26,25 @@ touched_truth_classes: []
 current_behavior_verified_from: [code, tests, cli, cmake, changelog]
 new_capability_claim: none; this change removes capabilities and CLI surfaces
 change_class: profile_specific_behavior
+verification:
+  tested_pre_record_sha: 069a7e5bf6e486ec41f8dd7ee7c96ee10f47fb23
+  release_configure: fail
+  release_build: fail
+  tests: fail
+  sanitizer_build: fail
+  sanitizer_tests: fail
+  installed_package_consumers: fail
+  cli_capabilities: fail
+  targeted_proof: fail
+  blockers:
+    release_configure: "cmake is unavailable on PATH (command -v cmake produced no path)."
+    release_build: "Not run: Release configuration cannot be created because cmake is unavailable on PATH."
+    tests: "Not run: no Release build exists because cmake is unavailable on PATH; ctest is also unavailable on PATH (command -v ctest produced no path)."
+    sanitizer_build: "Not run: sanitizer configuration cannot be created because cmake is unavailable on PATH."
+    sanitizer_tests: "Not run: no sanitizer build exists because cmake is unavailable on PATH; ctest is also unavailable on PATH."
+    installed_package_consumers: "Not run: an exact-head install cannot be created because cmake is unavailable on PATH."
+    cli_capabilities: "Not run: no source-exact ./build/codec was produced; stale or non-exact binaries were not used."
+    targeted_proof: "Not run: no source-exact ./build/codec was produced; stale or non-exact binaries were not used."
 ```
 
 ```text

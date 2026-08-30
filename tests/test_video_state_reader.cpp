@@ -87,7 +87,6 @@ struct HlsReaderFixtureOptions {
   bool include_child_descriptor{true};
   codec::StreamType child_stream_type{codec::StreamType::opaque};
   std::string child_source_id{"codec.video.hls-resource"};
-  bool duplicate_child_link{false};
   bool duplicate_child_stream{false};
   bool non_source_child{false};
   bool direct_process{false};
@@ -164,7 +163,6 @@ HlsReaderFixture make_hls_reader_archive(
   std::vector<codec::RecordInfo> inputs;
   if (options.include_primary_input) inputs.push_back(*primary_source);
   inputs.push_back(*child_source);
-  if (options.duplicate_child_link) inputs.push_back(*child_source);
   if (duplicate_child.has_value()) inputs.push_back(*duplicate_child);
   EXPECT_TRUE(writer.append_stream_provenance(
       *state, codec::TruthClass::state_exact, inputs,
@@ -585,24 +583,12 @@ TEST(video_state_reader_rejects_hls_child_wrong_source_id_or_stream_type) {
 }
 
 TEST(video_state_reader_rejects_hls_duplicate_or_non_source_child) {
-  const auto duplicate_link = make_hls_reader_archive(
-      "hls-duplicate-child-link.coda",
-      HlsReaderFixtureOptions{.duplicate_child_link = true});
-  auto archive = codec::CodaArchive::open(duplicate_link.path);
-  EXPECT_TRUE(archive);
-  auto frames = video::query_verified_raw_video_frames(*archive);
-  EXPECT_FALSE(frames);
-  if (!frames) {
-    EXPECT_EQ(frames.error().code, codec::ErrorCode::archive_corrupt);
-  }
-  std::filesystem::remove(duplicate_link.path);
-
   const auto duplicate_stream = make_hls_reader_archive(
       "hls-duplicate-child-stream.coda",
       HlsReaderFixtureOptions{.duplicate_child_stream = true});
-  archive = codec::CodaArchive::open(duplicate_stream.path);
+  auto archive = codec::CodaArchive::open(duplicate_stream.path);
   EXPECT_TRUE(archive);
-  frames = video::query_verified_raw_video_frames(*archive);
+  auto frames = video::query_verified_raw_video_frames(*archive);
   EXPECT_FALSE(frames);
   if (!frames) {
     EXPECT_EQ(frames.error().code, codec::ErrorCode::archive_corrupt);

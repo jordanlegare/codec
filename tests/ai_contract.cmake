@@ -146,6 +146,31 @@ foreach(required_contribution_term IN ITEMS
   endif()
 endforeach()
 
+foreach(retired_cli_text IN ITEMS
+    "codec watermark"
+    "codec list streams"
+    "--stream STREAM_ID"
+    "w0_ed25519"
+    "w1_reference"
+    "w2_reference"
+    "w2_policy")
+  string(FIND "${readme_contents}" "${retired_cli_text}" retired_offset)
+  if(NOT retired_offset EQUAL -1)
+    message(FATAL_ERROR
+      "README.md still advertises retired surface: ${retired_cli_text}")
+  endif()
+endforeach()
+
+string(FIND "${agents_contents}" "watermark" agents_watermark_offset)
+if(NOT agents_watermark_offset EQUAL -1)
+  message(FATAL_ERROR "AGENTS.md still requires watermarking")
+endif()
+string(FIND "${contributing_contents}" "watermark"
+  contributing_watermark_offset)
+if(NOT contributing_watermark_offset EQUAL -1)
+  message(FATAL_ERROR "CONTRIBUTING.md still requires watermarking")
+endif()
+
 foreach(required_field IN ITEMS base_head_sha active_roadmap_stage continuity_evidence)
   string(FIND "${worksheet_contents}" "${required_field}:" field_offset)
   if(field_offset EQUAL -1)

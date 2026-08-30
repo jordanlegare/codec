@@ -56,6 +56,10 @@ grep -q '"layout":"yuv420p8"' "$test_dir/probe.stdout"
 grep -q '"stream_id":"' "$test_dir/probe.stdout"
 "$codec_bin" verify "$probe_archive" --level full > "$test_dir/probe-verify.json"
 grep -q '"ok":true' "$test_dir/probe-verify.json"
+if LC_ALL=C grep -aFq "$fixture" "$probe_archive"; then
+  echo "video ingest persisted the raw source URI/path in archive metadata" >&2
+  exit 1
+fi
 
 for layout in gray8 rgb24 rgba32; do
   archive="$test_dir/$layout.coda"

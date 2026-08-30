@@ -131,8 +131,8 @@ struct FfmpegVideoIngestReport {
   std::vector<RecordInfo> states;
   std::vector<RecordInfo> provenance;
   std::optional<Error> profile_error;
-  std::vector<RecordInfo> secondary_descriptors;
-  std::vector<RecordInfo> secondary_sources;
+  std::vector<RecordInfo> secondary_descriptors{};
+  std::vector<RecordInfo> secondary_sources{};
 
   bool state_exact() const noexcept {
     return !states.empty() && states.size() == provenance.size() &&

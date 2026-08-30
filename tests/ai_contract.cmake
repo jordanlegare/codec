@@ -125,6 +125,10 @@ require_reference("README.md" "${readme_contents}"
   "docs/superpowers/specs/2026-08-30-stage-h1-video-profile-design.md")
 require_reference("README.md" "${readme_contents}"
   "docs/superpowers/plans/2026-08-30-stage-h1-video-profile.md")
+require_reference("README.md" "${readme_contents}"
+  "docs/superpowers/specs/2026-08-30-video-hls-ingest-design.md")
+require_reference("README.md" "${readme_contents}"
+  "docs/superpowers/plans/2026-08-30-video-hls-ingest.md")
 require_reference("CONTRIBUTING.md" "${contributing_contents}" "README.md")
 require_reference("CONTRIBUTING.md" "${contributing_contents}" "AI_WORKSHEET.md")
 require_reference("CONTRIBUTING.md" "${contributing_contents}" "AGENTS.md")
@@ -173,9 +177,12 @@ foreach(required_video_contract IN ITEMS
     "raw_video_frame_state_record_type = 0x0101"
     "query_verified_raw_video_frames"
     "ffmpeg_video_ingest_available"
+    "codec.video.raw-frame.canonicalize.hls"
+    "same-origin unencrypted HTTP/HTTPS HLS"
     "Video Stream Profile — Stage H.1"
     "Stage G trust/selective-disclosure work is explicitly deferred")
-  string(FIND "${video_header_contents}\n${readme_contents}"
+  string(FIND
+    "${video_header_contents}\n${video_frame_reader_contents}\n${readme_contents}"
     "${required_video_contract}" video_contract_offset)
   if(video_contract_offset EQUAL -1)
     message(FATAL_ERROR

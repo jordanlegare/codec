@@ -6,62 +6,59 @@ Canonical work loop for ChatGPT, Codex, and other agentic contributors.
 
 > Read `README.md` first. Read deeper design docs only when the task touches their subject. Do not reread large historical plans unless they are directly relevant.
 
-## Active work record — User-directed H.1 FFmpeg video ingest follow-on
+## Active work record — Preservation-first HLS video ingest
 
 ```yaml
-task: Add an optional FFmpeg-backed Video Profile ingest bridge that preserves encoded/container bytes as S0 and emits canonical provenance-linked VFR1 S1 frames.
+task: Extend the H.1 FFmpeg Video Profile bridge with bounded same-origin unencrypted HTTP/HTTPS HLS capture and versioned source-frontier provenance.
 base_ref: main
-base_head_sha: 226e7d099a3ebaf8fc12b38a8464881ed7608b04
-work_branch: codex/video-ffmpeg-ingest
+base_head_sha: f68515068a022ef4f16eefdc1df0512b94bcec77
+work_branch: codex/video-hls-ingest
 current_version: 0.3.0
-active_roadmap_stage: H — H.1 Video Stream Profile foundation is merged; this user-directed video integration follow-on does not claim H.2-H.6 complete and leaves Stage G deferred.
+active_roadmap_stage: H — H.1 Video Stream Profile integration follow-on; H.2 telemetry remains paused on its separate branch and Stage G remains deferred.
 continuity_evidence:
-  - git_head: GitHub main at 226e7d099a3ebaf8fc12b38a8464881ed7608b04 when the branch was created
-  - open_prs: none at task start
-  - exact_head_ci: security regression RED at 9c416fde4f64253ba3c530d8df9af2e98c833441 in CI run 336; hardened implementation GREEN at 956bfd1277137232fbc0e7ae79e854518c7c98c9 in CI run 337; final documentation/evidence head still requires its own exact-head CI before merge
+  - git_head: GitHub main at f68515068a022ef4f16eefdc1df0512b94bcec77 when the HLS branch was created
+  - open_prs: draft PR 50 is the active HLS pull request
+  - exact_head_ci: Task 3 lifecycle fix GREEN in run 375 at 1bc0e6363a5475b1e958b3893739cc1d74a4ff5d; Task 4 reader RED in run 377, reader GREEN in run 378, actual-ingest RED in run 379, and complete Task 4 GREEN in run 380 at cae82fea0b14a848ef9716322511342a70a1c436; Task 5 CLI RED in run 381; final documentation/evidence head still requires exact-head CI
   - roadmap_issue: issue 10 is the unique exact-title CODEC v1.0 roadmap execution log; runtime code and tests remain authoritative
 roadmap_issue_title: CODEC v1.0 roadmap execution log
 scope: [other-profile, docs]
 touched_truth_classes: [S0, S1]
-current_behavior_verified_from: [code, tests, cmake, changelog, H.1 design]
-new_capability_claim: When explicitly built with supported FFmpeg development libraries, CODEC can ingest one encoded video source into a CODA archive, preserve the exact accepted source bytes as S0, decode bounded video frames to one H.1 canonical pixel layout, and attach exact same-stream S0 provenance to each VFR1 S1 frame.
+current_behavior_verified_from: [code, tests, cli, cmake, changelog, HLS design]
+new_capability_claim: With the FFmpeg backend enabled, CODEC can ingest bounded same-origin unencrypted HTTP/HTTPS HLS while preserving the primary manifest and each accepted child snapshot as exact S0 before read, then emit canonical VFR1 S1 under exact versioned source-frontier provenance.
 change_class: profile_specific_behavior
 verification:
-  tdd_red_run: pass — CI run 336 at 9c416fde4f64253ba3c530d8df9af2e98c833441 proved an ffconcat nested child file could be opened through a nested libavformat context
-  release_configure: pass — CI run 337 at 956bfd1277137232fbc0e7ae79e854518c7c98c9
-  release_build: pass — GCC and Clang CI run 337
-  tests: pass — GCC and Clang CI run 337, including ordinary MP4 decode and nested-resource denial regression
-  sanitizer_build: pass — ASan/UBSan CI run 337
-  sanitizer_tests: pass — ASan/UBSan CI run 337
-  package_consumer: pass — GCC and Clang install/package-consumer CI run 337; FFmpeg-disabled install/package-consumer also pass
-  final_exact_head_ci: pending — must run after the final documentation/evidence commit and before merge
+  task3_exact_head: pass — CI run 375 at 1bc0e6363a5475b1e958b3893739cc1d74a4ff5d passed GCC, Clang, sanitizers/LSan, FFmpeg-disabled, install, and package consumers after the callback-open lifecycle fix
+  task4_tdd: pass — run 377 failed only on valid HLS frontier rejection after fixture correction; run 379 failed only on the legacy direct process emitted by actual HLS ingest
+  task4_green: pass — CI run 380 at cae82fea0b14a848ef9716322511342a70a1c436 passed GCC, Clang, sanitizers, FFmpeg-disabled, install, and package consumers
+  task5_cli_red: pass — CI run 381 at 432d5b2f615b40f0283d457f0411cbcd7d7395b8 failed at the new CLI contract before parser/output implementation
+  local_compile: pass for dependency-free reader/tests, CLI, and installed consumer with GCC warnings-as-errors; FFmpeg development headers are unavailable locally, so enabled production proof is authoritative in GitHub CI
+  final_exact_head_ci: pending — required after CLI/package/docs commit and before merge
 ```
 
 ```text
-BEFORE: H.1 can encode/decode/query canonical raw video frames supplied by callers, but it has no container demuxer or encoded-video decoder integration.
-AFTER: An optional FFmpeg-backed profile integration can capture a bounded encoded source, preserve those bytes as S0 first, decode the first selected video stream into canonical H.1 VFR1 frames, and bind every S1 frame to the exact committed S0 record; builds without FFmpeg remain supported and the generic core is unchanged.
+BEFORE: The FFmpeg bridge can preserve and decode one self-contained source object, but HLS secondary opens are denied and the verified reader accepts only same-stream direct provenance.
+AFTER: Same-origin unencrypted HTTP/HTTPS HLS is captured through CODEC-owned secondary AVIO, each accepted object is exact S0 on its own stream, live decode is bounded, and each canonical HLS VFR1 S1 validates against its ordered versioned source frontier; the direct-media contract remains unchanged.
 ```
 
 ```yaml
 proof:
-  regression_test: tests/test_video_ffmpeg_ingest.cpp proves optional backend availability, deterministic fixture ingest, source preservation, canonical frame decode, frame timing, and verified-reader retrieval; tests/test_video_ffmpeg_ingest_limits.cpp proves aggregate decoded-byte limits and nested demuxer resource denial
-  exactness_test: extracted S0 bytes equal the input media fixture byte-for-byte; emitted VFR1 payloads decode to exact bounded canonical pixels and re-encode identically
-  compatibility_test: existing H.1 VPD1/VFR1, CLI, C ABI, audio, archive, transport, recovery, and distributed tests remain green; no generic RecordType or CODA envelope changes
-  failure_path_test: backend-unavailable build, invalid request, no video stream, malformed media, unsupported/oversized dimensions, decode failure, output-path conflicts, aggregate decoded-byte exhaustion, and nested secondary-resource requirements fail explicitly; preservation-first ingest finalizes source-only archive when decoding fails after S0 commit
-  security_test: FFmpeg interprets only already captured bounded in-memory S0 bytes; direct libavformat secondary opens are rejected and an inherited protocol whitelist containing no real FFmpeg URL protocol blocks nested contexts such as concat from opening child files/network resources
-  benchmark: n/a — no performance, latency, codec coverage, or scale claim
+  regression_test: tests/test_video_hls_ingest.cpp proves exact manifest/segment preservation, HLS process identity, ordered source frontiers, and public verified-reader retrieval; tests/test_video_state_reader.cpp proves manual valid/malformed HLS lineage while retaining direct rules
+  exactness_test: the primary manifest and committed TS fixtures are extracted byte-for-byte, child payload hashes/lengths match, and emitted VFR1 remains canonical H.1 state
+  compatibility_test: direct MP4/BMP provenance and nested-open denial remain unchanged; FFmpeg-disabled, installed-package, CLI, C ABI, audio, archive, transport, recovery, distributed, and generic unknown-record tests remain green
+  failure_path_test: encrypted/cross-origin/file/crypto/private-denied/malformed children, per-resource/aggregate/count exhaustion, callback lifecycle failures, and live-duration termination preserve every accepted S0 prefix and write no partial S1 on profile failure
+  security_test: FFmpeg never receives native network/file protocol authority; each HLS child is independently same-origin authorized, captured, bounded, archived as S0, and only then exposed through read-only memory AVIO
+  benchmark: n/a — no performance, latency, codec coverage, or scale claim is made
 ```
 
 Invariant decisions:
 
-- [x] Accepted encoded/container/source bytes remain byte-exact S0 and are committed before optional decode interpretation.
-- [x] VFR1 remains S1 only under the existing H.1 canonical frame contract and exact same-stream provenance.
-- [x] FFmpeg integration is profile-owned and compile-time optional; no media-specific field or dependency enters generic CODEC/CODA structures.
-- [x] FFmpeg demux/decode consumes the captured in-memory bytes through custom AVIO rather than reopening the source URI; direct secondary opens are denied and nested libavformat contexts inherit a protocol whitelist containing no real URL protocol.
-- [x] Initial canonical decode target is YUV420P8 when conversion is required; direct supported layouts may be copied only when their exact byte layout matches the H.1 canonical representation.
-- [x] Audio/subtitle/data streams are ignored by this integration; playback, transcoding/export, streaming inference, models, and quality/performance claims remain out of scope.
-- [x] Builds without FFmpeg remain valid and expose explicit backend unavailability rather than silently changing H.1 behavior.
-- [x] Stage G remains deferred and H.2-H.6 are not claimed complete by this user-directed follow-on.
+- [x] The primary manifest and every accepted HLS child are distinct exact S0 objects committed before FFmpeg reads the child; generic source extraction is never fabricated by concatenation.
+- [x] Direct media retains the exact `codec.video.raw-frame.canonicalize` same-stream contract; HLS alone uses `codec.video.raw-frame.canonicalize.hls` with the exact version byte and ordered parent/opaque-child frontier.
+- [x] FFmpeg has no native HTTP/HTTPS/file/crypto/data/concat fallback; HLS expansion is limited to CODEC-authorized same-origin HTTP/HTTPS capture.
+- [x] Encrypted and cross-origin HLS, DASH, browser-session behavior, playback, export/transcoding, GPU/model/inference, quality, performance, and scale remain explicit non-capabilities.
+- [x] Live HLS duration is a decoded-media-timeline bound, not a wall-clock recording guarantee; resource count/bytes remain independent bounds.
+- [x] Generic archive/stream/capture authorization, CLI `record`, C ABI, audio, transport, distributed, telemetry, and Stage G semantics are unchanged.
+- [x] FFmpeg-disabled builds retain the media-library-independent H.1 schema/reader and explicit backend-unavailable behavior.
 
 ## 0. Work record
 

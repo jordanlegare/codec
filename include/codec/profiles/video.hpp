@@ -119,6 +119,9 @@ struct FfmpegVideoIngestRequest {
   std::size_t maximum_frames{4096};
   std::uint32_t maximum_redirects{5};
   bool deny_private_network{true};
+  std::size_t maximum_hls_resources{256};
+  std::uint64_t maximum_hls_resource_bytes{64ULL * 1024ULL * 1024ULL};
+  std::uint64_t maximum_hls_total_bytes{1024ULL * 1024ULL * 1024ULL};
 };
 
 struct FfmpegVideoIngestReport {
@@ -128,6 +131,8 @@ struct FfmpegVideoIngestReport {
   std::vector<RecordInfo> states;
   std::vector<RecordInfo> provenance;
   std::optional<Error> profile_error;
+  std::vector<RecordInfo> secondary_descriptors{};
+  std::vector<RecordInfo> secondary_sources{};
 
   bool state_exact() const noexcept {
     return !states.empty() && states.size() == provenance.size() &&

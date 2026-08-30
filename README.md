@@ -218,11 +218,16 @@ When enabled, the installed C++ API exposes `codec::profiles::video::ingest_vide
 
 - captures the accepted file/HTTP/HTTPS source through CODEC's existing bounded capture policy;
 - commits the exact encoded/container representation as S0 before media interpretation;
-- decodes only those already captured in-memory bytes through FFmpeg custom AVIO;
-- blocks libavformat secondary protocol I/O with a reject-all secondary-open callback plus an inherited whitelist containing no real FFmpeg URL protocol, instead of allowing nested file or network retrieval;
+- decodes direct media only from those already captured in-memory bytes through FFmpeg custom AVIO and continues to reject secondary opens for direct media;
+- recognizes same-origin unencrypted HTTP/HTTPS HLS from captured manifest bytes, intercepts each FFmpeg-requested child, authorizes and captures it through CODEC, and commits that exact object as S0 on a deterministic opaque child stream before FFmpeg may read it;
+- denies encrypted, cross-origin, private-network-denied, malformed, and non-HTTP/HTTPS HLS children without falling back to FFmpeg's native file or network protocols;
 - canonicalizes decoded frames to an explicitly requested H.1 Gray8, RGB24, RGBA32, or planar YUV420P8 layout;
-- writes each successful `VFR1` frame as S1 with direct exact same-stream S0 provenance;
+- writes each successful direct-media `VFR1` frame with the unchanged exact same-stream S0 provenance contract and each HLS frame with the exact primary manifest plus the accepted child-resource frontier available when that frame was decoded;
 - finalizes a valid source-only archive with `profile_error` populated when media demux/decode/canonicalization fails after S0 preservation.
+
+For live HLS, `end_ns - start_ns` bounds the decoded media timeline. It is
+not a wall-clock recording-duration guarantee; resource-count and byte limits
+remain independent fail-safes.
 
 The bridge does not change `codec record`: generic recording remains S0 capture and still requires `--feed LABEL=URI`. Encoded-video interpretation is explicit through `codec video ingest`; there is no automatic `codec record` MP4-to-VFR1 decoding mode.
 
@@ -364,14 +369,17 @@ codec video ingest \
   [--layout gray8|rgb24|rgba32|yuv420p8] \
   [--maximum-source-bytes N] \
   [--maximum-decoded-bytes N] \
-  [--maximum-frames N]
+  [--maximum-frames N] \
+  [--maximum-hls-resources N] \
+  [--maximum-hls-resource-bytes N] \
+  [--maximum-hls-total-bytes N]
 ```
 
-`--source`, `--archive`, `--label`, `--start-ns`, and `--end-ns` are required. The interval must have positive duration. The default output layout is `yuv420p8`; the default source and decoded-byte limits are 1 GiB each, and the default frame limit is 4096.
+`--source`, `--archive`, `--label`, `--start-ns`, and `--end-ns` are required. The interval must have positive duration. The default output layout is `yuv420p8`; the default source and decoded-byte limits are 1 GiB each, and the default frame limit is 4096. HLS defaults allow at most 256 accepted secondary snapshots, 64 MiB per resource, and 1 GiB in aggregate.
 
-On successful S1 canonicalization, the command exits `0` and prints JSON including `stream_id`, `layout`, `source_bytes`, `frames`, `provenance`, and `"state_exact":true`. If S0 capture succeeds but media demux/decode/canonicalization fails, CODEC finalizes a valid source-only archive, reports `profile_error` in JSON, and exits `1`. With an FFmpeg-disabled build, the command fails with `model_incompatible` before archive creation.
+On successful S1 canonicalization, the command exits `0` and prints JSON including `stream_id`, `layout`, `source_bytes`, `frames`, `provenance`, `secondary_sources`, `secondary_source_bytes`, and `"state_exact":true`. If S0 capture succeeds but media demux/decode/canonicalization fails, CODEC finalizes an archive containing every exact S0 object accepted before failure, reports `profile_error` in JSON, and exits `1`. With an FFmpeg-disabled build, the command fails with `model_incompatible` before archive creation.
 
-The command derives a stable stream ID from the label and source identity but does not persist the raw source URI/path in `StreamDescriptor::source_id`. FFmpeg decodes only the already captured bytes; secondary FFmpeg file/network opens are denied.
+The command derives a stable stream ID from the label and source identity but does not persist the raw source URI/path in `StreamDescriptor::source_id`. Direct media still uses captured-memory-only decode. For HLS, each requested child must be same-origin HTTP/HTTPS and is routed through CODEC capture; raw requested child URLs are not persisted in child descriptors. Encryption/key capture, cross-origin resources, DASH, cookies/custom headers, redirects beyond existing capture policy, and arbitrary FFmpeg protocol/network authority are not supported.
 
 Example:
 
@@ -813,14 +821,14 @@ The current C++ tree includes a media-library-independent Video Stream Profile f
 - deterministic, bounded `VPD1` video descriptors;
 - deterministic `VFR1` raw-frame S1 state for Gray8, RGB24, RGBA32, and planar YUV420P8;
 - exact profile-local record codes used through CODA's existing raw-code archive boundary;
-- a verified reader that returns VFR1 as S1 only when its canonical bytes and exact provenance to committed same-stream S0 records validate;
+- a verified reader that returns VFR1 as S1 only when its canonical bytes and either the exact direct-source contract or the exact versioned HLS source-frontier contract validate;
 - raw preservation, extraction, and repair of unknown future profile codes without interpretation.
 
-On top of that foundation, default builds provide the bounded FFmpeg ingest bridge described above. It accepts one CODEC-authorized source snapshot, preserves the exact encoded/container bytes as S0, demuxes/decodes only those captured bytes, converts frames to an existing H.1 canonical layout, and emits each successful frame with exact `state_exact` provenance to the same-stream S0 source. The verified reader therefore consumes the bridge output through the same H.1 contract rather than a second FFmpeg-specific state model. Builds configured with `CODEC_ENABLE_FFMPEG_VIDEO=OFF` retain the media-library-independent H.1 schema and verified reader without the FFmpeg integration.
+On top of that foundation, default builds provide the bounded FFmpeg ingest bridge described above. Direct media preserves one CODEC-authorized source snapshot and retains the original exact same-stream provenance contract. Same-origin unencrypted HTTP/HTTPS HLS additionally preserves every accepted child object as exact S0 on an opaque child stream before FFmpeg reads it and emits each successful frame with a versioned conservative source frontier. Both paths produce the same canonical H.1 VFR1 state model. Builds configured with `CODEC_ENABLE_FFMPEG_VIDEO=OFF` retain the media-library-independent H.1 schema and verified reader without the FFmpeg integration.
 
 Stage G trust/selective-disclosure work is explicitly deferred and is not claimed complete. Stage H is active at H.1; telemetry, sensor, document/event, network/system, domain schemas, and model-bundle work remain later milestones.
 
-H.1 still does **not** provide GStreamer integration, playback, transcoding/export, automatic `codec record` decoding, HLS/DASH secondary retrieval, arbitrary FFmpeg protocol access, GPU decode, streaming inference, or a video model. It makes no general codec-compatibility, model-quality, throughput, latency, or scale claim; actual encoded-media support depends on the linked FFmpeg build.
+H.1 still does **not** provide GStreamer integration, playback, transcoding/export, automatic `codec record` decoding, DASH, encrypted or cross-origin HLS, arbitrary FFmpeg protocol access, GPU decode, streaming inference, or a video model. It makes no general codec-compatibility, model-quality, throughput, latency, or scale claim; actual encoded-media support depends on the linked FFmpeg build.
 
 ## Stage E transport and recovery
 
@@ -919,6 +927,8 @@ This README is the user-facing guide. Repository-maintenance and architecture ma
 - [Stage H.1 implementation plan](docs/superpowers/plans/2026-08-30-stage-h1-video-profile.md) — test-first implementation and verification steps.
 - [Optional FFmpeg Video ingest design](docs/superpowers/specs/2026-08-30-video-ffmpeg-ingest-design.md) — preservation-first optional media-integration boundary.
 - [Optional FFmpeg Video ingest implementation plan](docs/superpowers/plans/2026-08-30-video-ffmpeg-ingest.md) — TDD and verification sequence for the integration bridge.
+- [Preservation-first HLS ingest design](docs/superpowers/specs/2026-08-30-video-hls-ingest-design.md) — same-origin capture authority, S0 resource graph, and versioned frontier contract.
+- [Preservation-first HLS ingest implementation plan](docs/superpowers/plans/2026-08-30-video-hls-ingest.md) — test-first security, provenance, CLI, and merge gates.
 
 A small machine-readable project block is retained here because repository CI verifies version/documentation continuity:
 

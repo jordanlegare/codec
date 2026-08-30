@@ -3,6 +3,22 @@ set -euo pipefail
 
 codec_bin=${1:?codec binary path required}
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+python3 - "$script_dir/../CMakeLists.txt" <<'PY'
+import re
+import sys
+
+text = open(sys.argv[1], encoding="utf-8").read()
+pattern = re.compile(
+    r'option\s*\(\s*CODEC_ENABLE_FFMPEG_VIDEO\s*'
+    r'"[^"]*"\s+ON\s*\)',
+    re.MULTILINE,
+)
+if not pattern.search(text):
+    raise SystemExit(
+        "CODEC_ENABLE_FFMPEG_VIDEO must default to ON in CMakeLists.txt"
+    )
+PY
+
 test_dir=$(mktemp -d)
 cleanup() {
   rm -rf "$test_dir"
@@ -54,12 +70,12 @@ grep -q '"frames":1' "$test_dir/probe.stdout"
 grep -q '"provenance":1' "$test_dir/probe.stdout"
 grep -q '"layout":"yuv420p8"' "$test_dir/probe.stdout"
 grep -q '"stream_id":"' "$test_dir/probe.stdout"
-"$codec_bin" verify "$probe_archive" --level full > "$test_dir/probe-verify.json"
-grep -q '"ok":true' "$test_dir/probe-verify.json"
-if LC_ALL=C grep -aFq "$fixture" "$probe_archive"; then
-  echo "video ingest persisted the raw source URI/path in archive metadata" >&2
+if grep -Fqa "$fixture" "$probe_archive"; then
+  echo "video ingest archive persisted the raw source URI/path" >&2
   exit 1
 fi
+"$codec_bin" verify "$probe_archive" --level full > "$test_dir/probe-verify.json"
+grep -q '"ok":true' "$test_dir/probe-verify.json"
 
 for layout in gray8 rgb24 rgba32; do
   archive="$test_dir/$layout.coda"

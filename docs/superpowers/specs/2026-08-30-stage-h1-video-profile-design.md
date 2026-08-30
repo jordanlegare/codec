@@ -200,7 +200,7 @@ The reader returns a frame only when all of these conditions hold:
 3. exactly one matching S1 provenance sidecar resolves to that state record;
 4. every provenance link resolves to an exact committed record;
 5. at least one direct input is an S0 record that is not the state record itself;
-6. the process operation and details identify the Video Profile canonicalization contract;
+6. the process operation, implementation identity/version, details type, and exact one-byte details payload `0x01` identify the Video Profile canonicalization contract;
 7. result and aggregate encoded-byte limits are not exceeded.
 
 Multiple exact S0 inputs are allowed for frames that depend on more than one source fragment. The reader does not claim that a decoder was deterministic or correct; it verifies the exact archived S1 state, its canonical form, and its provenance links.
@@ -257,6 +257,7 @@ operation: codec.video.raw-frame.canonicalize
 implementation_id: codec.video
 implementation_version: 1
 details_type: application/vnd.codec.video.canonicalization.v1
+details: exactly one byte 0x01
 ```
 
 ## Error behavior

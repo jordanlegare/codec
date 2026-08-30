@@ -64,7 +64,7 @@ codec::ProvenanceProcess video_process(std::string operation =
       .configuration_hash = std::nullopt,
       .created_utc_ns = 500,
       .details_type = "application/vnd.codec.video.canonicalization.v1",
-      .details = {},
+      .details = {std::byte{0x01}},
   };
 }
 
@@ -201,6 +201,35 @@ TEST(video_state_reader_rejects_wrong_process_contract) {
   EXPECT_TRUE(writer.append_stream_provenance(
       *state, codec::TruthClass::state_exact, inputs,
       video_process("codec.video.resize")));
+  EXPECT_TRUE(writer.finalize());
+  auto archive = codec::CodaArchive::open(path);
+  EXPECT_TRUE(archive);
+  auto frames = video::query_verified_raw_video_frames(*archive);
+  EXPECT_FALSE(frames);
+  if (!frames) {
+    EXPECT_EQ(frames.error().code, codec::ErrorCode::archive_corrupt);
+  }
+  std::filesystem::remove(path);
+}
+
+TEST(video_state_reader_rejects_wrong_process_details_version) {
+  const auto path = test_path("wrong-process-details.coda");
+  std::filesystem::remove(path);
+  const auto stream = codec::derive_stream_id("video-wrong-details");
+  auto writer = std::move(*codec::CodaWriter::create(path));
+  auto source = writer.append(codec::RecordType::source_bytes, stream, 1, 2,
+                              bytes("source"));
+  auto encoded = video::encode_raw_video_frame_state(exact_frame());
+  EXPECT_TRUE(source);
+  EXPECT_TRUE(encoded);
+  auto state = writer.append_raw(video::raw_video_frame_state_record_type,
+                                 stream, 1, 2, *encoded);
+  EXPECT_TRUE(state);
+  auto process = video_process();
+  process.details = {std::byte{0x02}};
+  const std::array inputs{*source};
+  EXPECT_TRUE(writer.append_stream_provenance(
+      *state, codec::TruthClass::state_exact, inputs, process));
   EXPECT_TRUE(writer.finalize());
   auto archive = codec::CodaArchive::open(path);
   EXPECT_TRUE(archive);

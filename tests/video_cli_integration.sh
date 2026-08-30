@@ -30,6 +30,7 @@ base64 --decode "$script_dir/fixtures/video_4x4_h264.mp4.b64" > "$fixture"
 
 "$codec_bin" --help > "$test_dir/help.txt"
 grep -Fq 'codec video ingest' "$test_dir/help.txt"
+grep -Fq 'codec video export' "$test_dir/help.txt"
 grep -Fq -- '--maximum-hls-resources' "$test_dir/help.txt"
 grep -Fq -- '--maximum-hls-resource-bytes' "$test_dir/help.txt"
 grep -Fq -- '--maximum-hls-total-bytes' "$test_dir/help.txt"
@@ -106,6 +107,46 @@ if grep -Fqa "$fixture" "$probe_archive"; then
 fi
 "$codec_bin" verify "$probe_archive" --level full > "$test_dir/probe-verify.json"
 grep -q '"ok":true' "$test_dir/probe-verify.json"
+
+probe_stream=$(python3 - "$test_dir/probe.stdout" <<'PY'
+import json
+import sys
+print(json.load(open(sys.argv[1], encoding="utf-8"))["stream_id"])
+PY
+)
+export_output="$test_dir/probe-export.mp4"
+"$codec_bin" video export "$probe_archive" \
+  --stream "$probe_stream" \
+  --output "$export_output" \
+  --maximum-frames 4 \
+  --maximum-input-bytes 1048576 \
+  --maximum-output-bytes 1048576 \
+  > "$test_dir/export.json"
+grep -q '"payload_type":"video/mp4"' "$test_dir/export.json"
+grep -q '"frames":1' "$test_dir/export.json"
+grep -q "\"stream_id\":\"$probe_stream\"" "$test_dir/export.json"
+test -s "$export_output"
+python3 - "$export_output" <<'PY'
+import sys
+payload = open(sys.argv[1], "rb").read(12)
+if len(payload) < 8 or payload[4:8] != b"ftyp":
+    raise SystemExit("video export did not write an MP4 ftyp box")
+PY
+
+invalid_export="$test_dir/invalid-export.mp4"
+set +e
+"$codec_bin" video export "$probe_archive" \
+  --stream "$probe_stream" \
+  --output "$invalid_export" \
+  --maximum-output-bytes 0 \
+  > "$test_dir/invalid-export.stdout" 2> "$test_dir/invalid-export.stderr"
+invalid_export_status=$?
+set -e
+if [ "$invalid_export_status" -ne 2 ]; then
+  echo "video export zero output limit should exit 2, got $invalid_export_status" >&2
+  exit 1
+fi
+[ ! -e "$invalid_export" ]
 
 for layout in gray8 rgb24 rgba32; do
   archive="$test_dir/$layout.coda"

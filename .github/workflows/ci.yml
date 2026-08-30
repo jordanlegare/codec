@@ -54,6 +54,26 @@ jobs:
           cmake --build package-consumer --parallel
           ./package-consumer/codec_package_consumer
 
+  ffmpeg-disabled:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependency-free video build requirements
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build libssl-dev libcurl4-openssl-dev libflac-dev
+      - name: Configure without FFmpeg
+        run: cmake -S . -B build-no-ffmpeg -G Ninja -DCMAKE_BUILD_TYPE=Release -DCODEC_WARNINGS_AS_ERRORS=ON -DCODEC_ENABLE_FFMPEG_VIDEO=OFF
+      - name: Build
+        run: cmake --build build-no-ffmpeg --parallel
+      - name: Test
+        run: ctest --test-dir build-no-ffmpeg --output-on-failure
+      - name: Install package
+        run: cmake --install build-no-ffmpeg --prefix "$RUNNER_TEMP/codec-install-no-ffmpeg"
+      - name: Test installed package consumer
+        run: |
+          cmake -S tests/package_consumer -B package-consumer-no-ffmpeg -G Ninja -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/codec-install-no-ffmpeg"
+          cmake --build package-consumer-no-ffmpeg --parallel
+          ./package-consumer-no-ffmpeg/codec_package_consumer
+
   sanitizers:
     runs-on: ubuntu-latest
     steps:

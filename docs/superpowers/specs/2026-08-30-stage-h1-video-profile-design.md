@@ -270,7 +270,6 @@ Every parser is fail-closed, bounded, and exact-length. No profile error mutates
 New production files:
 
 - `include/codec/profiles/video.hpp`
-- `include/codec/profiles/video_state_reader.hpp`
 - `src/video/frame_state.cpp`
 - `src/video/frame_state_reader.cpp`
 

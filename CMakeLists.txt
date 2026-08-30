@@ -28,6 +28,12 @@ if(CODEC_ENABLE_FFMPEG_VIDEO)
   set(CODEC_HAS_FFMPEG_VIDEO ON)
 endif()
 
+# Keep the proven direct-media implementation intact while the public entry
+# point grows HLS-specific validation and dispatch. Task 2 removes this
+# transitional rename when HLS is integrated at the decode seam.
+set_source_files_properties(src/video/ffmpeg_ingest.cpp PROPERTIES
+  COMPILE_DEFINITIONS "ingest_video_ffmpeg=ingest_video_ffmpeg_direct")
+
 add_library(codec_core
   src/archive/archive.cpp
   src/archive/follow.cpp
@@ -65,6 +71,7 @@ add_library(codec_core
   src/transport/streaming_repair.cpp
   src/transport/xor_recovery.cpp
   src/video/ffmpeg_ingest.cpp
+  src/video/ffmpeg_ingest_dispatch.cpp
   src/video/hls_policy.cpp
   src/video/frame_state.cpp
   src/video/frame_state_reader.cpp

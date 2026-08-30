@@ -12,7 +12,7 @@ Canonical work loop for ChatGPT, Codex, and other agentic contributors.
 task: Remove the complete watermark feature and the generic stream list/extract CLI surfaces, make source-exact the documented feed-extraction default, and retain generic stream library infrastructure and all unrelated CLI behavior.
 base_ref: origin/main
 base_head_sha: a73b15c474b6974bf74b2c622b81bdcafee7890c
-work_branch: codex/remove-watermark-stream-cli
+work_branch: codex/remove-watermark-stream-cli-exec
 current_version: 0.3.0
 active_roadmap_stage: F — F.1-F.7 remain implemented C++ library/package primitives; this user-directed removal retires the Audio Profile watermark capability and generic stream CLI exposure without removing the generic stream substrate.
 continuity_evidence:
@@ -27,24 +27,28 @@ current_behavior_verified_from: [code, tests, cli, cmake, changelog]
 new_capability_claim: none; this change removes capabilities and CLI surfaces
 change_class: profile_specific_behavior
 verification:
-  tested_pre_record_sha: 069a7e5bf6e486ec41f8dd7ee7c96ee10f47fb23
-  release_configure: fail
-  release_build: fail
-  tests: fail
-  sanitizer_build: fail
-  sanitizer_tests: fail
-  installed_package_consumers: fail
-  cli_capabilities: fail
-  targeted_proof: fail
-  blockers:
-    release_configure: "cmake is unavailable on PATH (command -v cmake produced no path)."
-    release_build: "Not run: Release configuration cannot be created because cmake is unavailable on PATH."
-    tests: "Not run: no Release build exists because cmake is unavailable on PATH; ctest is also unavailable on PATH (command -v ctest produced no path)."
-    sanitizer_build: "Not run: sanitizer configuration cannot be created because cmake is unavailable on PATH."
-    sanitizer_tests: "Not run: no sanitizer build exists because cmake is unavailable on PATH; ctest is also unavailable on PATH."
-    installed_package_consumers: "Not run: an exact-head install cannot be created because cmake is unavailable on PATH."
-    cli_capabilities: "Not run: no source-exact ./build/codec was produced; stale or non-exact binaries were not used."
-    targeted_proof: "Not run: no source-exact ./build/codec was produced; stale or non-exact binaries were not used."
+  tested_pre_record_sha: 2428f82fddd672fb2f99020207a0a10da4537661
+  release_configure: pass
+  release_build: pass
+  tests: pass
+  sanitizer_build: pass
+  sanitizer_tests: pass
+  installed_package_consumers: pass
+  cli_capabilities: pass
+  targeted_proof: pass
+  ci_evidence:
+    provider: GitHub Actions
+    workflow: CI
+    run_id: 33307668406
+    run_number: 304
+    exact_head_sha: 2428f82fddd672fb2f99020207a0a10da4537661
+    jobs:
+      sanitizers: pass
+      build_gcc: pass
+      build_clang: pass
+    package_consumers:
+      gcc: pass
+      clang: pass
 ```
 
 ```text

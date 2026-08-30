@@ -53,8 +53,6 @@ add_library(codec_core
   src/transport/recovery.cpp
   src/transport/streaming_repair.cpp
   src/transport/xor_recovery.cpp
-  src/watermark/carrier.cpp
-  src/watermark/statement.cpp
 )
 add_library(codec::codec ALIAS codec_core)
 set_target_properties(codec_core PROPERTIES
@@ -172,13 +170,11 @@ if(CODEC_BUILD_TESTS)
     tests/test_processing.cpp
     tests/test_exporter.cpp
     tests/test_stream.cpp
-    tests/test_statement.cpp
     tests/test_transport_multiplex.cpp
     tests/test_transport_recovery.cpp
     tests/test_transport_recovery_integration.cpp
     tests/test_transport_streaming_repair.cpp
     tests/test_transport_xor_recovery.cpp
-    tests/test_watermark.cpp
   )
   set_target_properties(codec_tests PROPERTIES
     CXX_STANDARD 20

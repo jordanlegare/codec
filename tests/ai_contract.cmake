@@ -28,6 +28,30 @@ read_required("AI_WORKSHEET.md" worksheet_contents)
 read_required("CONTRIBUTING.md" contributing_contents)
 read_required("CHANGELOG.md" changelog_contents)
 
+foreach(retired_file IN ITEMS
+    "include/codec/watermark.hpp"
+    "include/codec/statement.hpp"
+    "src/watermark/carrier.cpp"
+    "src/watermark/statement.cpp"
+    "tests/test_watermark.cpp"
+    "tests/test_statement.cpp")
+  if(EXISTS "${CODEC_SOURCE_DIR}/${retired_file}")
+    message(FATAL_ERROR "Retired watermark file remains: ${retired_file}")
+  endif()
+endforeach()
+
+foreach(retired_build_text IN ITEMS
+    "src/watermark/carrier.cpp"
+    "src/watermark/statement.cpp"
+    "tests/test_watermark.cpp"
+    "tests/test_statement.cpp")
+  string(FIND "${cmake_contents}" "${retired_build_text}" retired_offset)
+  if(NOT retired_offset EQUAL -1)
+    message(FATAL_ERROR
+      "CMakeLists.txt still references ${retired_build_text}")
+  endif()
+endforeach()
+
 string(REGEX MATCH
   "project[ \t\r\n]*\\([ \t\r\n]*CODEC[ \t\r\n]+VERSION[ \t\r\n]+([0-9]+\\.[0-9]+\\.[0-9]+)"
   project_declaration "${cmake_contents}")

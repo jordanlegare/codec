@@ -263,10 +263,9 @@ git commit -m "feat: add deterministic video frame state"
 ### Task 2: Provenance-verified raw-frame reader
 
 **Files:**
-- Create: `include/codec/profiles/video_state_reader.hpp`
+- Modify: `include/codec/profiles/video.hpp`
 - Create: `src/video/frame_state_reader.cpp`
 - Create: `tests/test_video_state_reader.cpp`
-- Modify: `include/codec/profiles/video.hpp`
 - Modify: `CMakeLists.txt`
 
 **Interfaces:**
@@ -275,7 +274,7 @@ git commit -m "feat: add deterministic video frame state"
 
 - [ ] **Step 1: Declare the reader API**
 
-Create `include/codec/profiles/video_state_reader.hpp`:
+Append the reader declarations to `include/codec/profiles/video.hpp`:
 
 ```cpp
 #pragma once
@@ -311,7 +310,7 @@ Result<std::vector<VerifiedRawVideoFrame>> query_verified_raw_video_frames(
 }  // namespace codec::profiles::video
 ```
 
-Include it from `include/codec/profiles/video.hpp` only after moving Task 1 declarations into a dependency-safe base header is evaluated. To avoid a cyclic include, the implementation choice is: keep all Task 1 declarations in `video.hpp`, let `video_state_reader.hpp` include `video.hpp`, and do not include the reader back from `video.hpp`. Installed users include the reader explicitly. This is the one approved refinement from the design's umbrella wording.
+Keep the complete public Video Profile API in this one installed umbrella header. `src/video/frame_state_reader.cpp` includes it directly; no forwarding or cyclic profile header is introduced.
 
 - [ ] **Step 2: Write failing archive/provenance tests**
 
@@ -393,7 +392,7 @@ Expected: all selected tests pass.
 - [ ] **Step 8: Commit the reader boundary**
 
 ```bash
-git add CMakeLists.txt include/codec/profiles/video_state_reader.hpp src/video/frame_state_reader.cpp tests/test_video_state_reader.cpp
+git add CMakeLists.txt include/codec/profiles/video.hpp src/video/frame_state_reader.cpp tests/test_video_state_reader.cpp
 git commit -m "feat: verify archived video frame state"
 ```
 
@@ -416,7 +415,6 @@ In `tests/package_consumer/main.cpp`, include:
 
 ```cpp
 #include <codec/profiles/video.hpp>
-#include <codec/profiles/video_state_reader.hpp>
 ```
 
 Add one function that:

@@ -210,7 +210,7 @@ int video_command(const Strings& arguments) {
           .id = stream,
           .type = codec::StreamType::video,
           .label = std::string{*label},
-          .source_id = std::string{*source},
+          .source_id = "codec.video.cli",
           .payload_type = "application/octet-stream",
       },
       .start_ns = start_ns,

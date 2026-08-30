@@ -521,6 +521,12 @@ Result<DecodedVideo> decode_video_bytes(
   format_raw->pb = avio.get();
   format_raw->flags |= AVFMT_FLAG_CUSTOM_IO;
   format_raw->io_open = &deny_secondary_io_open;
+  format_raw->protocol_whitelist = av_strdup("codec-memory-only");
+  if (format_raw->protocol_whitelist == nullptr) {
+    avformat_free_context(format_raw);
+    return fail<DecodedVideo>(ErrorCode::resource_exhausted,
+                              "cannot allocate FFmpeg protocol policy");
+  }
   const auto opened = avformat_open_input(&format_raw, nullptr, nullptr, nullptr);
   if (opened < 0) {
     if (format_raw != nullptr) avformat_free_context(format_raw);

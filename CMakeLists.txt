@@ -9,6 +9,8 @@ option(CODEC_BUILD_TESTS "Build CODEC tests" ON)
 option(CODEC_BUILD_EXAMPLES "Build CODEC examples" ON)
 option(CODEC_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 option(CODEC_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
+option(CODEC_ENABLE_FFMPEG_VIDEO
+  "Enable the optional FFmpeg Video Profile ingest backend" OFF)
 set(CODEC_ONNXRUNTIME_ROOT "" CACHE PATH
     "Optional ONNX Runtime distribution root for the Audio CPU backend")
 
@@ -16,6 +18,15 @@ find_package(OpenSSL 3.0 REQUIRED COMPONENTS Crypto)
 find_package(CURL REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(FLAC REQUIRED IMPORTED_TARGET flac)
+
+set(CODEC_HAS_FFMPEG_VIDEO OFF)
+if(CODEC_ENABLE_FFMPEG_VIDEO)
+  pkg_check_modules(AVFORMAT REQUIRED IMPORTED_TARGET libavformat)
+  pkg_check_modules(AVCODEC REQUIRED IMPORTED_TARGET libavcodec)
+  pkg_check_modules(AVUTIL REQUIRED IMPORTED_TARGET libavutil)
+  pkg_check_modules(SWSCALE REQUIRED IMPORTED_TARGET libswscale)
+  set(CODEC_HAS_FFMPEG_VIDEO ON)
+endif()
 
 add_library(codec_core
   src/archive/archive.cpp
@@ -53,6 +64,7 @@ add_library(codec_core
   src/transport/recovery.cpp
   src/transport/streaming_repair.cpp
   src/transport/xor_recovery.cpp
+  src/video/ffmpeg_ingest.cpp
   src/video/frame_state.cpp
   src/video/frame_state_reader.cpp
 )
@@ -75,6 +87,18 @@ target_include_directories(codec_core
 )
 target_link_libraries(codec_core PUBLIC OpenSSL::Crypto CURL::libcurl PkgConfig::FLAC)
 target_link_libraries(codec_core PRIVATE ${CMAKE_DL_LIBS})
+
+if(CODEC_HAS_FFMPEG_VIDEO)
+  target_compile_definitions(codec_core PRIVATE CODEC_HAS_FFMPEG_VIDEO=1)
+  target_link_libraries(codec_core PUBLIC
+    PkgConfig::AVFORMAT
+    PkgConfig::AVCODEC
+    PkgConfig::AVUTIL
+    PkgConfig::SWSCALE)
+  message(STATUS "CODEC FFmpeg Video Profile ingest backend: enabled")
+else()
+  message(STATUS "CODEC FFmpeg Video Profile ingest backend: unavailable (set CODEC_ENABLE_FFMPEG_VIDEO=ON to enable)")
+endif()
 
 set(CODEC_HAS_ONNXRUNTIME OFF)
 if(CODEC_ONNXRUNTIME_ROOT)
@@ -245,6 +269,7 @@ install(TARGETS codec_core codec_cli
   INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 install(DIRECTORY include/codec DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
+set(CODEC_PACKAGE_HAS_FFMPEG_VIDEO ${CODEC_HAS_FFMPEG_VIDEO})
 configure_package_config_file(
   cmake/codec-config.cmake.in
   ${CMAKE_CURRENT_BINARY_DIR}/codec-config.cmake

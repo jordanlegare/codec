@@ -127,3 +127,75 @@ PY
 
 "$codec_bin" verify "$archive" --level full > "$test_dir/verify.json"
 grep -q '"ok":true' "$test_dir/verify.json"
+
+# A hard failure in one worker must not discard a successful concurrent worker.
+# The shared archive contains every usable staged stream and the command reports
+# every group in command-line order before returning non-zero.
+partial_archive="$test_dir/partial.coda"
+missing_source="$test_dir/does-not-exist.mp4"
+set +e
+"$codec_bin" video ingest \
+  --archive "$partial_archive" \
+  --video \
+    --source "$fixture" \
+    --label camera-good \
+    --start-ns 0 \
+    --end-ns 1000000000 \
+    --layout yuv420p8 \
+    --maximum-frames 4 \
+  --video \
+    --source "$missing_source" \
+    --label camera-missing \
+    --start-ns 0 \
+    --end-ns 1000000000 \
+    --layout gray8 \
+    --maximum-frames 4 \
+  > "$test_dir/partial.jsonl" 2> "$test_dir/partial.stderr"
+partial_status=$?
+set -e
+if [ "$partial_status" -ne 1 ]; then
+  echo "partial grouped ingest should exit 1, got $partial_status" >&2
+  exit 1
+fi
+
+test -s "$partial_archive"
+"$codec_bin" verify "$partial_archive" --level full > "$test_dir/partial-verify.json"
+grep -q '"ok":true' "$test_dir/partial-verify.json"
+
+python3 - "$test_dir/partial.jsonl" "$partial_archive" "$test_dir/partial-good-stream.txt" <<'PY'
+import json
+import sys
+
+records = [json.loads(line) for line in open(sys.argv[1], encoding="utf-8") if line.strip()]
+if len(records) != 2:
+    raise SystemExit(f"expected two partial-ingest JSON lines, got {len(records)}")
+if [record["archive"] for record in records] != [sys.argv[2], sys.argv[2]]:
+    raise SystemExit("partial-ingest groups did not report the shared archive")
+if [record["status"] for record in records] != ["ok", "error"]:
+    raise SystemExit(f"unexpected partial-ingest statuses: {[record['status'] for record in records]}")
+if not records[0]["state_exact"] or records[0]["frames"] != 1:
+    raise SystemExit("successful partial-ingest stream lost verified S1")
+if records[1]["error"] != "archive_io" or records[1]["preserved"] is not False:
+    raise SystemExit("hard-failed partial-ingest stream was not reported as unpreserved archive_io")
+if records[0]["stream_id"] == records[1]["stream_id"]:
+    raise SystemExit("partial-ingest groups unexpectedly share a stream ID")
+open(sys.argv[3], "w", encoding="utf-8").write(records[0]["stream_id"] + "\n")
+PY
+
+partial_good_stream=$(cat "$test_dir/partial-good-stream.txt")
+partial_export="$test_dir/partial-good.mp4"
+"$codec_bin" video export "$partial_archive" \
+  --stream "$partial_good_stream" \
+  --output "$partial_export" \
+  --maximum-frames 4 \
+  --maximum-input-bytes 1048576 \
+  --maximum-output-bytes 1048576 \
+  > "$test_dir/partial-export.json"
+grep -q '"payload_type":"video/mp4"' "$test_dir/partial-export.json"
+grep -q '"frames":1' "$test_dir/partial-export.json"
+test -s "$partial_export"
+
+if find "$test_dir" -maxdepth 1 -name 'partial.coda.video-*.tmp' -print -quit | grep -q .; then
+  echo "partial grouped ingest leaked staging archives" >&2
+  exit 1
+fi

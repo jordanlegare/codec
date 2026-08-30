@@ -5,6 +5,7 @@
 #include <compare>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -84,5 +85,23 @@ Result<std::vector<std::byte>> encode_raw_video_frame_state(
     const RawVideoFrameState& frame);
 Result<RawVideoFrameState> decode_raw_video_frame_state(
     std::span<const std::byte> payload, VideoDecodeLimits limits = {});
+
+struct VideoFrameQuery {
+  std::optional<StreamId> stream;
+  std::optional<RecordTimeRange> time;
+  std::size_t maximum_results{1024};
+  std::uint64_t maximum_encoded_bytes{1024ULL * 1024ULL * 1024ULL};
+  VideoDecodeLimits decode_limits{};
+};
+
+struct VerifiedRawVideoFrame {
+  RawVideoFrameState state;
+  RecordInfo state_record;
+  std::vector<RecordInfo> source_records;
+  StreamProvenance provenance;
+};
+
+Result<std::vector<VerifiedRawVideoFrame>> query_verified_raw_video_frames(
+    const CodaArchive& archive, const VideoFrameQuery& query = {});
 
 }  // namespace codec::profiles::video

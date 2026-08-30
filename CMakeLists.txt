@@ -54,6 +54,7 @@ add_library(codec_core
   src/transport/streaming_repair.cpp
   src/transport/xor_recovery.cpp
   src/video/frame_state.cpp
+  src/video/frame_state_reader.cpp
 )
 add_library(codec::codec ALIAS codec_core)
 set_target_properties(codec_core PROPERTIES
@@ -177,6 +178,7 @@ if(CODEC_BUILD_TESTS)
     tests/test_transport_streaming_repair.cpp
     tests/test_transport_xor_recovery.cpp
     tests/test_video_profile.cpp
+    tests/test_video_state_reader.cpp
   )
   set_target_properties(codec_tests PROPERTIES
     CXX_STANDARD 20

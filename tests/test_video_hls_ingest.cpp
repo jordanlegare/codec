@@ -166,5 +166,24 @@ TEST(video_hls_ingest_preserves_manifest_and_segments_before_decode) {
     EXPECT_EQ(opaque_children, std::size_t{2});
   }
 
+  auto frames = video::query_verified_raw_video_frames(*archive);
+  EXPECT_TRUE(frames);
+  if (frames) {
+    EXPECT_EQ(frames->size(), std::size_t{2});
+    for (const auto& frame : *frames) {
+      EXPECT_EQ(frame.provenance.process.operation,
+                std::string{"codec.video.raw-frame.canonicalize.hls"});
+      EXPECT_TRUE(frame.source_records.size() >= std::size_t{2});
+      EXPECT_EQ(frame.source_records.front().hash, report->source.hash);
+    }
+    if (frames->size() == 2U) {
+      EXPECT_EQ(frames->back().source_records.size(), std::size_t{3});
+      EXPECT_EQ(frames->back().source_records[1].hash,
+                report->secondary_sources[0].hash);
+      EXPECT_EQ(frames->back().source_records[2].hash,
+                report->secondary_sources[1].hash);
+    }
+  }
+
   std::filesystem::remove(archive_path);
 }

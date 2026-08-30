@@ -388,13 +388,16 @@ inline void print_group_report(
             << "\",\"stream_id\":\""
             << to_string(group.request.descriptor.id)
             << "\",\"layout\":\"" << grouped_layout_name(group.layout)
+            << "\",\"status\":\""
+            << (report.profile_error ? "profile_error" : "ok")
             << "\",\"source_bytes\":" << report.source.payload_size
             << ",\"frames\":" << report.states.size()
             << ",\"provenance\":" << report.provenance.size()
             << ",\"secondary_sources\":" << report.secondary_sources.size()
             << ",\"secondary_source_bytes\":" << secondary_source_bytes
             << ",\"state_exact\":"
-            << (report.state_exact() ? "true" : "false");
+            << (report.state_exact() ? "true" : "false")
+            << ",\"preserved\":true";
   if (report.profile_error) {
     std::cout << ",\"profile_error\":\""
               << error_code_name(report.profile_error->code)
@@ -403,6 +406,19 @@ inline void print_group_report(
               << "\"";
   }
   std::cout << "}\n";
+}
+
+inline void print_group_failure(const Error& error,
+                                const GroupedVideoIngest& group,
+                                const std::filesystem::path& shared_archive) {
+  std::cout << "{\"archive\":\""
+            << ::codec::detail::json_escape(shared_archive.string())
+            << "\",\"stream_id\":\""
+            << to_string(group.request.descriptor.id)
+            << "\",\"layout\":\"" << grouped_layout_name(group.layout)
+            << "\",\"status\":\"error\",\"error\":\""
+            << error_code_name(error.code)
+            << "\",\"preserved\":false}\n";
 }
 
 }  // namespace detail
@@ -470,28 +486,37 @@ inline int grouped_video_ingest_command(
   }
   for (auto& worker : workers) worker.join();
 
-  for (const auto& error : errors) {
-    if (error) return detail::print_grouped_error(*error);
-  }
-
-  auto merged = detail::merge_group_archives(destination, temporary.paths);
-  if (!merged) {
-    std::error_code ignored;
-    std::filesystem::remove(destination, ignored);
-    return detail::print_grouped_error(merged.error());
-  }
-
-  bool profile_error = false;
-  for (std::size_t index = 0; index < reports.size(); ++index) {
-    if (!reports[index]) {
+  std::vector<std::filesystem::path> usable_archives;
+  usable_archives.reserve(groups->size());
+  for (std::size_t index = 0; index < groups->size(); ++index) {
+    if (reports[index]) usable_archives.push_back(temporary.paths[index]);
+    if (!reports[index] && !errors[index]) {
       return detail::print_grouped_error(
           Error{ErrorCode::internal,
                 "grouped video worker produced no report or error", false});
     }
-    detail::print_group_report(*reports[index], (*groups)[index], destination);
-    profile_error = profile_error || reports[index]->profile_error.has_value();
   }
-  return profile_error ? 1 : 0;
+
+  if (!usable_archives.empty()) {
+    auto merged = detail::merge_group_archives(destination, usable_archives);
+    if (!merged) {
+      std::error_code ignored;
+      std::filesystem::remove(destination, ignored);
+      return detail::print_grouped_error(merged.error());
+    }
+  }
+
+  bool any_failure = false;
+  for (std::size_t index = 0; index < groups->size(); ++index) {
+    if (reports[index]) {
+      detail::print_group_report(*reports[index], (*groups)[index], destination);
+      if (reports[index]->profile_error) any_failure = true;
+      continue;
+    }
+    detail::print_group_failure(*errors[index], (*groups)[index], destination);
+    any_failure = true;
+  }
+  return any_failure ? 1 : 0;
 }
 
 }  // namespace codec::cli

@@ -88,7 +88,8 @@ codec::StreamDescriptor child_descriptor(const codec::StreamId& stream,
   };
 }
 
-void expect_corrupt(const codec::Result<std::vector<video::VerifiedVideoPcm16Audio>>& result) {
+void expect_corrupt(
+    const codec::Result<std::vector<video::VerifiedVideoPcm16Audio>>& result) {
   EXPECT_FALSE(result);
   if (!result) EXPECT_EQ(result.error().code, codec::ErrorCode::archive_corrupt);
 }
@@ -157,7 +158,7 @@ TEST(video_audio_state_reader_rejects_wrong_process_identity) {
   std::filesystem::remove(path);
 }
 
-TEST(video_audio_state_reader_rejects_duplicate_s1_provenance) {
+TEST(video_audio_state_writer_rejects_duplicate_subject_provenance) {
   const auto path = strict_path("duplicate-provenance.coda");
   std::filesystem::remove(path);
   const auto stream = codec::derive_stream_id("video-audio-duplicate-provenance");
@@ -174,12 +175,10 @@ TEST(video_audio_state_reader_rejects_duplicate_s1_provenance) {
   const std::array inputs{*source};
   EXPECT_TRUE(writer.append_stream_provenance(
       *state, codec::TruthClass::state_exact, inputs, direct_process()));
-  EXPECT_TRUE(writer.append_stream_provenance(
-      *state, codec::TruthClass::state_exact, inputs, direct_process()));
+  auto duplicate = writer.append_stream_provenance(
+      *state, codec::TruthClass::state_exact, inputs, direct_process());
+  EXPECT_FALSE(duplicate);
   EXPECT_TRUE(writer.finalize());
-  auto archive = codec::CodaArchive::open(path);
-  EXPECT_TRUE(archive);
-  expect_corrupt(video::query_verified_video_pcm16_audio(*archive));
   std::filesystem::remove(path);
 }
 
@@ -190,7 +189,8 @@ TEST(video_audio_state_reader_rejects_invalid_hls_child_descriptor) {
   const auto child = codec::derive_stream_id("video-audio-bad-child");
   auto writer = std::move(*codec::CodaWriter::create(path));
   EXPECT_TRUE(writer.append_stream_descriptor(video_descriptor(stream), 0));
-  EXPECT_TRUE(writer.append_stream_descriptor(child_descriptor(child, "wrong"), 0));
+  EXPECT_TRUE(
+      writer.append_stream_descriptor(child_descriptor(child, "wrong"), 0));
   auto primary = writer.append(codec::RecordType::source_bytes, stream, 0,
                                10'000'000, std::array{std::byte{0x01}});
   auto secondary = writer.append(codec::RecordType::source_bytes, child, 0,

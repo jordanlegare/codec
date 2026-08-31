@@ -170,7 +170,7 @@ void cleanup(const std::filesystem::path& source,
 
 }  // namespace
 
-TEST(video_ffmpeg_audio_direct_ingest_writes_verified_pcm16) {
+TEST(video_ffmpeg_audio_direct_ingest_writes_verified_encoded_packets) {
   if (!video::ffmpeg_video_ingest_available()) return;
   const auto source = audio_ingest_path("mono.mp4");
   const auto archive_path = audio_ingest_path("mono.coda");
@@ -188,7 +188,7 @@ TEST(video_ffmpeg_audio_direct_ingest_writes_verified_pcm16) {
 
   auto archive = codec::CodaArchive::open(archive_path);
   EXPECT_TRUE(archive);
-  auto audio = video::query_verified_video_pcm16_audio(
+  auto audio = video::query_verified_video_encoded_audio(
       *archive,
       video::VideoAudioQuery{
           .stream = stream,
@@ -199,15 +199,24 @@ TEST(video_ffmpeg_audio_direct_ingest_writes_verified_pcm16) {
   EXPECT_TRUE(audio);
   if (audio && !audio->empty()) {
     EXPECT_EQ(audio->size(), std::size_t{1});
+    EXPECT_EQ(audio->front().state.codec, video::EncodedAudioCodec::aac);
     EXPECT_EQ(audio->front().state.sample_rate, std::uint32_t{8000});
     EXPECT_EQ(audio->front().state.channels, std::uint16_t{1});
-    EXPECT_TRUE(!audio->front().state.samples.empty());
+    EXPECT_TRUE(!audio->front().state.packets.empty());
     EXPECT_EQ(audio->front().source_records.size(), std::size_t{1});
   }
+  auto legacy = video::query_verified_video_pcm16_audio(
+      *archive, video::VideoAudioQuery{.stream = stream,
+                                      .time = std::nullopt,
+                                      .maximum_results = 1024,
+                                      .maximum_encoded_bytes =
+                                          1024ULL * 1024ULL * 1024ULL});
+  EXPECT_TRUE(legacy);
+  if (legacy) EXPECT_TRUE(legacy->empty());
   cleanup(source, archive_path);
 }
 
-TEST(video_ffmpeg_audio_direct_ingest_reuses_existing_pcm16_encoding) {
+TEST(video_ffmpeg_audio_direct_ingest_state_is_smaller_than_pcm16_equivalent) {
   if (!video::ffmpeg_video_ingest_available()) return;
   const auto source = audio_ingest_path("pcm-reuse.mp4");
   const auto archive_path = audio_ingest_path("pcm-reuse.coda");
@@ -219,14 +228,21 @@ TEST(video_ffmpeg_audio_direct_ingest_reuses_existing_pcm16_encoding) {
   if (!report || !report->audio_state.has_value()) return;
   auto archive = codec::CodaArchive::open(archive_path);
   EXPECT_TRUE(archive);
-  auto payload = archive->read_payload(*report->audio_state);
-  EXPECT_TRUE(payload);
-  auto decoded = codec::decode_pcm16_state(*payload);
-  EXPECT_TRUE(decoded);
-  if (decoded) {
-    EXPECT_EQ(decoded->sample_rate, std::uint32_t{8000});
-    EXPECT_EQ(decoded->channels, std::uint16_t{1});
-    EXPECT_TRUE(!decoded->samples.empty());
+  auto audio = video::query_verified_video_encoded_audio(
+      *archive, video::VideoAudioQuery{.stream = stream,
+                                      .time = std::nullopt,
+                                      .maximum_results = 1024,
+                                      .maximum_encoded_bytes =
+                                          1024ULL * 1024ULL * 1024ULL});
+  EXPECT_TRUE(audio);
+  if (audio && audio->size() == 1U) {
+    const auto& verified = audio->front();
+    EXPECT_EQ(verified.state_record.type_code(),
+              video::video_encoded_audio_state_record_type);
+    const auto pcm16_equivalent =
+        verified.state.presentation_frames * verified.state.channels *
+        sizeof(std::int16_t);
+    EXPECT_TRUE(verified.state_record.payload_size < pcm16_equivalent);
   }
   cleanup(source, archive_path);
 }
@@ -296,7 +312,7 @@ TEST(video_ffmpeg_audio_direct_audio_limit_is_enforced) {
   cleanup(source, archive_path);
 }
 
-TEST(video_hls_audio_ingest_writes_verified_pcm16) {
+TEST(video_hls_audio_ingest_writes_verified_encoded_packets) {
   if (!video::ffmpeg_video_ingest_available()) return;
   auto server = hls_audio_server();
   const auto archive_path = audio_ingest_path("hls-audio.coda");
@@ -312,7 +328,7 @@ TEST(video_hls_audio_ingest_writes_verified_pcm16) {
   auto archive = codec::CodaArchive::open(archive_path);
   EXPECT_TRUE(archive);
   if (archive) {
-    auto audio = video::query_verified_video_pcm16_audio(
+    auto audio = video::query_verified_video_encoded_audio(
         *archive,
         video::VideoAudioQuery{
             .stream = stream,
@@ -324,8 +340,10 @@ TEST(video_hls_audio_ingest_writes_verified_pcm16) {
     if (audio) {
       EXPECT_EQ(audio->size(), std::size_t{1});
       if (!audio->empty()) {
+        EXPECT_EQ(audio->front().state.codec, video::EncodedAudioCodec::aac);
         EXPECT_EQ(audio->front().state.channels, std::uint16_t{1});
         EXPECT_EQ(audio->front().state.sample_rate, std::uint32_t{8000});
+        EXPECT_TRUE(!audio->front().state.packets.empty());
       }
     }
   }
@@ -344,7 +362,7 @@ TEST(video_hls_audio_provenance_uses_primary_plus_ordered_frontier) {
   auto archive = codec::CodaArchive::open(archive_path);
   EXPECT_TRUE(archive);
   if (archive) {
-    auto audio = video::query_verified_video_pcm16_audio(
+    auto audio = video::query_verified_video_encoded_audio(
         *archive,
         video::VideoAudioQuery{
             .stream = stream,
@@ -364,7 +382,7 @@ TEST(video_hls_audio_provenance_uses_primary_plus_ordered_frontier) {
                   report->secondary_sources[index].hash);
       }
       EXPECT_EQ(audio->front().provenance.process.operation,
-                std::string{"codec.video.pcm16.canonicalize.hls"});
+                std::string{"codec.video.encoded-audio.preserve.hls"});
     }
   }
   std::filesystem::remove(archive_path);

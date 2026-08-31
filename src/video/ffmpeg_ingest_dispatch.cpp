@@ -353,6 +353,9 @@ void capture_encoded_audio_packet(const AVPacket& packet) {
       has_skip_samples = true;
       continue;
     }
+    if (packet.side_data[index].type == AV_PKT_DATA_MPEGTS_STREAM_ID) {
+      continue;
+    }
     remember_audio_error(
         codec::ErrorCode::model_incompatible,
         "selected AAC packet has side data unsupported by EAP1 v1");

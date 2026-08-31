@@ -736,7 +736,10 @@ TEST(video_export_rejects_conflicting_audio_forms_outside_time_filter) {
       video::VideoMp4ExportLimits{.maximum_output_bytes = 1024 * 1024});
   EXPECT_FALSE(exported);
   if (!exported) {
-    EXPECT_EQ(exported.error().code, codec::ErrorCode::archive_corrupt);
+    EXPECT_EQ(exported.error().code,
+              video::ffmpeg_video_export_available()
+                  ? codec::ErrorCode::archive_corrupt
+                  : codec::ErrorCode::model_incompatible);
   }
   std::filesystem::remove(fixture.path);
 }

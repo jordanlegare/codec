@@ -418,9 +418,11 @@ leading trim that cannot be represented by packet passthrough fails explicitly
 instead of silently muting or changing the audio. Legacy verified `0x0102`
 archives retain their existing PCM16-to-AAC export path. An archive containing
 both verified forms for one stream is contradictory and fails closed.
-EAP1 v1 does not persist FFmpeg packet side data: retained AAC skip/discard
-metadata or other unsupported/configuration-changing side data causes an
-explicit profile incompatibility instead of being silently dropped.
+EAP1 v1 does not persist semantic FFmpeg packet side data: retained AAC
+skip/discard metadata or unsupported/configuration-changing side data causes
+an explicit profile incompatibility instead of being silently dropped.
+Non-semantic MPEG-TS stream-routing metadata does not alter AAC presentation
+and is not persisted.
 
 At 48 kHz stereo, PCM16 is 192,000 bytes/second (691.2 MB/hour), while a
 128-kbit/s compressed stream is 57.6 MB/hour before the bounded packet table,

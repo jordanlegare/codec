@@ -111,7 +111,8 @@ EAP1 v1 does not persist FFmpeg packet side data. Skip/discard metadata on a
 packet wholly before the logical window may be discarded with that packet.
 Retained skip/discard metadata, configuration-changing side data, or any other
 unsupported side data produces an explicit profile incompatibility rather than
-silently changing the presentation.
+silently changing the presentation. Non-semantic MPEG-TS stream-routing side
+data does not alter AAC presentation and is not persisted.
 
 ## Ingest architecture
 

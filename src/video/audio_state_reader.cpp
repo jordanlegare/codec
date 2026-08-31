@@ -162,38 +162,69 @@ Result<std::vector<VerifiedVideoPcm16Audio>> query_verified_video_pcm16_audio(
         "verified video audio query requires a finalized archive");
   }
 
+  const RecordQuery scoped_subject{
+      .stream = query.stream,
+      .type = video_pcm16_audio_state_record_type,
+      .sequence = std::nullopt,
+      .time = std::nullopt,
+  };
+  auto scoped_states = archive.query_records(scoped_subject);
+  if (!scoped_states) return scoped_states.error();
+  std::vector<StreamId> scoped_streams;
+  scoped_streams.reserve(scoped_states->size());
+  for (const auto& state : *scoped_states) {
+    if (std::find(scoped_streams.begin(), scoped_streams.end(), state.stream) !=
+        scoped_streams.end()) {
+      return fail<std::vector<VerifiedVideoPcm16Audio>>(
+          ErrorCode::archive_corrupt,
+          "H.1 v1 permits at most one PCM16 audio state per stream");
+    }
+    scoped_streams.push_back(state.stream);
+  }
+
   const RecordQuery subject{
       .stream = query.stream,
       .type = video_pcm16_audio_state_record_type,
       .sequence = std::nullopt,
       .time = query.time,
   };
-  const ProvenanceQuery provenance_query{
-      .subject_truth = TruthClass::state_exact,
-      .subject = subject,
-      .direct_input = std::nullopt,
-  };
-  auto selected = archive.query_provenance(provenance_query);
-  if (!selected) return selected.error();
-  if (selected->size() > query.maximum_results) {
+  auto requested_states = archive.query_records(subject);
+  if (!requested_states) return requested_states.error();
+  if (requested_states->size() > query.maximum_results) {
     return fail<std::vector<VerifiedVideoPcm16Audio>>(
         ErrorCode::resource_exhausted,
         "verified video audio state count exceeds the configured limit");
   }
 
-  for (std::size_t index = 0; index < selected->size(); ++index) {
-    for (std::size_t prior = 0; prior < index; ++prior) {
-      if ((*selected)[index].subject.stream ==
-              (*selected)[prior].subject.stream &&
-          (*selected)[index].subject.type == (*selected)[prior].subject.type &&
-          (*selected)[index].subject.sequence ==
-              (*selected)[prior].subject.sequence &&
-          (*selected)[index].subject.hash == (*selected)[prior].subject.hash) {
-        return fail<std::vector<VerifiedVideoPcm16Audio>>(
-            ErrorCode::archive_corrupt,
-            "verified video audio state has duplicate S1 provenance");
-      }
+  const ProvenanceQuery provenance_query{
+      .subject_truth = std::nullopt,
+      .subject = subject,
+      .direct_input = std::nullopt,
+  };
+  auto available_provenance = archive.query_provenance(provenance_query);
+  if (!available_provenance) return available_provenance.error();
+
+  std::vector<StreamProvenance> selected;
+  selected.reserve(requested_states->size());
+  for (const auto& state : *requested_states) {
+    const StreamProvenance* match = nullptr;
+    std::size_t match_count = 0U;
+    for (const auto& provenance : *available_provenance) {
+      if (!matches_link(state, provenance.subject)) continue;
+      ++match_count;
+      match = &provenance;
     }
+    if (match_count != 1U || match == nullptr) {
+      return fail<std::vector<VerifiedVideoPcm16Audio>>(
+          ErrorCode::archive_corrupt,
+          "purported H.1 video audio state lacks unique provenance");
+    }
+    if (match->subject_truth != TruthClass::state_exact) {
+      return fail<std::vector<VerifiedVideoPcm16Audio>>(
+          ErrorCode::archive_corrupt,
+          "purported H.1 video audio state is not verified S1");
+    }
+    selected.push_back(*match);
   }
 
   auto records = archive.records();
@@ -202,11 +233,10 @@ Result<std::vector<VerifiedVideoPcm16Audio>> query_verified_video_pcm16_audio(
   if (!descriptors) return descriptors.error();
 
   std::vector<Candidate> candidates;
-  candidates.reserve(selected->size());
-  std::vector<StreamId> seen_streams;
+  candidates.reserve(selected.size());
   std::uint64_t encoded_bytes = 0U;
 
-  for (auto provenance : *selected) {
+  for (auto provenance : selected) {
     auto contract = classify_process(provenance.process);
     if (!contract) return contract.error();
     auto state_record = resolve_record(*records, provenance.subject, "subject");
@@ -219,13 +249,6 @@ Result<std::vector<VerifiedVideoPcm16Audio>> query_verified_video_pcm16_audio(
     auto video_descriptor =
         require_unique_video_descriptor(*descriptors, state_record->stream);
     if (!video_descriptor) return video_descriptor.error();
-    if (std::find(seen_streams.begin(), seen_streams.end(),
-                  state_record->stream) != seen_streams.end()) {
-      return fail<std::vector<VerifiedVideoPcm16Audio>>(
-          ErrorCode::archive_corrupt,
-          "H.1 v1 permits at most one verified PCM16 audio state per stream");
-    }
-    seen_streams.push_back(state_record->stream);
 
     if (*contract == VideoAudioProvenanceContract::direct &&
         provenance.inputs.size() != 1U) {

@@ -4,14 +4,28 @@
 #include <codec/audio.hpp>
 #include <codec/profiles/video.hpp>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <memory>
+#include <optional>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
+
+#ifdef CODEC_TEST_HAS_FFMPEG_VIDEO
+#include <cerrno>
+
+extern "C" {
+#include <libavcodec/avcodec.h>
+#include <libavformat/avformat.h>
+#include <libavutil/mathematics.h>
+}
+#endif
 
 namespace video = codec::profiles::video;
 
@@ -72,6 +86,179 @@ bool write_bytes(const std::filesystem::path& path,
                static_cast<std::streamsize>(bytes.size()));
   return static_cast<bool>(output);
 }
+
+#ifdef CODEC_TEST_HAS_FFMPEG_VIDEO
+
+struct AudioInputDeleter {
+  void operator()(AVFormatContext* value) const noexcept {
+    if (value != nullptr) avformat_close_input(&value);
+  }
+};
+
+struct AudioPacketDeleter {
+  void operator()(AVPacket* value) const noexcept {
+    if (value != nullptr) av_packet_free(&value);
+  }
+};
+
+struct DemuxedAacPacket {
+  std::int64_t pts_ns{};
+  std::int64_t dts_ns{};
+  std::uint64_t duration_ns{};
+  std::uint32_t flags{};
+  std::vector<std::byte> payload;
+};
+
+struct DemuxedAacStream {
+  std::int32_t codec_profile{};
+  std::uint32_t sample_rate{};
+  std::uint16_t channels{};
+  std::vector<std::byte> decoder_config;
+  std::vector<DemuxedAacPacket> packets;
+};
+
+DemuxedAacStream demux_aac_source(const std::filesystem::path& path) {
+  AVFormatContext* raw_format = nullptr;
+  const auto path_text = path.string();
+  if (avformat_open_input(&raw_format, path_text.c_str(), nullptr, nullptr) < 0 ||
+      raw_format == nullptr) {
+    if (raw_format != nullptr) avformat_close_input(&raw_format);
+    throw std::runtime_error("cannot open AAC source fixture");
+  }
+  std::unique_ptr<AVFormatContext, AudioInputDeleter> format{raw_format};
+  if (avformat_find_stream_info(format.get(), nullptr) < 0) {
+    throw std::runtime_error("cannot inspect AAC source fixture");
+  }
+  const auto audio_index =
+      av_find_best_stream(format.get(), AVMEDIA_TYPE_AUDIO, -1, -1, nullptr, 0);
+  if (audio_index < 0 ||
+      static_cast<unsigned>(audio_index) >= format->nb_streams) {
+    throw std::runtime_error("AAC source fixture has no selected audio stream");
+  }
+  const auto* stream = format->streams[audio_index];
+  if (stream == nullptr || stream->codecpar == nullptr ||
+      stream->codecpar->codec_id != AV_CODEC_ID_AAC ||
+      stream->codecpar->sample_rate <= 0 ||
+      stream->codecpar->ch_layout.nb_channels < 1 ||
+      stream->codecpar->ch_layout.nb_channels > 2 ||
+      stream->time_base.num <= 0 || stream->time_base.den <= 0 ||
+      stream->codecpar->extradata_size < 0 ||
+      (stream->codecpar->extradata_size > 0 &&
+       stream->codecpar->extradata == nullptr)) {
+    throw std::runtime_error("AAC source fixture has invalid stream metadata");
+  }
+
+  DemuxedAacStream source{
+      .codec_profile = stream->codecpar->profile,
+      .sample_rate = static_cast<std::uint32_t>(stream->codecpar->sample_rate),
+      .channels = static_cast<std::uint16_t>(
+          stream->codecpar->ch_layout.nb_channels),
+      .decoder_config = {},
+      .packets = {},
+  };
+  if (stream->codecpar->extradata_size > 0) {
+    const auto* config = reinterpret_cast<const std::byte*>(
+        stream->codecpar->extradata);
+    source.decoder_config.assign(
+        config, config + stream->codecpar->extradata_size);
+  }
+
+  constexpr AVRational nanosecond_time_base{1, 1'000'000'000};
+  std::unique_ptr<AVPacket, AudioPacketDeleter> packet{av_packet_alloc()};
+  if (!packet) throw std::runtime_error("cannot allocate AAC source packet");
+  std::optional<std::int64_t> previous_end_ns;
+  for (;;) {
+    const auto read = av_read_frame(format.get(), packet.get());
+    if (read == AVERROR_EOF) break;
+    if (read < 0) throw std::runtime_error("cannot demux AAC source packet");
+    if (packet->stream_index != audio_index) {
+      av_packet_unref(packet.get());
+      continue;
+    }
+    auto pts = packet->pts;
+    auto dts = packet->dts;
+    if (pts == AV_NOPTS_VALUE) pts = dts;
+    if (dts == AV_NOPTS_VALUE) dts = pts;
+    if (packet->data == nullptr || packet->size <= 0) {
+      throw std::runtime_error("AAC source packet is missing bytes");
+    }
+    auto duration = packet->duration;
+    if (duration <= 0) {
+      duration = av_rescale_q(1024, AVRational{1, stream->codecpar->sample_rate},
+                              stream->time_base);
+    }
+    const auto duration_ns =
+        av_rescale_q(duration, stream->time_base, nanosecond_time_base);
+    if (duration <= 0 || duration_ns <= 0) {
+      throw std::runtime_error("AAC source packet has invalid duration");
+    }
+    std::int64_t pts_ns = 0;
+    std::int64_t dts_ns = 0;
+    if (pts == AV_NOPTS_VALUE || dts == AV_NOPTS_VALUE) {
+      // The raw AAC transport fixture timestamps its first access unit. Derive
+      // later contiguous AAC access-unit times from the independently demuxed
+      // sample rate when MPEG-TS omits repeated timestamps.
+      if (!previous_end_ns.has_value()) {
+        throw std::runtime_error("first AAC source packet has no timing");
+      }
+      pts_ns = *previous_end_ns;
+      dts_ns = *previous_end_ns;
+    } else {
+      pts_ns = av_rescale_q(pts, stream->time_base, nanosecond_time_base);
+      dts_ns = av_rescale_q(dts, stream->time_base, nanosecond_time_base);
+    }
+    const auto* payload = reinterpret_cast<const std::byte*>(packet->data);
+    source.packets.push_back(DemuxedAacPacket{
+        .pts_ns = pts_ns,
+        .dts_ns = dts_ns,
+        .duration_ns = static_cast<std::uint64_t>(duration_ns),
+        .flags = static_cast<std::uint32_t>(packet->flags) & 0x1fU,
+        .payload = std::vector<std::byte>(payload, payload + packet->size),
+    });
+    previous_end_ns = pts_ns + duration_ns;
+    av_packet_unref(packet.get());
+  }
+  return source;
+}
+
+void expect_eap1_matches_source_demux(
+    const DemuxedAacStream& source,
+    const video::VerifiedVideoEncodedAudio& verified) {
+  const auto& state = verified.state;
+  EXPECT_EQ(state.codec, video::EncodedAudioCodec::aac);
+  EXPECT_EQ(state.codec_profile, source.codec_profile);
+  EXPECT_EQ(state.sample_rate, source.sample_rate);
+  EXPECT_EQ(state.channels, source.channels);
+  EXPECT_EQ(state.decoder_config, source.decoder_config);
+  EXPECT_TRUE(!state.packets.empty());
+  EXPECT_TRUE(source.packets.size() >= state.packets.size());
+  if (state.packets.empty() || source.packets.size() < state.packets.size()) {
+    return;
+  }
+
+  std::size_t matching_subsequences = 0U;
+  for (std::size_t begin = 0U;
+       begin + state.packets.size() <= source.packets.size(); ++begin) {
+    const auto origin_ns =
+        source.packets[begin].pts_ns - state.packets.front().pts_offset_ns;
+    bool matches = true;
+    for (std::size_t index = 0U; index < state.packets.size(); ++index) {
+      const auto& actual = state.packets[index];
+      const auto& literal = source.packets[begin + index];
+      if (actual.pts_offset_ns != literal.pts_ns - origin_ns ||
+          actual.dts_offset_ns != literal.dts_ns - origin_ns ||
+          actual.duration_ns != literal.duration_ns ||
+          actual.flags != literal.flags || actual.payload != literal.payload) {
+        matches = false;
+        break;
+      }
+    }
+    if (matches) ++matching_subsequences;
+  }
+  EXPECT_EQ(matching_subsequences, std::size_t{1});
+}
+
+#endif
 
 video::FfmpegVideoIngestRequest request_for(
     const std::filesystem::path& source,
@@ -216,6 +403,38 @@ TEST(video_ffmpeg_audio_direct_ingest_writes_verified_encoded_packets) {
   cleanup(source, archive_path);
 }
 
+TEST(video_ffmpeg_audio_direct_state_matches_independent_source_demux) {
+#ifdef CODEC_TEST_HAS_FFMPEG_VIDEO
+  if (!video::ffmpeg_video_ingest_available()) return;
+  const auto source_path = audio_ingest_path("direct-exactness.mp4");
+  const auto archive_path = audio_ingest_path("direct-exactness.coda");
+  cleanup(source_path, archive_path);
+  EXPECT_TRUE(
+      write_bytes(source_path, fixture("video_audio_mono.mp4.b64")));
+  const auto literal_source = demux_aac_source(source_path);
+  const auto stream = codec::derive_stream_id("video-audio-direct-exactness");
+  auto report = video::ingest_video_ffmpeg(
+      request_for(source_path, archive_path, stream));
+  EXPECT_TRUE(report);
+  if (!report) return;
+  auto archive = codec::CodaArchive::open(archive_path);
+  EXPECT_TRUE(archive);
+  auto audio = video::query_verified_video_encoded_audio(
+      *archive, video::VideoAudioQuery{
+                    .stream = stream,
+                    .time = std::nullopt,
+                    .maximum_results = 8,
+                    .maximum_encoded_bytes = 1024ULL * 1024ULL,
+                });
+  EXPECT_TRUE(audio);
+  if (audio) EXPECT_EQ(audio->size(), std::size_t{1});
+  if (audio && audio->size() == 1U) {
+    expect_eap1_matches_source_demux(literal_source, audio->front());
+  }
+  cleanup(source_path, archive_path);
+#endif
+}
+
 TEST(video_ffmpeg_audio_direct_ingest_state_is_smaller_than_pcm16_equivalent) {
   if (!video::ffmpeg_video_ingest_available()) return;
   const auto source = audio_ingest_path("pcm-reuse.mp4");
@@ -349,6 +568,39 @@ TEST(video_hls_audio_ingest_writes_verified_encoded_packets) {
     }
   }
   std::filesystem::remove(archive_path);
+}
+
+TEST(video_hls_audio_state_matches_independent_transport_demux) {
+#ifdef CODEC_TEST_HAS_FFMPEG_VIDEO
+  if (!video::ffmpeg_video_ingest_available()) return;
+  auto server = hls_audio_server();
+  const auto transport_path = audio_ingest_path("hls-audio-exactness.ts");
+  const auto archive_path = audio_ingest_path("hls-audio-exactness.coda");
+  cleanup(transport_path, archive_path);
+  EXPECT_TRUE(
+      write_bytes(transport_path, fixture("hls_audio_mono.ts.b64")));
+  const auto literal_source = demux_aac_source(transport_path);
+  const auto stream = codec::derive_stream_id("video-hls-audio-exactness");
+  auto report = video::ingest_video_ffmpeg(
+      hls_request_for(server, archive_path, stream));
+  EXPECT_TRUE(report);
+  if (!report) return;
+  auto archive = codec::CodaArchive::open(archive_path);
+  EXPECT_TRUE(archive);
+  auto audio = video::query_verified_video_encoded_audio(
+      *archive, video::VideoAudioQuery{
+                    .stream = stream,
+                    .time = std::nullopt,
+                    .maximum_results = 8,
+                    .maximum_encoded_bytes = 1024ULL * 1024ULL,
+                });
+  EXPECT_TRUE(audio);
+  if (audio) EXPECT_EQ(audio->size(), std::size_t{1});
+  if (audio && audio->size() == 1U) {
+    expect_eap1_matches_source_demux(literal_source, audio->front());
+  }
+  cleanup(transport_path, archive_path);
+#endif
 }
 
 TEST(video_hls_audio_provenance_uses_primary_plus_ordered_frontier) {

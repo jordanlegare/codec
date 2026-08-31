@@ -119,8 +119,8 @@ Result<void> validate_interval(const EncodedAudioState& state,
   const auto expected =
       seconds * kNanosecondsPerSecond +
       (remainder * kNanosecondsPerSecond) / state.sample_rate;
-  const auto duration =
-      static_cast<std::uint64_t>(record.end_ns - record.start_ns);
+  const auto duration = static_cast<std::uint64_t>(record.end_ns) -
+                        static_cast<std::uint64_t>(record.start_ns);
   const auto difference =
       duration > expected ? duration - expected : expected - duration;
   if (difference > 1U) {

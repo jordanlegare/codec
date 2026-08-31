@@ -39,6 +39,12 @@ void set_u32(std::vector<std::byte>& bytes, std::size_t offset,
   }
 }
 
+void set_u16(std::vector<std::byte>& bytes, std::size_t offset,
+             std::uint16_t value) {
+  bytes[offset] = static_cast<std::byte>((value >> 8U) & 0xffU);
+  bytes[offset + 1U] = static_cast<std::byte>(value & 0xffU);
+}
+
 void set_u64(std::vector<std::byte>& bytes, std::size_t offset,
              std::uint64_t value) {
   for (int shift = 56; shift >= 0; shift -= 8) {
@@ -329,4 +335,87 @@ TEST(video_encoded_audio_state_rejects_packet_timestamp_overflow) {
   state.packets.front().dts_offset_ns =
       std::numeric_limits<std::int64_t>::max() - 1;
   EXPECT_FALSE(video::encode_encoded_audio_state(state));
+}
+
+TEST(video_encoded_audio_state_round_trips_signed_timestamp_offsets) {
+  auto state = one_packet_state();
+  state.packets.front().pts_offset_ns = -1;
+  state.packets.front().dts_offset_ns = -2;
+  state.packets.front().duration_ns = 128'000'001;
+
+  auto encoded = video::encode_encoded_audio_state(state);
+  EXPECT_TRUE(encoded);
+  if (!encoded) return;
+  auto decoded = video::decode_encoded_audio_state(*encoded);
+  EXPECT_TRUE(decoded);
+  if (decoded) {
+    EXPECT_EQ(decoded->packets.front().pts_offset_ns, std::int64_t{-1});
+    EXPECT_EQ(decoded->packets.front().dts_offset_ns, std::int64_t{-2});
+    EXPECT_EQ(decoded->packets.front().duration_ns,
+              std::uint64_t{128'000'001});
+  }
+}
+
+TEST(video_encoded_audio_state_rejects_unknown_codec) {
+  auto state = one_packet_state();
+  state.codec = static_cast<video::EncodedAudioCodec>(2U);
+  auto encoded_unknown = video::encode_encoded_audio_state(state);
+  EXPECT_FALSE(encoded_unknown);
+  if (!encoded_unknown) {
+    EXPECT_EQ(encoded_unknown.error().code, codec::ErrorCode::invalid_argument);
+  }
+
+  auto encoded = video::encode_encoded_audio_state(one_packet_state());
+  EXPECT_TRUE(encoded);
+  if (!encoded) return;
+  set_u16(*encoded, 6U, 2U);
+  auto decoded_unknown = video::decode_encoded_audio_state(*encoded);
+  EXPECT_FALSE(decoded_unknown);
+  if (!decoded_unknown) {
+    EXPECT_EQ(decoded_unknown.error().code, codec::ErrorCode::decode);
+  }
+}
+
+TEST(video_encoded_audio_state_enforces_decoder_configuration_limit) {
+  auto encoded = video::encode_encoded_audio_state(one_packet_state());
+  EXPECT_TRUE(encoded);
+  if (!encoded) return;
+  auto decoded = video::decode_encoded_audio_state(
+      *encoded,
+      video::EncodedAudioDecodeLimits{
+          .maximum_packets = 8,
+          .maximum_decoder_config_bytes = 1,
+          .maximum_packet_bytes = 16,
+          .maximum_payload_bytes = 16,
+      });
+  EXPECT_FALSE(decoded);
+  if (!decoded) {
+    EXPECT_EQ(decoded.error().code, codec::ErrorCode::resource_exhausted);
+  }
+}
+
+TEST(video_encoded_audio_state_rejects_malformed_headers_and_declared_sizes) {
+  auto encoded = video::encode_encoded_audio_state(one_packet_state());
+  EXPECT_TRUE(encoded);
+  if (!encoded) return;
+
+  std::vector<std::vector<std::byte>> malformed;
+  malformed.push_back(std::vector<std::byte>(encoded->begin(),
+                                             encoded->begin() + 63));
+  malformed.push_back(*encoded);
+  malformed.back()[0] = std::byte{'X'};
+  malformed.push_back(*encoded);
+  set_u16(malformed.back(), 4U, 2U);
+  malformed.push_back(*encoded);
+  set_u32(malformed.back(), 24U, 1'000U);
+  malformed.push_back(*encoded);
+  set_u64(malformed.back(), 56U, 3U);
+  malformed.push_back(*encoded);
+  set_u64(malformed.back(), 56U, 5U);
+
+  for (const auto& payload : malformed) {
+    auto decoded = video::decode_encoded_audio_state(payload);
+    EXPECT_FALSE(decoded);
+    if (!decoded) EXPECT_EQ(decoded.error().code, codec::ErrorCode::decode);
+  }
 }

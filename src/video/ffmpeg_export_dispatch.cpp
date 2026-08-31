@@ -106,18 +106,38 @@ int choose_aac_sample_rate(const AVCodec& codec, std::uint32_t requested) {
     return 0;
   }
   const auto requested_int = static_cast<int>(requested);
+
+#if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(61, 12, 100)
+  const void* configurations = nullptr;
+  int configuration_count = 0;
+  const auto queried = avcodec_get_supported_config(
+      nullptr, &codec, AV_CODEC_CONFIG_SAMPLE_RATE, 0, &configurations,
+      &configuration_count);
+  if (queried < 0) return 0;
+  if (configurations == nullptr) return requested_int;
+  if (configuration_count <= 0) return 0;
+  const auto* rates = static_cast<const int*>(configurations);
+#else
   if (codec.supported_samplerates == nullptr) return requested_int;
+  const int* rates = codec.supported_samplerates;
+#endif
 
   int best = 0;
   std::uint64_t best_distance = std::numeric_limits<std::uint64_t>::max();
-  for (const int* rate = codec.supported_samplerates; *rate != 0; ++rate) {
-    if (*rate <= 0) continue;
-    if (*rate == requested_int) return requested_int;
+#if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(61, 12, 100)
+  for (int index = 0; index < configuration_count; ++index) {
+    const auto rate = rates[index];
+#else
+  for (const int* candidate = rates; *candidate != 0; ++candidate) {
+    const auto rate = *candidate;
+#endif
+    if (rate <= 0) continue;
+    if (rate == requested_int) return requested_int;
     const auto distance = static_cast<std::uint64_t>(
-        *rate > requested_int ? *rate - requested_int : requested_int - *rate);
+        rate > requested_int ? rate - requested_int : requested_int - rate);
     if (best == 0 || distance < best_distance ||
-        (distance == best_distance && *rate < best)) {
-      best = *rate;
+        (distance == best_distance && rate < best)) {
+      best = rate;
       best_distance = distance;
     }
   }
@@ -125,12 +145,28 @@ int choose_aac_sample_rate(const AVCodec& codec, std::uint32_t requested) {
 }
 
 AVSampleFormat choose_aac_sample_format(const AVCodec& codec) {
+#if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(61, 12, 100)
+  const void* configurations = nullptr;
+  int configuration_count = 0;
+  const auto queried = avcodec_get_supported_config(
+      nullptr, &codec, AV_CODEC_CONFIG_SAMPLE_FORMAT, 0, &configurations,
+      &configuration_count);
+  if (queried < 0) return AV_SAMPLE_FMT_NONE;
+  if (configurations == nullptr) return AV_SAMPLE_FMT_FLTP;
+  if (configuration_count <= 0) return AV_SAMPLE_FMT_NONE;
+  const auto* formats = static_cast<const AVSampleFormat*>(configurations);
+  for (int index = 0; index < configuration_count; ++index) {
+    if (formats[index] == AV_SAMPLE_FMT_FLTP) return formats[index];
+  }
+  return formats[0];
+#else
   if (codec.sample_fmts == nullptr) return AV_SAMPLE_FMT_NONE;
   for (const AVSampleFormat* format = codec.sample_fmts;
        *format != AV_SAMPLE_FMT_NONE; ++format) {
     if (*format == AV_SAMPLE_FMT_FLTP) return *format;
   }
   return codec.sample_fmts[0];
+#endif
 }
 
 Result<std::vector<std::byte>> mux_verified_audio(

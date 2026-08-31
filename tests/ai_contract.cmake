@@ -45,6 +45,7 @@ read_required("src/capi/codec_c.cpp" capi_source_contents)
 read_required("src/distributed/wire.cpp" wire_source_contents)
 read_required("src/video/frame_state.cpp" video_frame_state_contents)
 read_required("src/video/frame_state_reader.cpp" video_frame_reader_contents)
+read_required("src/video/ffmpeg_export_dispatch.cpp" video_export_dispatch_contents)
 
 foreach(retired_symbol IN ITEMS
     "watermark_statement"
@@ -216,6 +217,20 @@ foreach(required_optional_video_build_contract IN ITEMS
   if(optional_video_offset EQUAL -1)
     message(FATAL_ERROR
       "Optional FFmpeg video build contract is missing: ${required_optional_video_build_contract}")
+  endif()
+endforeach()
+
+foreach(required_ffmpeg_audio_config_contract IN ITEMS
+    "LIBAVCODEC_VERSION_INT"
+    "AV_VERSION_INT(61, 12, 100)"
+    "avcodec_get_supported_config"
+    "AV_CODEC_CONFIG_SAMPLE_RATE"
+    "AV_CODEC_CONFIG_SAMPLE_FORMAT")
+  string(FIND "${video_export_dispatch_contents}"
+    "${required_ffmpeg_audio_config_contract}" ffmpeg_config_offset)
+  if(ffmpeg_config_offset EQUAL -1)
+    message(FATAL_ERROR
+      "FFmpeg audio export compatibility contract is missing: ${required_ffmpeg_audio_config_contract}")
   endif()
 endforeach()
 

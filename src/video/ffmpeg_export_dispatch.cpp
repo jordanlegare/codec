@@ -587,7 +587,12 @@ Result<VerifiedVideoMp4Export> export_verified_video_mp4(
   if (!muxed) return muxed.error();
 
   video_only->output.payload = std::move(*muxed);
-  video_only->output.supporting_records.push_back(audio.state_record);
+  video_only->output.supporting_records.push_back(ProvenanceRecordLink{
+      .stream = audio.state_record.stream,
+      .type = audio.state_record.type_code(),
+      .sequence = audio.state_record.sequence,
+      .hash = audio.state_record.hash,
+  });
   video_only->audio_state_record = audio.state_record;
   video_only->audio_provenance = audio.provenance;
   return video_only;

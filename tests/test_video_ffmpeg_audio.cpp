@@ -125,7 +125,13 @@ TEST(video_ffmpeg_audio_direct_ingest_writes_verified_pcm16) {
   auto archive = codec::CodaArchive::open(archive_path);
   EXPECT_TRUE(archive);
   auto audio = video::query_verified_video_pcm16_audio(
-      *archive, video::VideoAudioQuery{.stream = stream});
+      *archive,
+      video::VideoAudioQuery{
+          .stream = stream,
+          .time = std::nullopt,
+          .maximum_results = 1024,
+          .maximum_encoded_bytes = 1024ULL * 1024ULL * 1024ULL,
+      });
   EXPECT_TRUE(audio);
   if (audio && !audio->empty()) {
     EXPECT_EQ(audio->size(), std::size_t{1});

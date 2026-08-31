@@ -35,7 +35,8 @@ verification:
   ffmpeg_disabled: pass — run 476 configure/build/CTest/install with CODEC_ENABLE_FFMPEG_VIDEO=OFF
   install_and_package_consumer: pass — run 476 GCC, Clang, and FFmpeg-disabled installed-consumer gates
   pre_review_exact_head_ci: pass — run 477 at 0c7ec4f6f1418b53e2c9db9f0a5c1c9bc2a92f02; superseded by review remediation
-  review_remediation: targeted EAP1 bounds/timing and capture/side-data tests pass locally with GCC warnings-as-errors; FFmpeg-disabled dispatch units compile
+  review_ci_diagnostics: runs 478 and 479 exposed HLS transport side-data and nested CLI regressions; run 481 localized the remaining CLI failure to decoder priming extending beyond the retained packet timeline
+  review_remediation: 12 EAP1 bounds/timing tests and 7 capture/timeline tests pass locally with GCC warnings-as-errors; FFmpeg-disabled ingest, HLS, and export dispatch units compile; final exact-head CI remains authoritative
   exact_head_ci: pending on the review-remediation head; immutable PR 56 checks must pass before merge
 ```
 
@@ -60,6 +61,7 @@ Invariant decisions:
 - [x] 0x0102 is a compatibility tombstone for new writes but remains supported by the existing verified reader and PCM16-to-AAC legacy export path.
 - [x] 0x0103 is profile-local, versioned, bounded, and includes exact packet bytes plus sufficient codec/timing metadata for deterministic verification and container export.
 - [x] Audio validation remains fail-closed and streaming; decoded frames are discarded and no libswresample/aggregate PCM allocation is used by new ingest.
+- [x] Logical presentation is capped to complete frames supported by retained packets; decoder priming carried only by a discarded negative-time skip packet is validated but never fabricated as presented audio.
 - [x] Compatible MP4 audio uses packet remux; unsupported exact trims or codecs fail explicitly, never silently mute.
 - [x] Direct-video and HLS video-frame provenance, authorization, CLI syntax, generic archive/C ABI, standalone Audio Profile, transport, distributed, telemetry, and Stage G semantics are unchanged.
 - [x] FFmpeg-disabled builds retain the media-library-independent encoded-audio schema/reader and explicit backend-unavailable export behavior.

@@ -204,8 +204,7 @@ Result<FfmpegCapturedEncodedAudio> finalize_ffmpeg_encoded_audio_capture(
       boundary.sample_rate, false);
   if (!maximum_frames) return maximum_frames.error();
   const auto remaining_frames = boundary.decoded_frames - trim_start_frames;
-  const auto presentation_frames =
-      std::min(remaining_frames, *maximum_frames);
+  auto presentation_frames = std::min(remaining_frames, *maximum_frames);
   if (presentation_frames == 0U) {
     return profile_error(true, ErrorCode::decode,
                          "encoded audio presentation contains no complete frames");
@@ -217,13 +216,6 @@ Result<FfmpegCapturedEncodedAudio> finalize_ffmpeg_encoded_audio_capture(
     return profile_error(true, ErrorCode::decode,
                          "encoded audio duration is outside the requested interval");
   }
-  auto end = add_nonnegative(start_ns, *duration_ns,
-                             "encoded audio archive timestamp");
-  if (!end) {
-    return profile_error(true, end.error().code, end.error().message);
-  }
-  const auto end_ns = *end;
-
   auto source_start = add_nonnegative(
       *boundary.video_origin_ns,
       static_cast<std::uint64_t>(relative_start_ns),
@@ -243,6 +235,7 @@ Result<FfmpegCapturedEncodedAudio> finalize_ffmpeg_encoded_audio_capture(
 
   std::vector<EncodedAudioPacket> packets;
   packets.reserve(boundary.packets.size());
+  std::uint64_t supported_end_offset_ns = 0U;
   for (auto& packet : boundary.packets) {
     auto packet_end = add_nonnegative(packet.pts_ns, packet.duration_ns,
                                       "encoded audio packet interval");
@@ -267,6 +260,9 @@ Result<FfmpegCapturedEncodedAudio> finalize_ffmpeg_encoded_audio_capture(
       const auto& error = !pts_offset ? pts_offset.error() : dts_offset.error();
       return profile_error(true, error.code, error.message);
     }
+    supported_end_offset_ns =
+        std::max(supported_end_offset_ns,
+                 positive_distance(*packet_end, source_window_start));
     packets.push_back(EncodedAudioPacket{
         .pts_offset_ns = *pts_offset,
         .dts_offset_ns = *dts_offset,
@@ -279,6 +275,27 @@ Result<FfmpegCapturedEncodedAudio> finalize_ffmpeg_encoded_audio_capture(
     return profile_error(true, ErrorCode::decode,
                          "encoded audio has no packets in its presentation window");
   }
+  auto supported_frames = frames_for_ns(
+      std::min(supported_end_offset_ns, *duration_ns), boundary.sample_rate,
+      false);
+  if (!supported_frames) return supported_frames.error();
+  presentation_frames = std::min(presentation_frames, *supported_frames);
+  if (presentation_frames == 0U) {
+    return profile_error(true, ErrorCode::decode,
+                         "encoded audio packets support no complete presentation frames");
+  }
+  auto final_duration_ns =
+      nanoseconds_for_frames(presentation_frames, boundary.sample_rate);
+  if (!final_duration_ns || *final_duration_ns == 0U) {
+    return profile_error(true, ErrorCode::decode,
+                         "encoded audio packet-supported duration is invalid");
+  }
+  auto end = add_nonnegative(start_ns, *final_duration_ns,
+                             "encoded audio archive timestamp");
+  if (!end) {
+    return profile_error(true, end.error().code, end.error().message);
+  }
+  const auto end_ns = *end;
 
   EncodedAudioState state{
       .codec = boundary.codec,

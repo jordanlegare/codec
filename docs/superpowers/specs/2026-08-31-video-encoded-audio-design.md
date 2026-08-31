@@ -128,7 +128,10 @@ session.
 4. Count decoded frames and discard decoded `AVFrame` data immediately. Do not
    allocate a `SwrContext`, convert to PCM16, or retain decoded samples.
 5. Apply the existing logical video-origin/start/end calculation as
-   `trim_start_frames` plus `presentation_frames` metadata.
+   `trim_start_frames` plus `presentation_frames` metadata. Cap the logical
+   presentation to complete frames supported by the retained packet timeline;
+   decoder priming counted during validation but carried only by a discarded
+   negative-time skip-sample packet is not presented or fabricated as a trim.
 6. Retain packets that support that logical window, normalize packet timing to
    nanosecond offsets from the state record, encode EAP1, and write `0x0103`.
 

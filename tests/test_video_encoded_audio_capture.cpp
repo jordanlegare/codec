@@ -195,3 +195,57 @@ TEST(video_encoded_audio_capture_counts_packet_table_against_byte_limit) {
     }
   }
 }
+
+TEST(video_encoded_audio_capture_caps_priming_decode_to_retained_packets) {
+  video::FfmpegVideoIngestRequest request{};
+  request.start_ns = 0;
+  request.end_ns = 1'000'000'000;
+  request.maximum_decoded_audio_bytes = 4096;
+  detail::FfmpegEncodedAudioCaptureBoundary boundary{
+      .present = true,
+      .codec = video::EncodedAudioCodec::aac,
+      .codec_profile = 1,
+      .sample_rate = 8'000,
+      .channels = 1,
+      .decoded_frames = 3'024,
+      .first_audio_ns = 0,
+      .video_origin_ns = 0,
+      .decoder_config = {std::byte{0x15}, std::byte{0x88}},
+      .packets = {
+          detail::FfmpegCapturedEncodedPacket{
+              .pts_ns = -128'000'000,
+              .dts_ns = -128'000'000,
+              .duration_ns = 128'000'000,
+              .flags = 1,
+              .has_skip_samples = true,
+              .payload = {std::byte{0x00}},
+          },
+          detail::FfmpegCapturedEncodedPacket{
+              .pts_ns = 0,
+              .dts_ns = 0,
+              .duration_ns = 128'000'000,
+              .flags = 1,
+              .payload = {std::byte{0x01}},
+          },
+          detail::FfmpegCapturedEncodedPacket{
+              .pts_ns = 128'000'000,
+              .dts_ns = 128'000'000,
+              .duration_ns = 122'000'000,
+              .flags = 1,
+              .payload = {std::byte{0x02}},
+          },
+      },
+  };
+
+  auto captured = detail::finalize_ffmpeg_encoded_audio_capture(
+      request, std::move(boundary));
+  EXPECT_TRUE(captured);
+  if (!captured || !captured->state.has_value()) return;
+  EXPECT_FALSE(captured->error.has_value());
+  EXPECT_EQ(captured->state->decoded_frames, std::uint64_t{3'024});
+  EXPECT_EQ(captured->state->trim_start_frames, std::uint64_t{0});
+  EXPECT_EQ(captured->state->presentation_frames, std::uint64_t{2'000});
+  EXPECT_EQ(captured->end_ns, std::int64_t{250'000'000});
+  EXPECT_EQ(captured->state->packets.size(), std::size_t{2});
+  EXPECT_TRUE(video::encode_encoded_audio_state(*captured->state));
+}

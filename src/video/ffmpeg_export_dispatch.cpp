@@ -865,6 +865,12 @@ Result<std::vector<std::byte>> mux_verified_encoded_audio(
 
 #endif
 
+bool overlaps_time_filter(const RecordInfo& record,
+                          const std::optional<RecordTimeRange>& time) {
+  return !time.has_value() ||
+         (record.start_ns < time->end_ns && time->begin_ns < record.end_ns);
+}
+
 }  // namespace
 
 Result<VerifiedVideoMp4Export> export_verified_video_mp4(
@@ -883,7 +889,7 @@ Result<VerifiedVideoMp4Export> export_verified_video_mp4(
       archive,
       VideoAudioQuery{
           .stream = stream,
-          .time = query.time,
+          .time = std::nullopt,
           .maximum_results = 1,
           .maximum_encoded_bytes = query.maximum_encoded_bytes,
       });
@@ -892,7 +898,7 @@ Result<VerifiedVideoMp4Export> export_verified_video_mp4(
       archive,
       VideoAudioQuery{
           .stream = stream,
-          .time = query.time,
+          .time = std::nullopt,
           .maximum_results = 1,
           .maximum_encoded_bytes = query.maximum_encoded_bytes,
       });
@@ -901,6 +907,16 @@ Result<VerifiedVideoMp4Export> export_verified_video_mp4(
     return fail<VerifiedVideoMp4Export>(
         ErrorCode::archive_corrupt,
         "H.1 MP4 export found contradictory encoded and PCM16 audio states");
+  }
+  if (!verified_encoded_audio->empty() &&
+      !overlaps_time_filter(verified_encoded_audio->front().state_record,
+                            query.time)) {
+    verified_encoded_audio->clear();
+  }
+  if (!verified_pcm16_audio->empty() &&
+      !overlaps_time_filter(verified_pcm16_audio->front().state_record,
+                            query.time)) {
+    verified_pcm16_audio->clear();
   }
   if (verified_encoded_audio->empty() && verified_pcm16_audio->empty()) {
     return video_only;

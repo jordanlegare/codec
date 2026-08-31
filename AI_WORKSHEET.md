@@ -34,7 +34,9 @@ verification:
   sanitizer_tests: pass — run 476 sanitizer CTest
   ffmpeg_disabled: pass — run 476 configure/build/CTest/install with CODEC_ENABLE_FFMPEG_VIDEO=OFF
   install_and_package_consumer: pass — run 476 GCC, Clang, and FFmpeg-disabled installed-consumer gates
-  exact_head_ci: required on the final documentation commit and recorded by immutable PR 56 checks before merge
+  pre_review_exact_head_ci: pass — run 477 at 0c7ec4f6f1418b53e2c9db9f0a5c1c9bc2a92f02; superseded by review remediation
+  review_remediation: targeted EAP1 bounds/timing and capture/side-data tests pass locally with GCC warnings-as-errors; FFmpeg-disabled dispatch units compile
+  exact_head_ci: pending on the review-remediation head; immutable PR 56 checks must pass before merge
 ```
 
 ```text
@@ -47,7 +49,7 @@ proof:
   regression_test: new encoded-state schema/reader tests plus direct/HLS ingest and MP4 export tests prove 0x0103 writes, no new 0x0102 writes, and audiovisual output
   exactness_test: packet payloads, codec parameters/extradata, timestamps, durations, flags, and presentation window round-trip byte-for-byte through encode/decode and verified ingest/query
   compatibility_test: existing 0x0102 reader/export tests remain green; old/no-audio archives remain exportable; standalone Audio Profile and generic CODA APIs are unchanged
-  failure_path_test: malformed packet bundles, excess packet/payload limits, unsupported codec/remux, decode-validation failure, timestamp discontinuity, and provenance corruption fail closed without muting known audio
+  failure_path_test: malformed/forged packet bundles, count/table/configuration/payload limits, timestamp overflow/discontinuity, out-of-window packets, retained semantic side data, time-filtered state-form conflict, unsupported codec/remux, decode-validation failure, and provenance corruption fail closed without muting known audio
   security_test: direct/HLS source authorization and memory-only FFmpeg protocol policy remain unchanged; export performs no source re-fetch
   benchmark: fixture operation evidence proves no PCM16 state write and no AAC encoder on compatible passthrough; storage math is reported as workload-specific, not a universal throughput claim
 ```

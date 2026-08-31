@@ -119,7 +119,8 @@ ExportFixture make_export_archive(
     std::int64_t audio_start_ns = 20'000'000,
     std::int64_t audio_duration_ns = 100'000'000,
     bool with_encoded_audio = false,
-    std::uint64_t encoded_trim_start_frames = 0) {
+    std::uint64_t encoded_trim_start_frames = 0,
+    std::optional<std::int64_t> encoded_audio_start_ns = std::nullopt) {
   const auto path = test_path(name);
   std::filesystem::remove(path);
   const auto stream = codec::derive_stream_id(name);
@@ -134,7 +135,7 @@ ExportFixture make_export_archive(
       },
       0));
   auto source = writer.append(codec::RecordType::source_bytes, stream, 0,
-                              140'000'000, bytes("encoded source"));
+                              400'000'000, bytes("encoded source"));
   EXPECT_TRUE(source);
 
   const std::array starts{0LL, 40'000'000LL, 100'000'000LL};
@@ -178,6 +179,7 @@ ExportFixture make_export_archive(
 
   std::optional<codec::RecordInfo> encoded_audio_state_record;
   if (with_encoded_audio) {
+    const auto encoded_start = encoded_audio_start_ns.value_or(audio_start_ns);
     const video::EncodedAudioState encoded_state{
         .codec = video::EncodedAudioCodec::aac,
         .codec_profile = 1,
@@ -198,8 +200,8 @@ ExportFixture make_export_archive(
     auto encoded_audio = video::encode_encoded_audio_state(encoded_state);
     EXPECT_TRUE(encoded_audio);
     auto state = writer.append_raw(
-        video::video_encoded_audio_state_record_type, stream, audio_start_ns,
-        audio_start_ns + audio_duration_ns, *encoded_audio);
+        video::video_encoded_audio_state_record_type, stream, encoded_start,
+        encoded_start + audio_duration_ns, *encoded_audio);
     EXPECT_TRUE(state);
     if (state) encoded_audio_state_record = *state;
     if (state && provenanced) {
@@ -713,6 +715,28 @@ TEST(video_export_rejects_simultaneous_verified_audio_state_forms) {
               video::ffmpeg_video_export_available()
                   ? codec::ErrorCode::archive_corrupt
                   : codec::ErrorCode::model_incompatible);
+  }
+  std::filesystem::remove(fixture.path);
+}
+
+TEST(video_export_rejects_conflicting_audio_forms_outside_time_filter) {
+  const auto fixture = make_export_archive(
+      "audio-state-filtered-conflict.coda", true, true, 20'000'000,
+      100'000'000, true, 0, 200'000'000);
+  auto archive = codec::CodaArchive::open(fixture.path);
+  EXPECT_TRUE(archive);
+  auto exported = video::export_verified_video_mp4(
+      *archive,
+      video::VideoFrameQuery{
+          .stream = fixture.stream,
+          .time = codec::RecordTimeRange{.begin_ns = 0,
+                                         .end_ns = 140'000'000},
+          .maximum_results = 8,
+          .maximum_encoded_bytes = 1024 * 1024},
+      video::VideoMp4ExportLimits{.maximum_output_bytes = 1024 * 1024});
+  EXPECT_FALSE(exported);
+  if (!exported) {
+    EXPECT_EQ(exported.error().code, codec::ErrorCode::archive_corrupt);
   }
   std::filesystem::remove(fixture.path);
 }

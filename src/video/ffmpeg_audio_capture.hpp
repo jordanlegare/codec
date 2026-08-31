@@ -13,6 +13,7 @@ struct FfmpegCapturedEncodedPacket {
   std::int64_t dts_ns{};
   std::uint64_t duration_ns{};
   std::uint32_t flags{};
+  bool has_skip_samples{};
   std::vector<std::byte> payload;
 };
 
@@ -40,7 +41,10 @@ struct FfmpegCapturedEncodedAudio {
 
 Result<FfmpegCapturedEncodedAudio> finalize_ffmpeg_encoded_audio_capture(
     const FfmpegVideoIngestRequest& request,
-    const FfmpegEncodedAudioCaptureBoundary& boundary);
+    FfmpegEncodedAudioCaptureBoundary boundary);
+Result<std::uint64_t> ffmpeg_audio_timeline_difference(
+    std::int64_t first_audio_ns, std::uint64_t decoded_frames,
+    std::uint32_t sample_rate, std::int64_t chunk_start_ns);
 
 Result<void> begin_ffmpeg_audio_capture(
     const FfmpegVideoIngestRequest& request, bool enabled);

@@ -1,5 +1,6 @@
 #include <codec/profiles/video.hpp>
 
+#include <algorithm>
 #include <bit>
 #include <cstddef>
 #include <cstdint>
@@ -72,18 +73,61 @@ Result<void> validate_state(const EncodedAudioState& state,
       state.packets.empty()) {
     return fail(code, "EAP1 state has invalid audio geometry");
   }
+  constexpr std::uint64_t nanoseconds_per_second = 1'000'000'000ULL;
+  const auto seconds = state.presentation_frames / state.sample_rate;
+  const auto remainder = state.presentation_frames % state.sample_rate;
+  if (seconds > std::numeric_limits<std::uint64_t>::max() /
+                    nanoseconds_per_second) {
+    return fail(code, "EAP1 presentation duration exceeds bounds");
+  }
+  const auto presentation_ns =
+      seconds * nanoseconds_per_second +
+      (remainder * nanoseconds_per_second) / state.sample_rate;
+  if (presentation_ns == 0U ||
+      presentation_ns > static_cast<std::uint64_t>(
+                            std::numeric_limits<std::int64_t>::max())) {
+    return fail(code, "EAP1 presentation duration is not representable");
+  }
   bool have_previous_dts = false;
   std::int64_t previous_dts = 0;
+  std::int64_t previous_pts = 0;
+  std::int64_t latest_end = 0;
   for (const auto& packet : state.packets) {
     if ((packet.flags & ~kSupportedPacketFlags) != 0U) {
       return fail(code, "EAP1 packet contains unsupported flags");
     }
     if (packet.duration_ns == 0U ||
-        (have_previous_dts && packet.dts_offset_ns < previous_dts)) {
+        packet.duration_ns > static_cast<std::uint64_t>(
+                                 std::numeric_limits<std::int64_t>::max())) {
       return fail(code, "EAP1 packet timing is invalid");
     }
+    const auto duration = static_cast<std::int64_t>(packet.duration_ns);
+    if (packet.pts_offset_ns >
+            std::numeric_limits<std::int64_t>::max() - duration ||
+        packet.dts_offset_ns >
+            std::numeric_limits<std::int64_t>::max() - duration) {
+      return fail(code, "EAP1 packet timing exceeds bounds");
+    }
+    const auto packet_end = packet.pts_offset_ns + duration;
+    if (packet.dts_offset_ns > packet.pts_offset_ns || packet_end <= 0 ||
+        packet.pts_offset_ns >= static_cast<std::int64_t>(presentation_ns) ||
+        (have_previous_dts &&
+         (packet.dts_offset_ns < previous_dts ||
+          packet.pts_offset_ns < previous_pts ||
+          (latest_end < std::numeric_limits<std::int64_t>::max() &&
+           packet.pts_offset_ns > latest_end + 1)))) {
+      return fail(code, "EAP1 packet timing is invalid");
+    }
+    if (!have_previous_dts && packet.pts_offset_ns > 0) {
+      return fail(code, "EAP1 packets do not support the presentation start");
+    }
     previous_dts = packet.dts_offset_ns;
+    previous_pts = packet.pts_offset_ns;
+    latest_end = std::max(latest_end, packet_end);
     have_previous_dts = true;
+  }
+  if (latest_end < static_cast<std::int64_t>(presentation_ns)) {
+    return fail(code, "EAP1 packets do not support the presentation end");
   }
   return {};
 }
@@ -180,6 +224,13 @@ Result<EncodedAudioState> decode_encoded_audio_state(
     return fail<EncodedAudioState>(ErrorCode::decode,
                                    "EAP1 decoder configuration is truncated");
   }
+  const auto packet_region_bytes =
+      payload.size() - kHeaderSize - static_cast<std::size_t>(config_size);
+  if (packet_count > packet_region_bytes / (kPacketHeaderSize + 1U)) {
+    return fail<EncodedAudioState>(
+        ErrorCode::decode,
+        "EAP1 packet count cannot fit in the encoded payload");
+  }
 
   EncodedAudioState state{
       .codec = static_cast<EncodedAudioCodec>(get_u16(payload, 6U)),
@@ -205,12 +256,30 @@ Result<EncodedAudioState> decode_encoded_audio_state(
                                      "EAP1 packet header is truncated");
     }
     const auto packet_size = get_u32(payload, offset + 28U);
-    if (packet_size == 0U || packet_size > limits.maximum_packet_bytes ||
+    if (packet_size > limits.maximum_packet_bytes) {
+      return fail<EncodedAudioState>(
+          ErrorCode::resource_exhausted,
+          "EAP1 packet exceeds the configured individual limit");
+    }
+    if (packet_size == 0U ||
         packet_size > payload.size() - offset - kPacketHeaderSize ||
         actual_packet_bytes > std::numeric_limits<std::uint64_t>::max() -
                                   packet_size) {
       return fail<EncodedAudioState>(ErrorCode::decode,
                                      "EAP1 packet payload is invalid");
+    }
+    if (actual_packet_bytes > limits.maximum_payload_bytes ||
+        packet_size >
+            limits.maximum_payload_bytes - actual_packet_bytes) {
+      return fail<EncodedAudioState>(
+          ErrorCode::resource_exhausted,
+          "EAP1 packet payloads exceed configured limits");
+    }
+    if (actual_packet_bytes > declared_packet_bytes ||
+        packet_size > declared_packet_bytes - actual_packet_bytes) {
+      return fail<EncodedAudioState>(
+          ErrorCode::decode,
+          "EAP1 packet payloads exceed the declared aggregate size");
     }
     EncodedAudioPacket packet{
         .pts_offset_ns =

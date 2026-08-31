@@ -46,9 +46,10 @@ to reproduce the same packetization.
   `audio_provenance`) remain generic evidence handles and require no CLI JSON
   change.
 - `maximum_decoded_audio_bytes` and its existing CLI spelling remain accepted
-  for source/API compatibility. For the new path this value bounds aggregate
-  captured packet/configuration bytes. The legacy name is documented; a
-  separate CLI migration is outside this change.
+  for source/API compatibility. For the new path this value bounds the retained
+  EAP1 fixed header, packet table, packet payloads, and decoder configuration;
+  packet count also has an independent one-million-packet ceiling. The legacy
+  name is documented; a separate CLI migration is outside this change.
 
 ## EAP1 state model
 
@@ -102,7 +103,15 @@ trailing bytes are rejected.
 The record interval is the logical presentation window. Its duration must
 match `presentation_frames / sample_rate` within one nanosecond of integer
 rounding. `trim_start_frames + presentation_frames` must not exceed
-`decoded_frames`.
+`decoded_frames`. Packet PTS/DTS arithmetic must be representable, ordered, and
+support the complete logical window without gaps; wholly out-of-window packets
+are invalid.
+
+EAP1 v1 does not persist FFmpeg packet side data. Skip/discard metadata on a
+packet wholly before the logical window may be discarded with that packet.
+Retained skip/discard metadata, configuration-changing side data, or any other
+unsupported side data produces an explicit profile incompatibility rather than
+silently changing the presentation.
 
 ## Ingest architecture
 
@@ -192,6 +201,8 @@ Tests must establish behavior rather than claim universal benchmarks:
 
 - new ingest writes `0x0103` and writes no `0x0102`;
 - EAP1 packet/configuration bytes round-trip exactly;
+- forged counts and aggregate sizes cannot reserve or copy beyond caller
+  limits, and fixed header/table bytes count against ingest bounds;
 - the fixture EAP1 record is smaller than its validated PCM16-equivalent byte
   count;
 - decoded audio validation does not create a resampler or aggregate sample

@@ -377,7 +377,7 @@ codec video ingest \
   [--maximum-hls-total-bytes N]
 ```
 
-`--source`, `--archive`, `--label`, `--start-ns`, and `--end-ns` are required. The interval must have positive duration. The default output layout is `yuv420p8`; the default source, decoded-video, and encoded-audio working-set limits are 1 GiB each, and the default frame limit is 4096. The retained `--maximum-decoded-audio-bytes` spelling is a compatibility name: new ingest uses it to bound aggregate selected AAC packet and decoder-configuration bytes, not an accumulated PCM buffer. HLS defaults allow at most 256 accepted secondary snapshots, 64 MiB per resource, and 1 GiB in aggregate.
+`--source`, `--archive`, `--label`, `--start-ns`, and `--end-ns` are required. The interval must have positive duration. The default output layout is `yuv420p8`; the default source, decoded-video, and encoded-audio working-set limits are 1 GiB each, and the default frame limit is 4096. The retained `--maximum-decoded-audio-bytes` spelling is a compatibility name: new ingest uses it to bound the retained EAP1 header, packet table, AAC packet payloads, and decoder configuration, not an accumulated PCM buffer. Packet count has an independent one-million-packet ceiling. HLS defaults allow at most 256 accepted secondary snapshots, 64 MiB per resource, and 1 GiB in aggregate.
 
 On successful S1 canonicalization, the command exits `0` and prints JSON including `stream_id`, `layout`, `source_bytes`, `frames`, `provenance`, `secondary_sources`, `secondary_source_bytes`, and `"state_exact":true`. If S0 capture succeeds but media demux/decode/canonicalization fails, CODEC finalizes an archive containing every exact S0 object accepted before failure, reports `profile_error` in JSON, and exits `1`. With an FFmpeg-disabled build, the command fails with `model_incompatible` before archive creation.
 
@@ -418,6 +418,9 @@ leading trim that cannot be represented by packet passthrough fails explicitly
 instead of silently muting or changing the audio. Legacy verified `0x0102`
 archives retain their existing PCM16-to-AAC export path. An archive containing
 both verified forms for one stream is contradictory and fails closed.
+EAP1 v1 does not persist FFmpeg packet side data: retained AAC skip/discard
+metadata or other unsupported/configuration-changing side data causes an
+explicit profile incompatibility instead of being silently dropped.
 
 At 48 kHz stereo, PCM16 is 192,000 bytes/second (691.2 MB/hour), while a
 128-kbit/s compressed stream is 57.6 MB/hour before the bounded packet table,

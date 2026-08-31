@@ -606,6 +606,7 @@ Result<FfmpegVideoIngestReport> ingest_video_ffmpeg(
     }
     auto encoded_audio = encode_encoded_audio_state(*captured_audio.state);
     if (!encoded_audio) return finish_profile_error(encoded_audio.error());
+    captured_audio.state.reset();
     auto audio_state = writer.append_raw(
         video_encoded_audio_state_record_type, request.descriptor.id,
         captured_audio.start_ns, captured_audio.end_ns, *encoded_audio);

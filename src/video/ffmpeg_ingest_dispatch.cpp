@@ -24,6 +24,9 @@ extern "C" {
 namespace {
 
 constexpr AVRational kNanosecondTimeBase{1, 1'000'000'000};
+constexpr std::uint64_t kEncodedAudioHeaderBytes = 64U;
+constexpr std::uint64_t kEncodedAudioPacketHeaderBytes = 32U;
+constexpr std::size_t kMaximumEncodedAudioPackets = 1'000'000U;
 
 struct HlsDecodeBoundary {
   bool active{};
@@ -166,7 +169,9 @@ void configure_audio_decoder(AVFormatContext* context) {
   }
   const auto configuration_bytes =
       static_cast<std::uint64_t>(stream->codecpar->extradata_size);
-  if (configuration_bytes > audio_boundary.maximum_bytes) {
+  if (audio_boundary.maximum_bytes < kEncodedAudioHeaderBytes ||
+      configuration_bytes >
+          audio_boundary.maximum_bytes - kEncodedAudioHeaderBytes) {
     remember_audio_error(codec::ErrorCode::resource_exhausted,
                          "encoded audio decoder configuration exceeds the configured limit");
     return;
@@ -178,7 +183,8 @@ void configure_audio_decoder(AVFormatContext* context) {
     audio_boundary.decoder_config.assign(
         configuration, configuration + stream->codecpar->extradata_size);
   }
-  audio_boundary.captured_bytes = configuration_bytes;
+  audio_boundary.captured_bytes =
+      kEncodedAudioHeaderBytes + configuration_bytes;
 
   auto* codec_context = avcodec_alloc_context3(decoder);
   if (codec_context == nullptr) {
@@ -257,23 +263,18 @@ void validate_decoded_audio(const AVFrame& frame) {
   if (!audio_boundary.first_audio_ns.has_value()) {
     audio_boundary.first_audio_ns = chunk_start_ns;
   } else {
-    if (audio_boundary.decoded_frames >
-        static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) {
-      remember_audio_error(codec::ErrorCode::resource_exhausted,
-                           "decoded audio frame count exceeds time-conversion bounds");
+    auto difference =
+        codec::profiles::video::detail::ffmpeg_audio_timeline_difference(
+            *audio_boundary.first_audio_ns, audio_boundary.decoded_frames,
+            audio_boundary.sample_rate, chunk_start_ns);
+    if (!difference) {
+      remember_audio_error(difference.error().code,
+                           difference.error().message);
       return;
     }
-    const auto expected =
-        *audio_boundary.first_audio_ns +
-        av_rescale_rnd(static_cast<std::int64_t>(audio_boundary.decoded_frames),
-                       1'000'000'000LL, audio_boundary.sample_rate,
-                       AV_ROUND_DOWN);
     const auto sample_tolerance = av_rescale_rnd(
         1, 1'000'000'000LL, audio_boundary.sample_rate, AV_ROUND_UP);
-    const auto difference = chunk_start_ns >= expected
-                                ? chunk_start_ns - expected
-                                : expected - chunk_start_ns;
-    if (difference > sample_tolerance) {
+    if (*difference > static_cast<std::uint64_t>(sample_tolerance)) {
       remember_audio_error(codec::ErrorCode::decode,
                            "decoded audio timeline is discontinuous");
       return;
@@ -339,10 +340,32 @@ void capture_encoded_audio_packet(const AVPacket& packet) {
                          "selected audio packet lacks usable timestamps");
     return;
   }
+  bool has_skip_samples = false;
+  if (packet.side_data_elems < 0 ||
+      (packet.side_data_elems > 0 && packet.side_data == nullptr)) {
+    remember_audio_error(codec::ErrorCode::decode,
+                         "selected audio packet has invalid side data");
+    return;
+  }
+  for (std::size_t index = 0U;
+       index < static_cast<std::size_t>(packet.side_data_elems); ++index) {
+    if (packet.side_data[index].type == AV_PKT_DATA_SKIP_SAMPLES) {
+      has_skip_samples = true;
+      continue;
+    }
+    remember_audio_error(
+        codec::ErrorCode::model_incompatible,
+        "selected AAC packet has side data unsupported by EAP1 v1");
+    return;
+  }
   const auto payload_bytes = static_cast<std::uint64_t>(packet.size);
-  if (audio_boundary.captured_bytes > audio_boundary.maximum_bytes ||
-      payload_bytes >
-          audio_boundary.maximum_bytes - audio_boundary.captured_bytes) {
+  if (audio_boundary.packets.size() >= kMaximumEncodedAudioPackets ||
+      audio_boundary.captured_bytes > audio_boundary.maximum_bytes ||
+      kEncodedAudioPacketHeaderBytes >
+          audio_boundary.maximum_bytes - audio_boundary.captured_bytes ||
+      payload_bytes > audio_boundary.maximum_bytes -
+                              audio_boundary.captured_bytes -
+                              kEncodedAudioPacketHeaderBytes) {
     remember_audio_error(
         codec::ErrorCode::resource_exhausted,
         "encoded audio exceeds the configured aggregate byte limit");
@@ -386,9 +409,11 @@ void capture_encoded_audio_packet(const AVPacket& packet) {
           .dts_ns = dts_ns,
           .duration_ns = static_cast<std::uint64_t>(duration_ns),
           .flags = static_cast<std::uint32_t>(packet.flags) & 0x1fU,
+          .has_skip_samples = has_skip_samples,
           .payload = std::move(payload),
       });
-  audio_boundary.captured_bytes += payload_bytes;
+  audio_boundary.captured_bytes +=
+      kEncodedAudioPacketHeaderBytes + payload_bytes;
 }
 
 }  // namespace
@@ -678,13 +703,15 @@ FfmpegCapturedEncodedAudio take_ffmpeg_audio_capture(
       .packets = std::move(audio_boundary.packets),
       .error = audio_boundary.error,
   };
-  auto finalized = finalize_ffmpeg_encoded_audio_capture(request, boundary);
+  const bool audio_present = boundary.present;
+  auto finalized =
+      finalize_ffmpeg_encoded_audio_capture(request, std::move(boundary));
   FfmpegCapturedEncodedAudio result;
   if (finalized) {
     result = std::move(*finalized);
   } else {
     result = FfmpegCapturedEncodedAudio{
-        .present = boundary.present,
+        .present = audio_present,
         .state = std::nullopt,
         .start_ns = 0,
         .end_ns = 0,

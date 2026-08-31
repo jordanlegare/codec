@@ -25,6 +25,7 @@ if(CODEC_ENABLE_FFMPEG_VIDEO)
   pkg_check_modules(AVCODEC REQUIRED IMPORTED_TARGET libavcodec)
   pkg_check_modules(AVUTIL REQUIRED IMPORTED_TARGET libavutil)
   pkg_check_modules(SWSCALE REQUIRED IMPORTED_TARGET libswscale)
+  pkg_check_modules(SWRESAMPLE REQUIRED IMPORTED_TARGET libswresample)
   set(CODEC_HAS_FFMPEG_VIDEO ON)
 endif()
 
@@ -104,7 +105,8 @@ if(CODEC_HAS_FFMPEG_VIDEO)
     PkgConfig::AVFORMAT
     PkgConfig::AVCODEC
     PkgConfig::AVUTIL
-    PkgConfig::SWSCALE)
+    PkgConfig::SWSCALE
+    PkgConfig::SWRESAMPLE)
   message(STATUS "CODEC FFmpeg Video Profile ingest backend: enabled")
 else()
   message(STATUS "CODEC FFmpeg Video Profile ingest backend: unavailable (set CODEC_ENABLE_FFMPEG_VIDEO=ON to enable)")

@@ -395,6 +395,11 @@ inline void print_group_report(
             << ",\"provenance\":" << report.provenance.size()
             << ",\"secondary_sources\":" << report.secondary_sources.size()
             << ",\"secondary_source_bytes\":" << secondary_source_bytes
+            << ",\"audio_present\":"
+            << (report.audio_present ? "true" : "false")
+            << ",\"audio_state_exact\":"
+            << (report.audio_present && report.audio_state_exact() ? "true"
+                                                                   : "false")
             << ",\"state_exact\":"
             << (report.state_exact() ? "true" : "false")
             << ",\"preserved\":true";

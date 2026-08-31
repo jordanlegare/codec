@@ -57,6 +57,7 @@ void usage(std::ostream& output) {
       << "    --layout gray8|rgb24|rgba32|yuv420p8\n"
       << "    --maximum-source-bytes N\n"
       << "    --maximum-decoded-bytes N\n"
+      << "    --maximum-decoded-audio-bytes N\n"
       << "    --maximum-frames N\n"
       << "    --maximum-hls-resources N\n"
       << "    --maximum-hls-resource-bytes N\n"
@@ -441,6 +442,8 @@ int video_export_command(const Strings& arguments) {
             << "\",\"payload_type\":\""
             << codec::detail::json_escape(exported->output.payload_type)
             << "\",\"frames\":" << exported->state_records.size()
+            << ",\"audio\":"
+            << (exported->audio_state_record.has_value() ? "true" : "false")
             << ",\"bytes\":" << exported->output.payload.size() << "}\n";
   return 0;
 }
@@ -487,6 +490,7 @@ int video_command(const Strings& arguments) {
 
   std::uint64_t maximum_source_bytes = 1024ULL * 1024ULL * 1024ULL;
   std::uint64_t maximum_decoded_bytes = 1024ULL * 1024ULL * 1024ULL;
+  std::uint64_t maximum_decoded_audio_bytes = 1024ULL * 1024ULL * 1024ULL;
   std::size_t maximum_frames = 4096U;
   std::size_t maximum_hls_resources = 256U;
   std::uint64_t maximum_hls_resource_bytes = 64ULL * 1024ULL * 1024ULL;
@@ -500,6 +504,13 @@ int video_command(const Strings& arguments) {
   if (const auto value = option(tail, "--maximum-decoded-bytes")) {
     if (!parse_decimal(*value, maximum_decoded_bytes) || maximum_decoded_bytes == 0U) {
       std::cerr << "codec: video ingest --maximum-decoded-bytes must be a positive integer\n";
+      return 2;
+    }
+  }
+  if (const auto value = option(tail, "--maximum-decoded-audio-bytes")) {
+    if (!parse_decimal(*value, maximum_decoded_audio_bytes) ||
+        maximum_decoded_audio_bytes == 0U) {
+      std::cerr << "codec: video ingest --maximum-decoded-audio-bytes must be a positive integer\n";
       return 2;
     }
   }
@@ -557,6 +568,7 @@ int video_command(const Strings& arguments) {
       .output_layout = *layout,
       .maximum_source_bytes = maximum_source_bytes,
       .maximum_decoded_bytes = maximum_decoded_bytes,
+      .maximum_decoded_audio_bytes = maximum_decoded_audio_bytes,
       .maximum_frames = maximum_frames,
       .maximum_hls_resources = maximum_hls_resources,
       .maximum_hls_resource_bytes = maximum_hls_resource_bytes,
@@ -586,6 +598,11 @@ int video_command(const Strings& arguments) {
             << ",\"secondary_sources\":"
             << report->secondary_sources.size()
             << ",\"secondary_source_bytes\":" << secondary_source_bytes
+            << ",\"audio_present\":"
+            << (report->audio_present ? "true" : "false")
+            << ",\"audio_state_exact\":"
+            << (report->audio_present && report->audio_state_exact() ? "true"
+                                                                     : "false")
             << ",\"state_exact\":"
             << (report->state_exact() ? "true" : "false");
   if (report->profile_error) {

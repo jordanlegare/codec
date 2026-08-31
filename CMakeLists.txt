@@ -212,6 +212,7 @@ if(CODEC_BUILD_TESTS)
     tests/test_transport_streaming_repair.cpp
     tests/test_transport_xor_recovery.cpp
     tests/test_video_audio_state_reader.cpp
+    tests/test_video_audio_state_reader_strict.cpp
     tests/test_video_export.cpp
     tests/test_video_ffmpeg_ingest.cpp
     tests/test_video_ffmpeg_ingest_limits.cpp

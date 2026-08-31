@@ -524,6 +524,7 @@ TEST(video_export_muxes_verified_pcm16_as_aac) {
     EXPECT_TRUE(contains_ascii(exported->output.payload, "soun"));
     EXPECT_TRUE(exported->audio_state_record.has_value());
     EXPECT_TRUE(exported->audio_provenance.has_value());
+    EXPECT_FALSE(exported->audio_packet_passthrough);
     if (exported->audio_state_record.has_value() && fixture.audio_state.has_value()) {
       EXPECT_EQ(exported->audio_state_record->hash, fixture.audio_state->hash);
     }
@@ -619,6 +620,7 @@ TEST(video_export_passthrough_keeps_ingested_aac_packets_byte_exact) {
   EXPECT_TRUE(exported);
   if (exported) {
     EXPECT_TRUE(exported->audio_state_record.has_value());
+    EXPECT_TRUE(exported->audio_packet_passthrough);
     if (exported->audio_state_record.has_value()) {
       EXPECT_EQ(exported->audio_state_record->type_code(),
                 video::video_encoded_audio_state_record_type);
@@ -730,10 +732,7 @@ TEST(video_export_rejects_encoded_audio_leading_trim) {
       video::VideoMp4ExportLimits{.maximum_output_bytes = 1024 * 1024});
   EXPECT_FALSE(exported);
   if (!exported) {
-    EXPECT_EQ(exported.error().code,
-              video::ffmpeg_video_export_available()
-                  ? codec::ErrorCode::archive_corrupt
-                  : codec::ErrorCode::model_incompatible);
+    EXPECT_EQ(exported.error().code, codec::ErrorCode::model_incompatible);
   }
   std::filesystem::remove(fixture.path);
 }

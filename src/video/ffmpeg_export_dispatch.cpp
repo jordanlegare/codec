@@ -169,7 +169,7 @@ AVSampleFormat choose_aac_sample_format(const AVCodec& codec) {
 #endif
 }
 
-Result<std::vector<std::byte>> mux_verified_audio(
+Result<std::vector<std::byte>> mux_verified_pcm16_audio(
     std::span<const std::byte> video_mp4,
     const VerifiedVideoPcm16Audio& audio,
     std::int64_t video_origin_ns,
@@ -579,6 +579,290 @@ Result<std::vector<std::byte>> mux_verified_audio(
   return dynamic_output.close(maximum_output_bytes);
 }
 
+Result<std::vector<std::byte>> mux_verified_encoded_audio(
+    std::span<const std::byte> video_mp4,
+    const VerifiedVideoEncodedAudio& audio,
+    std::int64_t video_origin_ns,
+    std::uint64_t maximum_output_bytes) {
+  if (audio.state.codec != EncodedAudioCodec::aac ||
+      audio.state.channels == 0U || audio.state.channels > 2U ||
+      audio.state.sample_rate == 0U ||
+      audio.state.sample_rate >
+          static_cast<std::uint32_t>(std::numeric_limits<int>::max()) ||
+      audio.state.packets.empty() ||
+      audio.state.decoder_config.empty()) {
+    return fail<std::vector<std::byte>>(
+        ErrorCode::archive_corrupt,
+        "verified encoded video audio is invalid before MP4 mux");
+  }
+  if (audio.state.trim_start_frames != 0U) {
+    return fail<std::vector<std::byte>>(
+        ErrorCode::model_incompatible,
+        "encoded AAC leading trim cannot be represented by H.1 MP4 passthrough");
+  }
+  if (audio.state.decoder_config.size() >
+      static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+    return fail<std::vector<std::byte>>(
+        ErrorCode::resource_exhausted,
+        "encoded AAC decoder configuration exceeds FFmpeg bounds");
+  }
+
+  auto presentation_duration =
+      nonnegative_delta(audio.state_record.end_ns,
+                        audio.state_record.start_ns,
+                        "encoded AAC presentation duration");
+  if (!presentation_duration) return presentation_duration.error();
+  if (*presentation_duration == 0) {
+    return fail<std::vector<std::byte>>(
+        ErrorCode::archive_corrupt,
+        "encoded AAC presentation duration is empty");
+  }
+  auto audio_delta = nonnegative_delta(audio.state_record.start_ns,
+                                       video_origin_ns,
+                                       "video MP4 encoded-audio timestamp");
+  if (!audio_delta) return audio_delta.error();
+
+  MemoryInput memory{video_mp4, 0U};
+  constexpr int avio_buffer_bytes = 32 * 1024;
+  auto* avio_buffer = static_cast<std::uint8_t*>(av_malloc(avio_buffer_bytes));
+  if (avio_buffer == nullptr) {
+    return fail<std::vector<std::byte>>(
+        ErrorCode::resource_exhausted,
+        "cannot allocate encoded-audio MP4 remux input buffer");
+  }
+  AvioPtr avio{avio_alloc_context(avio_buffer, avio_buffer_bytes, 0, &memory,
+                                  &memory_read, nullptr, &memory_seek)};
+  if (!avio) {
+    av_free(avio_buffer);
+    return fail<std::vector<std::byte>>(
+        ErrorCode::resource_exhausted,
+        "cannot create encoded-audio MP4 remux input context");
+  }
+
+  AVFormatContext* input_raw = avformat_alloc_context();
+  if (input_raw == nullptr) {
+    return fail<std::vector<std::byte>>(
+        ErrorCode::resource_exhausted,
+        "cannot allocate encoded-audio MP4 remux format context");
+  }
+  input_raw->pb = avio.get();
+  input_raw->flags |= AVFMT_FLAG_CUSTOM_IO;
+  input_raw->protocol_whitelist = av_strdup("codec-memory-only");
+  if (input_raw->protocol_whitelist == nullptr) {
+    avformat_free_context(input_raw);
+    return fail<std::vector<std::byte>>(
+        ErrorCode::resource_exhausted,
+        "cannot allocate encoded-audio MP4 remux protocol policy");
+  }
+  const auto input_opened =
+      avformat_open_input(&input_raw, nullptr, nullptr, nullptr);
+  if (input_opened < 0) {
+    if (input_raw != nullptr) avformat_free_context(input_raw);
+    return ffmpeg_failure<std::vector<std::byte>>(
+        ErrorCode::decode,
+        "cannot reopen generated MP4 for encoded-audio mux", input_opened);
+  }
+  InputFormatPtr input{input_raw};
+  const auto stream_info = avformat_find_stream_info(input.get(), nullptr);
+  if (stream_info < 0) {
+    return ffmpeg_failure<std::vector<std::byte>>(
+        ErrorCode::decode,
+        "cannot inspect generated MP4 for encoded-audio mux", stream_info);
+  }
+  const auto video_index =
+      av_find_best_stream(input.get(), AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
+  if (video_index < 0 ||
+      static_cast<unsigned>(video_index) >= input->nb_streams ||
+      input->streams[video_index] == nullptr) {
+    return fail<std::vector<std::byte>>(
+        ErrorCode::decode,
+        "generated MP4 has no video stream for encoded-audio mux");
+  }
+  AVStream* input_video = input->streams[video_index];
+
+  AVFormatContext* output_raw = nullptr;
+  const auto format_result =
+      avformat_alloc_output_context2(&output_raw, nullptr, "mp4", nullptr);
+  if (format_result < 0 || output_raw == nullptr) {
+    return ffmpeg_failure<std::vector<std::byte>>(
+        ErrorCode::model_incompatible,
+        "FFmpeg MP4 muxer is unavailable for encoded-audio export",
+        format_result);
+  }
+  std::unique_ptr<AVFormatContext, FormatDeleter> output{output_raw};
+
+  AVStream* output_video = avformat_new_stream(output.get(), nullptr);
+  if (output_video == nullptr) {
+    return fail<std::vector<std::byte>>(
+        ErrorCode::internal,
+        "cannot allocate encoded-audio remuxed MP4 video stream");
+  }
+  const auto copied_video =
+      avcodec_parameters_copy(output_video->codecpar, input_video->codecpar);
+  if (copied_video < 0) {
+    return ffmpeg_failure<std::vector<std::byte>>(
+        ErrorCode::internal,
+        "cannot copy encoded-audio MP4 video stream parameters",
+        copied_video);
+  }
+  output_video->codecpar->codec_tag = 0;
+  output_video->time_base = input_video->time_base;
+
+  AVStream* output_audio = avformat_new_stream(output.get(), nullptr);
+  if (output_audio == nullptr || output_audio->codecpar == nullptr) {
+    return fail<std::vector<std::byte>>(
+        ErrorCode::internal,
+        "cannot allocate encoded-audio MP4 audio stream");
+  }
+  output_audio->time_base =
+      AVRational{1, static_cast<int>(audio.state.sample_rate)};
+  output_audio->codecpar->codec_type = AVMEDIA_TYPE_AUDIO;
+  output_audio->codecpar->codec_id = AV_CODEC_ID_AAC;
+  output_audio->codecpar->codec_tag = 0;
+  output_audio->codecpar->format = AV_SAMPLE_FMT_FLTP;
+  output_audio->codecpar->sample_rate =
+      static_cast<int>(audio.state.sample_rate);
+  output_audio->codecpar->profile = audio.state.codec_profile;
+  output_audio->codecpar->frame_size = 1024;
+  av_channel_layout_default(&output_audio->codecpar->ch_layout,
+                            static_cast<int>(audio.state.channels));
+  const auto config_size = static_cast<int>(audio.state.decoder_config.size());
+  output_audio->codecpar->extradata = static_cast<std::uint8_t*>(
+      av_mallocz(static_cast<std::size_t>(config_size) +
+                 AV_INPUT_BUFFER_PADDING_SIZE));
+  if (output_audio->codecpar->extradata == nullptr) {
+    return fail<std::vector<std::byte>>(
+        ErrorCode::resource_exhausted,
+        "cannot allocate encoded AAC decoder configuration");
+  }
+  std::memcpy(output_audio->codecpar->extradata,
+              audio.state.decoder_config.data(),
+              audio.state.decoder_config.size());
+  output_audio->codecpar->extradata_size = config_size;
+
+  DynamicAvio dynamic_output{output.get()};
+  auto opened_output = dynamic_output.open();
+  if (!opened_output) return opened_output.error();
+  const auto header = avformat_write_header(output.get(), nullptr);
+  if (header < 0) {
+    return ffmpeg_failure<std::vector<std::byte>>(
+        ErrorCode::model_incompatible,
+        "cannot write encoded-audio MP4 header", header);
+  }
+  auto header_bound = dynamic_output.require_within(maximum_output_bytes);
+  if (!header_bound) return header_bound.error();
+
+  std::unique_ptr<AVPacket, PacketDeleter> packet{av_packet_alloc()};
+  if (!packet) {
+    return fail<std::vector<std::byte>>(
+        ErrorCode::resource_exhausted,
+        "cannot allocate encoded-audio MP4 remux packet");
+  }
+  for (;;) {
+    const auto read = av_read_frame(input.get(), packet.get());
+    if (read == AVERROR_EOF) break;
+    if (read < 0) {
+      return ffmpeg_failure<std::vector<std::byte>>(
+          ErrorCode::decode,
+          "cannot read generated MP4 video packet for encoded-audio mux",
+          read);
+    }
+    if (packet->stream_index == video_index) {
+      av_packet_rescale_ts(packet.get(), input_video->time_base,
+                           output_video->time_base);
+      packet->stream_index = output_video->index;
+      packet->pos = -1;
+      const auto written = av_write_frame(output.get(), packet.get());
+      av_packet_unref(packet.get());
+      if (written < 0) {
+        return ffmpeg_failure<std::vector<std::byte>>(
+            ErrorCode::internal,
+            "cannot write encoded-audio remuxed MP4 video packet", written);
+      }
+      auto bound = dynamic_output.require_within(maximum_output_bytes);
+      if (!bound) return bound.error();
+    } else {
+      av_packet_unref(packet.get());
+    }
+  }
+
+  for (const auto& encoded_packet : audio.state.packets) {
+    if (encoded_packet.payload.empty() ||
+        encoded_packet.payload.size() >
+            static_cast<std::size_t>(std::numeric_limits<int>::max()) ||
+        encoded_packet.pts_offset_ns < 0 ||
+        encoded_packet.dts_offset_ns < 0 ||
+        encoded_packet.pts_offset_ns >= *presentation_duration) {
+      return fail<std::vector<std::byte>>(
+          encoded_packet.pts_offset_ns < 0 ||
+                  encoded_packet.dts_offset_ns < 0
+              ? ErrorCode::model_incompatible
+              : ErrorCode::archive_corrupt,
+          "encoded AAC packet timing cannot be represented by MP4 passthrough");
+    }
+    if (*audio_delta > std::numeric_limits<std::int64_t>::max() -
+                           encoded_packet.pts_offset_ns ||
+        *audio_delta > std::numeric_limits<std::int64_t>::max() -
+                           encoded_packet.dts_offset_ns) {
+      return fail<std::vector<std::byte>>(
+          ErrorCode::resource_exhausted,
+          "encoded AAC packet timestamp exceeds MP4 bounds");
+    }
+    const auto packet_pts_ns = *audio_delta + encoded_packet.pts_offset_ns;
+    const auto packet_dts_ns = *audio_delta + encoded_packet.dts_offset_ns;
+    const auto remaining_ns = static_cast<std::uint64_t>(
+        *presentation_duration - encoded_packet.pts_offset_ns);
+    const auto packet_duration_ns =
+        std::min(encoded_packet.duration_ns, remaining_ns);
+    if (packet_duration_ns == 0U ||
+        packet_duration_ns > static_cast<std::uint64_t>(
+                                 std::numeric_limits<std::int64_t>::max())) {
+      return fail<std::vector<std::byte>>(
+          ErrorCode::archive_corrupt,
+          "encoded AAC packet has invalid presentation duration");
+    }
+
+    const auto allocated = av_new_packet(
+        packet.get(), static_cast<int>(encoded_packet.payload.size()));
+    if (allocated < 0) {
+      return ffmpeg_failure<std::vector<std::byte>>(
+          ErrorCode::resource_exhausted,
+          "cannot allocate encoded AAC MP4 packet", allocated);
+    }
+    std::memcpy(packet->data, encoded_packet.payload.data(),
+                encoded_packet.payload.size());
+    packet->pts = av_rescale_q(packet_pts_ns, kNanoseconds,
+                               output_audio->time_base);
+    packet->dts = av_rescale_q(packet_dts_ns, kNanoseconds,
+                               output_audio->time_base);
+    packet->duration = av_rescale_q(
+        static_cast<std::int64_t>(packet_duration_ns), kNanoseconds,
+        output_audio->time_base);
+    packet->flags = static_cast<int>(encoded_packet.flags);
+    packet->stream_index = output_audio->index;
+    packet->pos = -1;
+    const auto written = av_write_frame(output.get(), packet.get());
+    av_packet_unref(packet.get());
+    if (written < 0) {
+      return ffmpeg_failure<std::vector<std::byte>>(
+          ErrorCode::internal,
+          "cannot write encoded AAC MP4 packet", written);
+    }
+    auto bound = dynamic_output.require_within(maximum_output_bytes);
+    if (!bound) return bound.error();
+  }
+
+  const auto trailer = av_write_trailer(output.get());
+  if (trailer < 0) {
+    return ffmpeg_failure<std::vector<std::byte>>(
+        ErrorCode::internal,
+        "cannot finalize encoded-audio MP4", trailer);
+  }
+  auto trailer_bound = dynamic_output.require_within(maximum_output_bytes);
+  if (!trailer_bound) return trailer_bound.error();
+  return dynamic_output.close(maximum_output_bytes);
+}
+
 #endif
 
 }  // namespace
@@ -595,7 +879,7 @@ Result<VerifiedVideoMp4Export> export_verified_video_mp4(
         "verified MP4 export returned no video state evidence");
   }
   const auto stream = video_only->state_records.front().stream;
-  auto verified_audio = query_verified_video_pcm16_audio(
+  auto verified_encoded_audio = query_verified_video_encoded_audio(
       archive,
       VideoAudioQuery{
           .stream = stream,
@@ -603,12 +887,29 @@ Result<VerifiedVideoMp4Export> export_verified_video_mp4(
           .maximum_results = 1,
           .maximum_encoded_bytes = query.maximum_encoded_bytes,
       });
-  if (!verified_audio) return verified_audio.error();
-  if (verified_audio->empty()) return video_only;
-  if (verified_audio->size() != 1U) {
+  if (!verified_encoded_audio) return verified_encoded_audio.error();
+  auto verified_pcm16_audio = query_verified_video_pcm16_audio(
+      archive,
+      VideoAudioQuery{
+          .stream = stream,
+          .time = query.time,
+          .maximum_results = 1,
+          .maximum_encoded_bytes = query.maximum_encoded_bytes,
+      });
+  if (!verified_pcm16_audio) return verified_pcm16_audio.error();
+  if (!verified_encoded_audio->empty() && !verified_pcm16_audio->empty()) {
     return fail<VerifiedVideoMp4Export>(
         ErrorCode::archive_corrupt,
-        "H.1 v1 MP4 export requires at most one verified PCM16 audio state");
+        "H.1 MP4 export found contradictory encoded and PCM16 audio states");
+  }
+  if (verified_encoded_audio->empty() && verified_pcm16_audio->empty()) {
+    return video_only;
+  }
+  if (verified_encoded_audio->size() > 1U ||
+      verified_pcm16_audio->size() > 1U) {
+    return fail<VerifiedVideoMp4Export>(
+        ErrorCode::archive_corrupt,
+        "H.1 v1 MP4 export requires at most one verified audio state");
   }
 
 #ifndef CODEC_HAS_FFMPEG_VIDEO
@@ -616,21 +917,36 @@ Result<VerifiedVideoMp4Export> export_verified_video_mp4(
       ErrorCode::model_incompatible,
       "FFmpeg video export backend is unavailable");
 #else
-  const auto& audio = verified_audio->front();
-  auto muxed = mux_verified_audio(
-      video_only->output.payload, audio,
-      video_only->state_records.front().start_ns, limits.maximum_output_bytes);
+  const bool packet_passthrough = !verified_encoded_audio->empty();
+  const auto muxed = [&]() -> Result<std::vector<std::byte>> {
+    if (packet_passthrough) {
+      return mux_verified_encoded_audio(
+          video_only->output.payload, verified_encoded_audio->front(),
+          video_only->state_records.front().start_ns,
+          limits.maximum_output_bytes);
+    }
+    return mux_verified_pcm16_audio(
+        video_only->output.payload, verified_pcm16_audio->front(),
+        video_only->state_records.front().start_ns,
+        limits.maximum_output_bytes);
+  }();
   if (!muxed) return muxed.error();
 
   video_only->output.payload = std::move(*muxed);
+  const auto& state_record = packet_passthrough
+                                 ? verified_encoded_audio->front().state_record
+                                 : verified_pcm16_audio->front().state_record;
   video_only->output.supporting_records.push_back(ProvenanceRecordLink{
-      .stream = audio.state_record.stream,
-      .type = audio.state_record.type_code(),
-      .sequence = audio.state_record.sequence,
-      .hash = audio.state_record.hash,
+      .stream = state_record.stream,
+      .type = state_record.type_code(),
+      .sequence = state_record.sequence,
+      .hash = state_record.hash,
   });
-  video_only->audio_state_record = audio.state_record;
-  video_only->audio_provenance = audio.provenance;
+  video_only->audio_state_record = state_record;
+  video_only->audio_provenance = packet_passthrough
+                                     ? verified_encoded_audio->front().provenance
+                                     : verified_pcm16_audio->front().provenance;
+  video_only->audio_packet_passthrough = packet_passthrough;
   return video_only;
 #endif
 }

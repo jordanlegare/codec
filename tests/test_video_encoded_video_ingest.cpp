@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -115,6 +116,7 @@ TEST(video_ffmpeg_ingest_writes_evp1_and_no_raw_pixel_states) {
 
   auto encoded = video::query_verified_video_encoded_video(
       *archive, video::VideoFrameQuery{.stream = stream,
+                                       .time = std::nullopt,
                                        .maximum_results = 8,
                                        .maximum_encoded_bytes = 1024U * 1024U});
   EXPECT_TRUE(encoded);
@@ -202,6 +204,7 @@ TEST(video_hls_ingest_writes_one_evp1_with_complete_resource_frontier) {
   if (raw_frames) EXPECT_TRUE(raw_frames->empty());
   auto encoded = video::query_verified_video_encoded_video(
       *archive, video::VideoFrameQuery{.stream = stream,
+                                       .time = std::nullopt,
                                        .maximum_results = 8,
                                        .maximum_encoded_bytes = 1024U * 1024U});
   EXPECT_TRUE(encoded);
@@ -211,8 +214,6 @@ TEST(video_hls_ingest_writes_one_evp1_with_complete_resource_frontier) {
       EXPECT_EQ(encoded->front().state.codec, video::EncodedVideoCodec::h264);
       EXPECT_EQ(encoded->front().state.framing,
                 video::EncodedVideoPacketFraming::annex_b);
-      EXPECT_TRUE(encoded->front().state.decoder_config.empty() ||
-                  !encoded->front().state.decoder_config.empty());
       EXPECT_TRUE(!encoded->front().state.packets.empty());
       EXPECT_EQ(encoded->front().provenance.process.operation,
                 std::string{"codec.video.encoded-video.preserve.hls"});

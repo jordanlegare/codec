@@ -203,6 +203,7 @@ if(CODEC_BUILD_TESTS)
     tests/test_video_encoded_audio_state_reader.cpp
     tests/test_video_encoded_audio_capture.cpp
     tests/test_video_encoded_video_state_reader.cpp
+    tests/test_video_encoded_video_ingest.cpp
     tests/test_video_export.cpp
     tests/test_video_ffmpeg_audio.cpp
     tests/test_video_ffmpeg_ingest.cpp

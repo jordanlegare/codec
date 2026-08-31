@@ -197,8 +197,8 @@ TEST(video_ffmpeg_audio_direct_ingest_writes_verified_encoded_packets) {
           .maximum_encoded_bytes = 1024ULL * 1024ULL * 1024ULL,
       });
   EXPECT_TRUE(audio);
+  if (audio) EXPECT_EQ(audio->size(), std::size_t{1});
   if (audio && !audio->empty()) {
-    EXPECT_EQ(audio->size(), std::size_t{1});
     EXPECT_EQ(audio->front().state.codec, video::EncodedAudioCodec::aac);
     EXPECT_EQ(audio->front().state.sample_rate, std::uint32_t{8000});
     EXPECT_EQ(audio->front().state.channels, std::uint16_t{1});
@@ -235,6 +235,7 @@ TEST(video_ffmpeg_audio_direct_ingest_state_is_smaller_than_pcm16_equivalent) {
                                       .maximum_encoded_bytes =
                                           1024ULL * 1024ULL * 1024ULL});
   EXPECT_TRUE(audio);
+  if (audio) EXPECT_EQ(audio->size(), std::size_t{1});
   if (audio && audio->size() == 1U) {
     const auto& verified = audio->front();
     EXPECT_EQ(verified.state_record.type_code(),

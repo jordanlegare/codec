@@ -67,3 +67,38 @@ TEST(video_encoded_audio_capture_keeps_packets_and_trims_logical_window) {
     EXPECT_TRUE(encoded->size() < 2'000U * sizeof(std::int16_t));
   }
 }
+
+TEST(video_encoded_audio_capture_supports_negative_archive_time) {
+  video::FfmpegVideoIngestRequest request{};
+  request.start_ns = -1'000'000'000;
+  request.end_ns = -750'000'000;
+  request.maximum_decoded_audio_bytes = 4096;
+  const detail::FfmpegEncodedAudioCaptureBoundary boundary{
+      .present = true,
+      .codec = video::EncodedAudioCodec::aac,
+      .codec_profile = 1,
+      .sample_rate = 8'000,
+      .channels = 1,
+      .decoded_frames = 2'048,
+      .first_audio_ns = -4'000'000'000,
+      .video_origin_ns = -4'000'000'000,
+      .decoder_config = {std::byte{0x15}, std::byte{0x88}},
+      .packets = {
+          detail::FfmpegCapturedEncodedPacket{
+              .pts_ns = -4'000'000'000,
+              .dts_ns = -4'000'000'000,
+              .duration_ns = 256'000'000,
+              .flags = 1,
+              .payload = {std::byte{0x01}, std::byte{0x02}},
+          },
+      },
+  };
+
+  auto captured = detail::finalize_ffmpeg_encoded_audio_capture(request,
+                                                                 boundary);
+  EXPECT_TRUE(captured);
+  if (!captured) return;
+  EXPECT_EQ(captured->start_ns, std::int64_t{-1'000'000'000});
+  EXPECT_EQ(captured->end_ns, std::int64_t{-750'000'000});
+  EXPECT_TRUE(captured->state.has_value());
+}

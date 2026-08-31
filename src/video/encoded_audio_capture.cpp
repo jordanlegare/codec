@@ -4,6 +4,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -42,6 +44,36 @@ Result<std::uint64_t> nanoseconds_for_frames(std::uint64_t frames,
   }
   return seconds * kNanosecondsPerSecond +
          (remainder * kNanosecondsPerSecond) / sample_rate;
+}
+
+Result<std::int64_t> add_nonnegative(std::int64_t base,
+                                     std::uint64_t delta,
+                                     std::string_view label) {
+  if (delta > static_cast<std::uint64_t>(
+                  std::numeric_limits<std::int64_t>::max()) ||
+      base > std::numeric_limits<std::int64_t>::max() -
+                 static_cast<std::int64_t>(delta)) {
+    return fail<std::int64_t>(ErrorCode::resource_exhausted,
+                              std::string{label} + " overflows");
+  }
+  return base + static_cast<std::int64_t>(delta);
+}
+
+Result<std::int64_t> subtract(std::int64_t left, std::int64_t right,
+                              std::string_view label) {
+  if ((right > 0 &&
+       left < std::numeric_limits<std::int64_t>::min() + right) ||
+      (right < 0 &&
+       left > std::numeric_limits<std::int64_t>::max() + right)) {
+    return fail<std::int64_t>(ErrorCode::resource_exhausted,
+                              std::string{label} + " overflows");
+  }
+  return left - right;
+}
+
+std::uint64_t positive_distance(std::int64_t end,
+                                std::int64_t start) noexcept {
+  return static_cast<std::uint64_t>(end) - static_cast<std::uint64_t>(start);
 }
 
 FfmpegCapturedEncodedAudio profile_error(bool present, ErrorCode code,
@@ -98,15 +130,14 @@ Result<FfmpegCapturedEncodedAudio> finalize_ffmpeg_encoded_audio_capture(
     captured_bytes += packet.payload.size();
   }
 
-  if (*boundary.first_audio_ns < 0 &&
-      *boundary.video_origin_ns >
-          std::numeric_limits<std::int64_t>::max() +
-              *boundary.first_audio_ns) {
-    return profile_error(true, ErrorCode::decode,
-                         "encoded audio synchronization delta overflows");
+  auto relative_start = subtract(*boundary.first_audio_ns,
+                                 *boundary.video_origin_ns,
+                                 "encoded audio synchronization delta");
+  if (!relative_start) {
+    return profile_error(true, relative_start.error().code,
+                         relative_start.error().message);
   }
-  auto relative_start_ns =
-      *boundary.first_audio_ns - *boundary.video_origin_ns;
+  auto relative_start_ns = *relative_start;
   std::uint64_t trim_start_frames = 0U;
   if (relative_start_ns < 0) {
     if (relative_start_ns == std::numeric_limits<std::int64_t>::min()) {
@@ -119,19 +150,23 @@ Result<FfmpegCapturedEncodedAudio> finalize_ffmpeg_encoded_audio_capture(
     trim_start_frames = *trim;
     relative_start_ns = 0;
   }
-  if (trim_start_frames >= boundary.decoded_frames ||
-      relative_start_ns >
-          std::numeric_limits<std::int64_t>::max() - request.start_ns) {
+  if (trim_start_frames >= boundary.decoded_frames) {
     return profile_error(true, ErrorCode::decode,
                          "encoded audio has no presentation within the video interval");
   }
-  const auto start_ns = request.start_ns + relative_start_ns;
+  auto start = add_nonnegative(
+      request.start_ns, static_cast<std::uint64_t>(relative_start_ns),
+      "encoded audio archive timestamp");
+  if (!start) {
+    return profile_error(true, start.error().code, start.error().message);
+  }
+  const auto start_ns = *start;
   if (start_ns < request.start_ns || start_ns >= request.end_ns) {
     return profile_error(true, ErrorCode::decode,
                          "encoded audio begins outside the requested interval");
   }
   auto maximum_frames = frames_for_ns(
-      static_cast<std::uint64_t>(request.end_ns - start_ns),
+      positive_distance(request.end_ns, start_ns),
       boundary.sample_rate, false);
   if (!maximum_frames) return maximum_frames.error();
   const auto remaining_frames = boundary.decoded_frames - trim_start_frames;
@@ -144,51 +179,58 @@ Result<FfmpegCapturedEncodedAudio> finalize_ffmpeg_encoded_audio_capture(
   auto duration_ns =
       nanoseconds_for_frames(presentation_frames, boundary.sample_rate);
   if (!duration_ns || *duration_ns == 0U ||
-      *duration_ns >
-          static_cast<std::uint64_t>(request.end_ns - start_ns)) {
+      *duration_ns > positive_distance(request.end_ns, start_ns)) {
     return profile_error(true, ErrorCode::decode,
                          "encoded audio duration is outside the requested interval");
   }
-  if (*duration_ns > static_cast<std::uint64_t>(
-                         std::numeric_limits<std::int64_t>::max() - start_ns)) {
-    return profile_error(true, ErrorCode::resource_exhausted,
-                         "encoded audio archive timestamp overflows");
+  auto end = add_nonnegative(start_ns, *duration_ns,
+                             "encoded audio archive timestamp");
+  if (!end) {
+    return profile_error(true, end.error().code, end.error().message);
   }
-  const auto end_ns = start_ns + static_cast<std::int64_t>(*duration_ns);
+  const auto end_ns = *end;
 
-  if (*boundary.video_origin_ns >
-      std::numeric_limits<std::int64_t>::max() - relative_start_ns) {
-    return profile_error(true, ErrorCode::resource_exhausted,
-                         "encoded audio source timestamp overflows");
+  auto source_start = add_nonnegative(
+      *boundary.video_origin_ns,
+      static_cast<std::uint64_t>(relative_start_ns),
+      "encoded audio source timestamp");
+  if (!source_start) {
+    return profile_error(true, source_start.error().code,
+                         source_start.error().message);
   }
-  const auto source_window_start =
-      *boundary.video_origin_ns + relative_start_ns;
-  if (*duration_ns > static_cast<std::uint64_t>(
-                         std::numeric_limits<std::int64_t>::max() -
-                         source_window_start)) {
-    return profile_error(true, ErrorCode::resource_exhausted,
-                         "encoded audio source interval overflows");
+  const auto source_window_start = *source_start;
+  auto source_end = add_nonnegative(source_window_start, *duration_ns,
+                                    "encoded audio source interval");
+  if (!source_end) {
+    return profile_error(true, source_end.error().code,
+                         source_end.error().message);
   }
-  const auto source_window_end =
-      source_window_start + static_cast<std::int64_t>(*duration_ns);
+  const auto source_window_end = *source_end;
 
   std::vector<EncodedAudioPacket> packets;
   packets.reserve(boundary.packets.size());
   for (const auto& packet : boundary.packets) {
-    if (packet.duration_ns > static_cast<std::uint64_t>(
-                                 std::numeric_limits<std::int64_t>::max() -
-                                 packet.pts_ns)) {
-      return profile_error(true, ErrorCode::decode,
-                           "encoded audio packet interval overflows");
+    auto packet_end = add_nonnegative(packet.pts_ns, packet.duration_ns,
+                                      "encoded audio packet interval");
+    if (!packet_end) {
+      return profile_error(true, packet_end.error().code,
+                           packet_end.error().message);
     }
-    const auto packet_end =
-        packet.pts_ns + static_cast<std::int64_t>(packet.duration_ns);
-    if (packet.pts_ns >= source_window_end || packet_end <= source_window_start) {
+    if (packet.pts_ns >= source_window_end ||
+        *packet_end <= source_window_start) {
       continue;
     }
+    auto pts_offset = subtract(packet.pts_ns, source_window_start,
+                               "encoded audio packet PTS offset");
+    auto dts_offset = subtract(packet.dts_ns, source_window_start,
+                               "encoded audio packet DTS offset");
+    if (!pts_offset || !dts_offset) {
+      const auto& error = !pts_offset ? pts_offset.error() : dts_offset.error();
+      return profile_error(true, error.code, error.message);
+    }
     packets.push_back(EncodedAudioPacket{
-        .pts_offset_ns = packet.pts_ns - source_window_start,
-        .dts_offset_ns = packet.dts_ns - source_window_start,
+        .pts_offset_ns = *pts_offset,
+        .dts_offset_ns = *dts_offset,
         .duration_ns = packet.duration_ns,
         .flags = packet.flags,
         .payload = packet.payload,

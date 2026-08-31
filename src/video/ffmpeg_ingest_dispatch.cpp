@@ -19,8 +19,6 @@ extern "C" {
 #include <libavutil/dict.h>
 #include <libavutil/error.h>
 #include <libavutil/mathematics.h>
-#include <libavutil/samplefmt.h>
-#include <libswresample/swresample.h>
 }
 
 namespace {
@@ -47,14 +45,20 @@ struct AudioDecodeBoundary {
   bool decoder_ready{};
   bool flushed{};
   std::uint64_t maximum_bytes{};
+  std::uint64_t captured_bytes{};
   int stream_index{-1};
   AVRational time_base{0, 1};
   AVCodecContext* codec{};
-  SwrContext* resampler{};
   AVFrame* frame{};
+  codec::profiles::video::EncodedAudioCodec encoded_codec{
+      codec::profiles::video::EncodedAudioCodec::aac};
+  std::int32_t codec_profile{};
   std::uint32_t sample_rate{};
   std::uint16_t channels{};
-  std::vector<std::int16_t> samples;
+  std::uint64_t decoded_frames{};
+  std::vector<std::byte> decoder_config;
+  std::vector<codec::profiles::video::detail::FfmpegCapturedEncodedPacket>
+      packets;
   std::optional<std::int64_t> first_audio_ns{};
   AVRational video_time_base{0, 1};
   std::int64_t video_origin_timestamp{AV_NOPTS_VALUE};
@@ -84,9 +88,6 @@ void clear_audio_boundary() noexcept {
   }
   if (audio_boundary.codec != nullptr) {
     avcodec_free_context(&audio_boundary.codec);
-  }
-  if (audio_boundary.resampler != nullptr) {
-    swr_free(&audio_boundary.resampler);
   }
   audio_boundary = {};
 }
@@ -151,6 +152,33 @@ void configure_audio_decoder(AVFormatContext* context) {
     return;
   }
   audio_boundary.time_base = stream->time_base;
+  if (stream->codecpar->codec_id != AV_CODEC_ID_AAC) {
+    remember_audio_error(codec::ErrorCode::decode,
+                         "H.1 encoded audio v1 supports AAC only");
+    return;
+  }
+  if (stream->codecpar->extradata_size < 0 ||
+      (stream->codecpar->extradata_size > 0 &&
+       stream->codecpar->extradata == nullptr)) {
+    remember_audio_error(codec::ErrorCode::decode,
+                         "selected FFmpeg audio stream has invalid decoder configuration");
+    return;
+  }
+  const auto configuration_bytes =
+      static_cast<std::uint64_t>(stream->codecpar->extradata_size);
+  if (configuration_bytes > audio_boundary.maximum_bytes) {
+    remember_audio_error(codec::ErrorCode::resource_exhausted,
+                         "encoded audio decoder configuration exceeds the configured limit");
+    return;
+  }
+  audio_boundary.codec_profile = stream->codecpar->profile;
+  if (stream->codecpar->extradata_size > 0) {
+    const auto* configuration =
+        reinterpret_cast<const std::byte*>(stream->codecpar->extradata);
+    audio_boundary.decoder_config.assign(
+        configuration, configuration + stream->codecpar->extradata_size);
+  }
+  audio_boundary.captured_bytes = configuration_bytes;
 
   auto* codec_context = avcodec_alloc_context3(decoder);
   if (codec_context == nullptr) {
@@ -191,42 +219,6 @@ void configure_audio_decoder(AVFormatContext* context) {
       static_cast<std::uint32_t>(codec_context->sample_rate);
   audio_boundary.channels = static_cast<std::uint16_t>(channel_count);
 
-  AVChannelLayout input_layout{};
-  int layout_result = 0;
-  if (codec_context->ch_layout.order == AV_CHANNEL_ORDER_UNSPEC) {
-    av_channel_layout_default(&input_layout, channel_count);
-  } else {
-    layout_result =
-        av_channel_layout_copy(&input_layout, &codec_context->ch_layout);
-  }
-  if (layout_result < 0) {
-    remember_audio_ffmpeg_error("FFmpeg cannot copy the audio channel layout",
-                                layout_result);
-    return;
-  }
-  AVChannelLayout output_layout{};
-  av_channel_layout_default(&output_layout, channel_count);
-  SwrContext* resampler = nullptr;
-  const auto allocated = swr_alloc_set_opts2(
-      &resampler, &output_layout, AV_SAMPLE_FMT_S16, codec_context->sample_rate,
-      &input_layout, codec_context->sample_fmt, codec_context->sample_rate, 0,
-      nullptr);
-  av_channel_layout_uninit(&input_layout);
-  av_channel_layout_uninit(&output_layout);
-  if (allocated < 0 || resampler == nullptr) {
-    if (resampler != nullptr) swr_free(&resampler);
-    remember_audio_ffmpeg_error("FFmpeg cannot allocate the PCM16 resampler",
-                                allocated < 0 ? allocated : AVERROR(ENOMEM));
-    return;
-  }
-  audio_boundary.resampler = resampler;
-  const auto initialized = swr_init(resampler);
-  if (initialized < 0) {
-    remember_audio_ffmpeg_error("FFmpeg cannot initialize the PCM16 resampler",
-                                initialized);
-    return;
-  }
-
   audio_boundary.frame = av_frame_alloc();
   if (audio_boundary.frame == nullptr) {
     remember_audio_error(codec::ErrorCode::resource_exhausted,
@@ -236,30 +228,8 @@ void configure_audio_decoder(AVFormatContext* context) {
   audio_boundary.decoder_ready = true;
 }
 
-bool audio_capacity_is_bounded(int output_frames,
-                               std::size_t existing_samples) {
-  if (output_frames < 0 || audio_boundary.channels == 0U) return false;
-  const auto frames = static_cast<std::uint64_t>(output_frames);
-  const auto channels = static_cast<std::uint64_t>(audio_boundary.channels);
-  if (frames > std::numeric_limits<std::uint64_t>::max() / channels) {
-    return false;
-  }
-  const auto sample_count = frames * channels;
-  if (sample_count > std::numeric_limits<std::uint64_t>::max() /
-                         sizeof(std::int16_t)) {
-    return false;
-  }
-  const auto bytes = sample_count * sizeof(std::int16_t);
-  const auto existing_bytes =
-      static_cast<std::uint64_t>(existing_samples) * sizeof(std::int16_t);
-  return existing_bytes <= audio_boundary.maximum_bytes &&
-         bytes <= audio_boundary.maximum_bytes - existing_bytes &&
-         sample_count <= std::numeric_limits<std::size_t>::max();
-}
-
-void append_resampled_audio(const AVFrame& frame) {
-  if (!audio_boundary.decoder_ready || audio_boundary.resampler == nullptr ||
-      audio_boundary.error.has_value()) {
+void validate_decoded_audio(const AVFrame& frame) {
+  if (!audio_boundary.decoder_ready || audio_boundary.error.has_value()) {
     return;
   }
   if (frame.nb_samples <= 0 || frame.best_effort_timestamp == AV_NOPTS_VALUE) {
@@ -284,14 +254,18 @@ void append_resampled_audio(const AVFrame& frame) {
   const auto chunk_start_ns = av_rescale_q(frame.best_effort_timestamp,
                                            audio_boundary.time_base,
                                            kNanosecondTimeBase);
-  const auto prior_frames =
-      audio_boundary.samples.size() / audio_boundary.channels;
   if (!audio_boundary.first_audio_ns.has_value()) {
     audio_boundary.first_audio_ns = chunk_start_ns;
   } else {
+    if (audio_boundary.decoded_frames >
+        static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) {
+      remember_audio_error(codec::ErrorCode::resource_exhausted,
+                           "decoded audio frame count exceeds time-conversion bounds");
+      return;
+    }
     const auto expected =
         *audio_boundary.first_audio_ns +
-        av_rescale_rnd(static_cast<std::int64_t>(prior_frames),
+        av_rescale_rnd(static_cast<std::int64_t>(audio_boundary.decoded_frames),
                        1'000'000'000LL, audio_boundary.sample_rate,
                        AV_ROUND_DOWN);
     const auto sample_tolerance = av_rescale_rnd(
@@ -305,46 +279,14 @@ void append_resampled_audio(const AVFrame& frame) {
       return;
     }
   }
-
-  const auto capacity =
-      swr_get_out_samples(audio_boundary.resampler, frame.nb_samples);
-  if (capacity < 0) {
-    remember_audio_ffmpeg_error("FFmpeg cannot size PCM16 audio output",
-                                capacity);
+  const auto decoded = static_cast<std::uint64_t>(frame.nb_samples);
+  if (decoded > std::numeric_limits<std::uint64_t>::max() -
+                    audio_boundary.decoded_frames) {
+    remember_audio_error(codec::ErrorCode::resource_exhausted,
+                         "decoded audio frame count exceeds bounds");
     return;
   }
-  if (!audio_capacity_is_bounded(capacity, audio_boundary.samples.size())) {
-    remember_audio_error(
-        codec::ErrorCode::resource_exhausted,
-        "decoded audio exceeds the configured aggregate byte limit");
-    return;
-  }
-
-  const auto capacity_samples =
-      static_cast<std::size_t>(capacity) * audio_boundary.channels;
-  std::vector<std::int16_t> converted(capacity_samples);
-  std::uint8_t* output_data[1]{
-      reinterpret_cast<std::uint8_t*>(converted.data())};
-  const auto planes =
-      av_sample_fmt_is_planar(static_cast<AVSampleFormat>(frame.format)) != 0
-          ? audio_boundary.channels
-          : std::uint16_t{1};
-  std::array<const std::uint8_t*, 2> input_data{};
-  for (std::uint16_t plane = 0; plane < planes; ++plane) {
-    input_data[plane] = frame.extended_data[plane];
-  }
-  const auto converted_frames = swr_convert(
-      audio_boundary.resampler, output_data, capacity, input_data.data(),
-      frame.nb_samples);
-  if (converted_frames < 0) {
-    remember_audio_ffmpeg_error("FFmpeg PCM16 audio conversion failed",
-                                converted_frames);
-    return;
-  }
-  converted.resize(static_cast<std::size_t>(converted_frames) *
-                   audio_boundary.channels);
-  audio_boundary.samples.insert(audio_boundary.samples.end(), converted.begin(),
-                                converted.end());
+  audio_boundary.decoded_frames += decoded;
 }
 
 void receive_audio_frames() {
@@ -360,7 +302,7 @@ void receive_audio_frames() {
       remember_audio_ffmpeg_error("FFmpeg audio frame decode failed", received);
       return;
     }
-    append_resampled_audio(*audio_boundary.frame);
+    validate_decoded_audio(*audio_boundary.frame);
     av_frame_unref(audio_boundary.frame);
     if (audio_boundary.error.has_value()) return;
   }
@@ -379,44 +321,74 @@ void flush_audio_decoder() {
     return;
   }
   receive_audio_frames();
-  if (audio_boundary.error.has_value() || audio_boundary.resampler == nullptr) {
+}
+
+void capture_encoded_audio_packet(const AVPacket& packet) {
+  if (!audio_boundary.decoder_ready || audio_boundary.error.has_value()) return;
+  if (packet.data == nullptr || packet.size <= 0) {
+    remember_audio_error(codec::ErrorCode::decode,
+                         "selected audio packet has no encoded payload");
+    return;
+  }
+  auto pts = packet.pts;
+  auto dts = packet.dts;
+  if (pts == AV_NOPTS_VALUE) pts = dts;
+  if (dts == AV_NOPTS_VALUE) dts = pts;
+  if (pts == AV_NOPTS_VALUE || dts == AV_NOPTS_VALUE) {
+    remember_audio_error(codec::ErrorCode::decode,
+                         "selected audio packet lacks usable timestamps");
+    return;
+  }
+  const auto payload_bytes = static_cast<std::uint64_t>(packet.size);
+  if (audio_boundary.captured_bytes > audio_boundary.maximum_bytes ||
+      payload_bytes >
+          audio_boundary.maximum_bytes - audio_boundary.captured_bytes) {
+    remember_audio_error(
+        codec::ErrorCode::resource_exhausted,
+        "encoded audio exceeds the configured aggregate byte limit");
     return;
   }
 
-  for (;;) {
-    const auto delay = swr_get_delay(audio_boundary.resampler,
-                                     audio_boundary.sample_rate);
-    if (delay <= 0) break;
-    if (delay > std::numeric_limits<int>::max()) {
-      remember_audio_error(codec::ErrorCode::resource_exhausted,
-                           "FFmpeg audio resampler delay exceeds process bounds");
-      return;
-    }
-    const auto capacity = static_cast<int>(delay);
-    if (!audio_capacity_is_bounded(capacity,
-                                   audio_boundary.samples.size())) {
-      remember_audio_error(
-          codec::ErrorCode::resource_exhausted,
-          "decoded audio exceeds the configured aggregate byte limit");
-      return;
-    }
-    std::vector<std::int16_t> converted(
-        static_cast<std::size_t>(capacity) * audio_boundary.channels);
-    std::uint8_t* output_data[1]{
-        reinterpret_cast<std::uint8_t*>(converted.data())};
-    const auto converted_frames = swr_convert(
-        audio_boundary.resampler, output_data, capacity, nullptr, 0);
-    if (converted_frames < 0) {
-      remember_audio_ffmpeg_error("FFmpeg PCM16 resampler flush failed",
-                                  converted_frames);
-      return;
-    }
-    if (converted_frames == 0) break;
-    converted.resize(static_cast<std::size_t>(converted_frames) *
-                     audio_boundary.channels);
-    audio_boundary.samples.insert(audio_boundary.samples.end(),
-                                  converted.begin(), converted.end());
+  auto duration = packet.duration;
+  if (duration <= 0) {
+    const auto frame_size = audio_boundary.codec != nullptr &&
+                                    audio_boundary.codec->frame_size > 0
+                                ? audio_boundary.codec->frame_size
+                                : 1024;
+    duration = av_rescale_q(frame_size,
+                            AVRational{1, static_cast<int>(
+                                              audio_boundary.sample_rate)},
+                            audio_boundary.time_base);
   }
+  if (duration <= 0) {
+    remember_audio_error(codec::ErrorCode::decode,
+                         "selected audio packet has no usable duration");
+    return;
+  }
+
+  const auto pts_ns = av_rescale_q(pts, audio_boundary.time_base,
+                                   kNanosecondTimeBase);
+  const auto dts_ns = av_rescale_q(dts, audio_boundary.time_base,
+                                   kNanosecondTimeBase);
+  const auto duration_ns = av_rescale_q(duration, audio_boundary.time_base,
+                                        kNanosecondTimeBase);
+  if (duration_ns <= 0) {
+    remember_audio_error(codec::ErrorCode::decode,
+                         "selected audio packet duration is below nanosecond resolution");
+    return;
+  }
+
+  std::vector<std::byte> payload(payload_bytes);
+  std::memcpy(payload.data(), packet.data, static_cast<std::size_t>(packet.size));
+  audio_boundary.packets.push_back(
+      codec::profiles::video::detail::FfmpegCapturedEncodedPacket{
+          .pts_ns = pts_ns,
+          .dts_ns = dts_ns,
+          .duration_ns = static_cast<std::uint64_t>(duration_ns),
+          .flags = static_cast<std::uint32_t>(packet.flags) & 0x1fU,
+          .payload = std::move(payload),
+      });
+  audio_boundary.captured_bytes += payload_bytes;
 }
 
 }  // namespace
@@ -573,6 +545,9 @@ int codec_av_read_frame(AVFormatContext* context, AVPacket* packet) {
     if (audio_boundary.enabled && audio_boundary.present &&
         packet->stream_index == audio_boundary.stream_index) {
       if (audio_boundary.decoder_ready && !audio_boundary.error.has_value()) {
+        capture_encoded_audio_packet(*packet);
+      }
+      if (audio_boundary.decoder_ready && !audio_boundary.error.has_value()) {
         const auto sent =
             avcodec_send_packet(audio_boundary.codec, packet);
         if (sent < 0) {
@@ -679,124 +654,43 @@ Result<void> begin_ffmpeg_audio_capture(
   return {};
 }
 
-FfmpegCapturedPcm16Audio take_ffmpeg_audio_capture(
+FfmpegCapturedEncodedAudio take_ffmpeg_audio_capture(
     const FfmpegVideoIngestRequest& request) {
   flush_audio_decoder();
-  FfmpegCapturedPcm16Audio result{
+  std::optional<std::int64_t> video_origin_ns;
+  if (audio_boundary.video_origin_timestamp != AV_NOPTS_VALUE &&
+      audio_boundary.video_time_base.num > 0 &&
+      audio_boundary.video_time_base.den > 0) {
+    video_origin_ns = av_rescale_q(audio_boundary.video_origin_timestamp,
+                                   audio_boundary.video_time_base,
+                                   kNanosecondTimeBase);
+  }
+  FfmpegEncodedAudioCaptureBoundary boundary{
       .present = audio_boundary.enabled && audio_boundary.present,
-      .state = std::nullopt,
-      .start_ns = 0,
-      .end_ns = 0,
-      .error = audio_boundary.error,
-  };
-
-  if (!result.present || result.error.has_value()) {
-    clear_audio_boundary();
-    return result;
-  }
-  if (audio_boundary.sample_rate == 0U || audio_boundary.channels == 0U ||
-      audio_boundary.samples.empty() ||
-      !audio_boundary.first_audio_ns.has_value() ||
-      audio_boundary.video_origin_timestamp == AV_NOPTS_VALUE ||
-      audio_boundary.video_time_base.num <= 0 ||
-      audio_boundary.video_time_base.den <= 0) {
-    result.error = Error{ErrorCode::decode,
-                         "decoded audio cannot be synchronized to video",
-                         false};
-    clear_audio_boundary();
-    return result;
-  }
-
-  const auto video_origin_ns = av_rescale_q(
-      audio_boundary.video_origin_timestamp, audio_boundary.video_time_base,
-      kNanosecondTimeBase);
-  auto relative_start_ns = *audio_boundary.first_audio_ns - video_origin_ns;
-  auto samples = std::move(audio_boundary.samples);
-  auto frames = samples.size() / audio_boundary.channels;
-
-  if (relative_start_ns < 0) {
-    if (relative_start_ns == std::numeric_limits<std::int64_t>::min()) {
-      result.error = Error{ErrorCode::decode,
-                           "decoded audio starts outside synchronization bounds",
-                           false};
-      clear_audio_boundary();
-      return result;
-    }
-    const auto drop = av_rescale_rnd(
-        -relative_start_ns, audio_boundary.sample_rate, 1'000'000'000LL,
-        AV_ROUND_UP);
-    if (drop < 0 || static_cast<std::uint64_t>(drop) >= frames) {
-      result.error = Error{ErrorCode::decode,
-                           "decoded audio has no samples after video-origin trim",
-                           false};
-      clear_audio_boundary();
-      return result;
-    }
-    const auto drop_samples = static_cast<std::size_t>(drop) *
-                              audio_boundary.channels;
-    samples.erase(samples.begin(), samples.begin() +
-                                      static_cast<std::ptrdiff_t>(drop_samples));
-    frames -= static_cast<std::size_t>(drop);
-    relative_start_ns = 0;
-  }
-
-  if (relative_start_ns >
-      std::numeric_limits<std::int64_t>::max() - request.start_ns) {
-    result.error = Error{ErrorCode::resource_exhausted,
-                         "decoded audio timestamp overflows archive time",
-                         false};
-    clear_audio_boundary();
-    return result;
-  }
-  const auto start_ns = request.start_ns + relative_start_ns;
-  if (start_ns < request.start_ns || start_ns >= request.end_ns) {
-    result.error = Error{ErrorCode::decode,
-                         "decoded audio begins outside the requested interval",
-                         false};
-    clear_audio_boundary();
-    return result;
-  }
-
-  const auto remaining_ns = request.end_ns - start_ns;
-  const auto maximum_frames = av_rescale_rnd(
-      remaining_ns, audio_boundary.sample_rate, 1'000'000'000LL,
-      AV_ROUND_DOWN);
-  if (maximum_frames <= 0) {
-    result.error = Error{ErrorCode::decode,
-                         "requested interval contains no complete audio samples",
-                         false};
-    clear_audio_boundary();
-    return result;
-  }
-  if (frames > static_cast<std::uint64_t>(maximum_frames)) {
-    frames = static_cast<std::size_t>(maximum_frames);
-    samples.resize(frames * audio_boundary.channels);
-  }
-  if (frames == 0U) {
-    result.error = Error{ErrorCode::decode,
-                         "decoded audio has no retained PCM16 samples", false};
-    clear_audio_boundary();
-    return result;
-  }
-
-  const auto duration_ns = av_rescale_rnd(
-      static_cast<std::int64_t>(frames), 1'000'000'000LL,
-      audio_boundary.sample_rate, AV_ROUND_DOWN);
-  if (duration_ns <= 0 || duration_ns > request.end_ns - start_ns) {
-    result.error = Error{ErrorCode::decode,
-                         "decoded audio duration is outside the requested interval",
-                         false};
-    clear_audio_boundary();
-    return result;
-  }
-
-  result.start_ns = start_ns;
-  result.end_ns = start_ns + duration_ns;
-  result.state = Pcm16State{
+      .codec = audio_boundary.encoded_codec,
+      .codec_profile = audio_boundary.codec_profile,
       .sample_rate = audio_boundary.sample_rate,
       .channels = audio_boundary.channels,
-      .samples = std::move(samples),
+      .decoded_frames = audio_boundary.decoded_frames,
+      .first_audio_ns = audio_boundary.first_audio_ns,
+      .video_origin_ns = video_origin_ns,
+      .decoder_config = std::move(audio_boundary.decoder_config),
+      .packets = std::move(audio_boundary.packets),
+      .error = audio_boundary.error,
   };
+  auto finalized = finalize_ffmpeg_encoded_audio_capture(request, boundary);
+  FfmpegCapturedEncodedAudio result;
+  if (finalized) {
+    result = std::move(*finalized);
+  } else {
+    result = FfmpegCapturedEncodedAudio{
+        .present = boundary.present,
+        .state = std::nullopt,
+        .start_ns = 0,
+        .end_ns = 0,
+        .error = finalized.error(),
+    };
+  }
   clear_audio_boundary();
   return result;
 }

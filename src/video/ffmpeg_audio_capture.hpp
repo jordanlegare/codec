@@ -8,14 +8,6 @@
 
 namespace codec::profiles::video::detail {
 
-struct FfmpegCapturedPcm16Audio {
-  bool present{};
-  std::optional<Pcm16State> state{};
-  std::int64_t start_ns{};
-  std::int64_t end_ns{};
-  std::optional<Error> error{};
-};
-
 struct FfmpegCapturedEncodedPacket {
   std::int64_t pts_ns{};
   std::int64_t dts_ns{};
@@ -52,7 +44,7 @@ Result<FfmpegCapturedEncodedAudio> finalize_ffmpeg_encoded_audio_capture(
 
 Result<void> begin_ffmpeg_audio_capture(
     const FfmpegVideoIngestRequest& request, bool enabled);
-FfmpegCapturedPcm16Audio take_ffmpeg_audio_capture(
+FfmpegCapturedEncodedAudio take_ffmpeg_audio_capture(
     const FfmpegVideoIngestRequest& request);
 
 }  // namespace codec::profiles::video::detail

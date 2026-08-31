@@ -509,7 +509,7 @@ Result<FfmpegVideoIngestReport> ingest_video_ffmpeg(
   };
 
   const bool hls = detail::looks_like_hls_manifest(source_bytes);
-  auto audio_started = detail::begin_ffmpeg_audio_capture(request, !hls);
+  auto audio_started = detail::begin_ffmpeg_audio_capture(request, true);
   if (!audio_started) return finish_profile_error(audio_started.error());
 
   auto decoded = [&]() -> Result<DecodedVideo> {
@@ -612,18 +612,38 @@ Result<FfmpegVideoIngestReport> ingest_video_ffmpeg(
     if (!audio_state) return audio_state.error();
 
     const ProvenanceProcess audio_process{
-        .operation = "codec.video.pcm16.canonicalize",
+        .operation = hls ? "codec.video.pcm16.canonicalize.hls"
+                         : "codec.video.pcm16.canonicalize",
         .implementation_id = "codec.video",
         .implementation_version = "1",
         .implementation_hash = std::nullopt,
         .configuration_hash = std::nullopt,
         .created_utc_ns = created_utc_ns,
         .details_type =
-            "application/vnd.codec.video.audio-canonicalization.v1",
+            hls ? "application/vnd.codec.video.hls-audio-canonicalization.v1"
+                : "application/vnd.codec.video.audio-canonicalization.v1",
         .details = {std::byte{0x01}},
     };
-    auto audio_provenance = writer.append_stream_provenance(
-        *audio_state, TruthClass::state_exact, direct_inputs, audio_process);
+    Result<RecordInfo> audio_provenance = [&]() -> Result<RecordInfo> {
+      if (!hls) {
+        return writer.append_stream_provenance(
+            *audio_state, TruthClass::state_exact, direct_inputs, audio_process);
+      }
+      if (report.secondary_sources.empty()) {
+        return fail<RecordInfo>(
+            ErrorCode::internal,
+            "verified HLS audio has no preserved secondary source frontier");
+      }
+      std::vector<RecordInfo> hls_audio_inputs;
+      hls_audio_inputs.reserve(1U + report.secondary_sources.size());
+      hls_audio_inputs.push_back(*source);
+      hls_audio_inputs.insert(hls_audio_inputs.end(),
+                              report.secondary_sources.begin(),
+                              report.secondary_sources.end());
+      return writer.append_stream_provenance(
+          *audio_state, TruthClass::state_exact, hls_audio_inputs,
+          audio_process);
+    }();
     if (!audio_provenance) return audio_provenance.error();
     report.audio_state = *audio_state;
     report.audio_provenance = *audio_provenance;

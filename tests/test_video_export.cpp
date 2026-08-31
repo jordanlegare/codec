@@ -81,7 +81,7 @@ codec::ProvenanceProcess video_process() {
   };
 }
 
-codec::ProvenanceProcess audio_process() {
+codec::ProvenanceProcess pcm_audio_process() {
   return codec::ProvenanceProcess{
       .operation = "codec.video.pcm16.canonicalize",
       .implementation_id = "codec.video",
@@ -94,16 +94,33 @@ codec::ProvenanceProcess audio_process() {
   };
 }
 
+codec::ProvenanceProcess encoded_audio_process() {
+  return codec::ProvenanceProcess{
+      .operation = "codec.video.encoded-audio.preserve",
+      .implementation_id = "codec.video",
+      .implementation_version = "1",
+      .implementation_hash = std::nullopt,
+      .configuration_hash = std::nullopt,
+      .created_utc_ns = 1,
+      .details_type = "application/vnd.codec.video.encoded-audio.v1",
+      .details = {std::byte{0x01}},
+  };
+}
+
 struct ExportFixture {
   std::filesystem::path path;
   codec::StreamId stream;
   std::optional<codec::RecordInfo> audio_state;
+  std::optional<codec::RecordInfo> encoded_audio_state;
 };
 
 ExportFixture make_export_archive(
     std::string_view name, bool provenanced = true, bool with_audio = false,
     std::int64_t audio_start_ns = 20'000'000,
-    std::int64_t audio_duration_ns = 100'000'000) {
+    std::int64_t audio_duration_ns = 100'000'000,
+    bool with_encoded_audio = false,
+    std::uint64_t encoded_trim_start_frames = 0,
+    std::optional<std::int64_t> encoded_audio_start_ns = std::nullopt) {
   const auto path = test_path(name);
   std::filesystem::remove(path);
   const auto stream = codec::derive_stream_id(name);
@@ -118,7 +135,7 @@ ExportFixture make_export_archive(
       },
       0));
   auto source = writer.append(codec::RecordType::source_bytes, stream, 0,
-                              140'000'000, bytes("encoded source"));
+                              400'000'000, bytes("encoded source"));
   EXPECT_TRUE(source);
 
   const std::array starts{0LL, 40'000'000LL, 100'000'000LL};
@@ -155,13 +172,100 @@ ExportFixture make_export_archive(
     if (state && provenanced) {
       const std::array inputs{*source};
       EXPECT_TRUE(writer.append_stream_provenance(
-          *state, codec::TruthClass::state_exact, inputs, audio_process()));
+          *state, codec::TruthClass::state_exact, inputs,
+          pcm_audio_process()));
+    }
+  }
+
+  std::optional<codec::RecordInfo> encoded_audio_state_record;
+  if (with_encoded_audio) {
+    const auto encoded_start = encoded_audio_start_ns.value_or(audio_start_ns);
+    const video::EncodedAudioState encoded_state{
+        .codec = video::EncodedAudioCodec::aac,
+        .codec_profile = 1,
+        .sample_rate = 8'000,
+        .channels = 1,
+        .decoded_frames = 1'024,
+        .trim_start_frames = encoded_trim_start_frames,
+        .presentation_frames = 800,
+        .decoder_config = {std::byte{0x15}, std::byte{0x88}},
+        .packets = {video::EncodedAudioPacket{
+            .pts_offset_ns = 0,
+            .dts_offset_ns = 0,
+            .duration_ns = 128'000'000,
+            .flags = 1,
+            .payload = {std::byte{0x01}},
+        }},
+    };
+    auto encoded_audio = video::encode_encoded_audio_state(encoded_state);
+    EXPECT_TRUE(encoded_audio);
+    auto state = writer.append_raw(
+        video::video_encoded_audio_state_record_type, stream, encoded_start,
+        encoded_start + audio_duration_ns, *encoded_audio);
+    EXPECT_TRUE(state);
+    if (state) encoded_audio_state_record = *state;
+    if (state && provenanced) {
+      const std::array inputs{*source};
+      EXPECT_TRUE(writer.append_stream_provenance(
+          *state, codec::TruthClass::state_exact, inputs,
+          encoded_audio_process()));
     }
   }
 
   EXPECT_TRUE(writer.finalize());
-  return ExportFixture{path, stream, audio_state_record};
+  return ExportFixture{path, stream, audio_state_record,
+                       encoded_audio_state_record};
 }
+
+#ifdef CODEC_TEST_HAS_FFMPEG_VIDEO
+
+std::vector<std::byte> decode_base64(std::string_view encoded) {
+  const auto value = [](char ch) -> int {
+    if (ch >= 'A' && ch <= 'Z') return ch - 'A';
+    if (ch >= 'a' && ch <= 'z') return ch - 'a' + 26;
+    if (ch >= '0' && ch <= '9') return ch - '0' + 52;
+    if (ch == '+') return 62;
+    if (ch == '/') return 63;
+    return -1;
+  };
+  std::vector<std::byte> output;
+  output.reserve((encoded.size() * 3U) / 4U);
+  std::uint32_t accumulator = 0;
+  int bits = 0;
+  for (const char ch : encoded) {
+    if (ch == '=') break;
+    const int digit = value(ch);
+    if (digit < 0) continue;
+    accumulator = (accumulator << 6U) | static_cast<std::uint32_t>(digit);
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      output.push_back(static_cast<std::byte>(
+          (accumulator >> static_cast<unsigned>(bits)) & 0xffU));
+    }
+  }
+  return output;
+}
+
+std::vector<std::byte> encoded_media_fixture(std::string_view name) {
+  const auto path = std::filesystem::path{__FILE__}.parent_path() / "fixtures" /
+                    std::string{name};
+  std::ifstream input(path, std::ios::binary);
+  const std::string encoded((std::istreambuf_iterator<char>(input)),
+                            std::istreambuf_iterator<char>());
+  return decode_base64(encoded);
+}
+
+bool write_fixture(const std::filesystem::path& path,
+                   std::span<const std::byte> payload) {
+  std::ofstream output(path, std::ios::binary | std::ios::trunc);
+  if (!output) return false;
+  output.write(reinterpret_cast<const char*>(payload.data()),
+               static_cast<std::streamsize>(payload.size()));
+  return static_cast<bool>(output);
+}
+
+#endif
 
 bool has_ftyp(std::span<const std::byte> payload) {
   return payload.size() >= 8 && payload[4] == std::byte{'f'} &&
@@ -227,6 +331,7 @@ struct Mp4Inspection {
   std::uint64_t decoded_audio_samples{};
   std::optional<std::int64_t> first_audio_pts_ns;
   int audio_sample_rate{};
+  std::vector<std::vector<std::byte>> audio_payloads;
 };
 
 Mp4Inspection inspect_mp4(std::span<const std::byte> payload,
@@ -318,6 +423,14 @@ Mp4Inspection inspect_mp4(std::span<const std::byte> payload,
     }
 
     ++inspection.audio_packets;
+    if (packet->data != nullptr && packet->size > 0) {
+      const auto* packet_bytes =
+          reinterpret_cast<const std::byte*>(packet->data);
+      inspection.audio_payloads.emplace_back(packet_bytes,
+                                             packet_bytes + packet->size);
+    } else {
+      inspection.audio_payloads.emplace_back();
+    }
     if (!inspection.first_audio_pts_ns.has_value() &&
         packet->pts != AV_NOPTS_VALUE) {
       inspection.first_audio_pts_ns =
@@ -413,6 +526,7 @@ TEST(video_export_muxes_verified_pcm16_as_aac) {
     EXPECT_TRUE(contains_ascii(exported->output.payload, "soun"));
     EXPECT_TRUE(exported->audio_state_record.has_value());
     EXPECT_TRUE(exported->audio_provenance.has_value());
+    EXPECT_FALSE(exported->audio_packet_passthrough);
     if (exported->audio_state_record.has_value() && fixture.audio_state.has_value()) {
       EXPECT_EQ(exported->audio_state_record->hash, fixture.audio_state->hash);
     }
@@ -447,6 +561,80 @@ TEST(video_export_audio_track_decodes_nonempty) {
     EXPECT_TRUE(inspected.decoded_audio_samples > 0U);
   }
   std::filesystem::remove(fixture.path);
+}
+
+TEST(video_export_passthrough_keeps_ingested_aac_packets_byte_exact) {
+  const auto source_path = test_path("encoded-passthrough-input.mp4");
+  const auto archive_path = test_path("encoded-passthrough.coda");
+  std::filesystem::remove(source_path);
+  std::filesystem::remove(archive_path);
+  EXPECT_TRUE(write_fixture(
+      source_path, encoded_media_fixture("video_audio_mono.mp4.b64")));
+  const auto stream = codec::derive_stream_id("encoded-audio-passthrough");
+  auto ingested = video::ingest_video_ffmpeg(video::FfmpegVideoIngestRequest{
+      .source_uri = source_path.string(),
+      .archive_path = archive_path,
+      .descriptor = codec::StreamDescriptor{
+          .id = stream,
+          .type = codec::StreamType::video,
+          .label = "encoded audio passthrough",
+          .source_id = "fixture",
+          .payload_type = "video/mp4",
+      },
+      .start_ns = 0,
+      .end_ns = 250'000'000,
+      .output_layout = video::PixelLayout::yuv420p8,
+      .maximum_frames = 8,
+  });
+  EXPECT_TRUE(ingested);
+  if (!ingested) {
+    std::filesystem::remove(source_path);
+    std::filesystem::remove(archive_path);
+    return;
+  }
+
+  auto archive = codec::CodaArchive::open(archive_path);
+  EXPECT_TRUE(archive);
+  auto encoded = video::query_verified_video_encoded_audio(
+      *archive, video::VideoAudioQuery{.stream = stream,
+                                      .time = std::nullopt,
+                                      .maximum_results = 1,
+                                      .maximum_encoded_bytes = 1024 * 1024});
+  EXPECT_TRUE(encoded);
+  if (encoded) EXPECT_EQ(encoded->size(), std::size_t{1});
+  if (!encoded || encoded->size() != 1U) {
+    std::filesystem::remove(source_path);
+    std::filesystem::remove(archive_path);
+    return;
+  }
+  std::vector<std::vector<std::byte>> expected_payloads;
+  for (const auto& packet : encoded->front().state.packets) {
+    expected_payloads.push_back(packet.payload);
+  }
+
+  auto exported = video::export_verified_video_mp4(
+      *archive,
+      video::VideoFrameQuery{.stream = stream,
+                             .time = std::nullopt,
+                             .maximum_results = 8,
+                             .maximum_encoded_bytes = 1024 * 1024},
+      video::VideoMp4ExportLimits{.maximum_output_bytes = 1024 * 1024});
+  EXPECT_TRUE(exported);
+  if (exported) {
+    EXPECT_TRUE(exported->audio_state_record.has_value());
+    EXPECT_TRUE(exported->audio_packet_passthrough);
+    if (exported->audio_state_record.has_value()) {
+      EXPECT_EQ(exported->audio_state_record->type_code(),
+                video::video_encoded_audio_state_record_type);
+    }
+    const auto inspected =
+        inspect_mp4(exported->output.payload, "encoded-passthrough");
+    EXPECT_EQ(inspected.audio_streams, std::size_t{1});
+    EXPECT_TRUE(inspected.decoded_audio_samples > 0U);
+    EXPECT_EQ(inspected.audio_payloads, expected_payloads);
+  }
+  std::filesystem::remove(source_path);
+  std::filesystem::remove(archive_path);
 }
 
 TEST(video_export_preserves_positive_audio_start_offset) {
@@ -507,6 +695,74 @@ TEST(video_export_old_archive_without_h1_audio_stays_video_only) {
 }
 
 #endif
+
+TEST(video_export_rejects_simultaneous_verified_audio_state_forms) {
+  const auto fixture = make_export_archive(
+      "audio-state-conflict.coda", true, true, 20'000'000, 100'000'000,
+      true);
+  auto archive = codec::CodaArchive::open(fixture.path);
+  EXPECT_TRUE(archive);
+  auto exported = video::export_verified_video_mp4(
+      *archive,
+      video::VideoFrameQuery{.stream = fixture.stream,
+                             .time = std::nullopt,
+                             .maximum_results = 8,
+                             .maximum_encoded_bytes = 1024 * 1024},
+      video::VideoMp4ExportLimits{.maximum_output_bytes = 1024 * 1024});
+  EXPECT_FALSE(exported);
+  if (!exported) {
+    EXPECT_EQ(exported.error().code,
+              video::ffmpeg_video_export_available()
+                  ? codec::ErrorCode::archive_corrupt
+                  : codec::ErrorCode::model_incompatible);
+  }
+  std::filesystem::remove(fixture.path);
+}
+
+TEST(video_export_rejects_conflicting_audio_forms_outside_time_filter) {
+  const auto fixture = make_export_archive(
+      "audio-state-filtered-conflict.coda", true, true, 20'000'000,
+      100'000'000, true, 0, 200'000'000);
+  auto archive = codec::CodaArchive::open(fixture.path);
+  EXPECT_TRUE(archive);
+  auto exported = video::export_verified_video_mp4(
+      *archive,
+      video::VideoFrameQuery{
+          .stream = fixture.stream,
+          .time = codec::RecordTimeRange{.begin_ns = 0,
+                                         .end_ns = 140'000'000},
+          .maximum_results = 8,
+          .maximum_encoded_bytes = 1024 * 1024},
+      video::VideoMp4ExportLimits{.maximum_output_bytes = 1024 * 1024});
+  EXPECT_FALSE(exported);
+  if (!exported) {
+    EXPECT_EQ(exported.error().code,
+              video::ffmpeg_video_export_available()
+                  ? codec::ErrorCode::archive_corrupt
+                  : codec::ErrorCode::model_incompatible);
+  }
+  std::filesystem::remove(fixture.path);
+}
+
+TEST(video_export_rejects_encoded_audio_leading_trim) {
+  const auto fixture = make_export_archive(
+      "encoded-audio-leading-trim.coda", true, false, 20'000'000,
+      100'000'000, true, 1);
+  auto archive = codec::CodaArchive::open(fixture.path);
+  EXPECT_TRUE(archive);
+  auto exported = video::export_verified_video_mp4(
+      *archive,
+      video::VideoFrameQuery{.stream = fixture.stream,
+                             .time = std::nullopt,
+                             .maximum_results = 8,
+                             .maximum_encoded_bytes = 1024 * 1024},
+      video::VideoMp4ExportLimits{.maximum_output_bytes = 1024 * 1024});
+  EXPECT_FALSE(exported);
+  if (!exported) {
+    EXPECT_EQ(exported.error().code, codec::ErrorCode::model_incompatible);
+  }
+  std::filesystem::remove(fixture.path);
+}
 
 TEST(video_export_invalid_verified_audio_fails_instead_of_muting) {
   const auto fixture = make_export_archive("invalid-audio.coda", true, true,

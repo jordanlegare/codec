@@ -17,6 +17,7 @@ namespace codec::profiles::video {
 inline constexpr RecordTypeCode video_profile_descriptor_record_type = 0x0100;
 inline constexpr RecordTypeCode raw_video_frame_state_record_type = 0x0101;
 inline constexpr RecordTypeCode video_pcm16_audio_state_record_type = 0x0102;
+inline constexpr RecordTypeCode video_encoded_audio_state_record_type = 0x0103;
 
 enum class PixelLayout : std::uint8_t {
   gray8 = 1,
@@ -81,6 +82,39 @@ struct RawVideoFrameState {
   bool operator==(const RawVideoFrameState&) const = default;
 };
 
+enum class EncodedAudioCodec : std::uint16_t {
+  aac = 1,
+};
+
+struct EncodedAudioPacket {
+  std::int64_t pts_offset_ns{};
+  std::int64_t dts_offset_ns{};
+  std::uint64_t duration_ns{};
+  std::uint32_t flags{};
+  std::vector<std::byte> payload;
+  bool operator==(const EncodedAudioPacket&) const = default;
+};
+
+struct EncodedAudioState {
+  EncodedAudioCodec codec{EncodedAudioCodec::aac};
+  std::int32_t codec_profile{};
+  std::uint32_t sample_rate{};
+  std::uint16_t channels{};
+  std::uint64_t decoded_frames{};
+  std::uint64_t trim_start_frames{};
+  std::uint64_t presentation_frames{};
+  std::vector<std::byte> decoder_config;
+  std::vector<EncodedAudioPacket> packets;
+  bool operator==(const EncodedAudioState&) const = default;
+};
+
+struct EncodedAudioDecodeLimits {
+  std::size_t maximum_packets{1'000'000};
+  std::uint64_t maximum_decoder_config_bytes{1024ULL * 1024ULL};
+  std::uint64_t maximum_packet_bytes{64ULL * 1024ULL * 1024ULL};
+  std::uint64_t maximum_payload_bytes{1024ULL * 1024ULL * 1024ULL};
+};
+
 Result<std::vector<std::byte>> encode_video_profile_descriptor(
     const VideoProfileDescriptor& descriptor);
 Result<VideoProfileDescriptor> decode_video_profile_descriptor(
@@ -89,6 +123,11 @@ Result<std::vector<std::byte>> encode_raw_video_frame_state(
     const RawVideoFrameState& frame);
 Result<RawVideoFrameState> decode_raw_video_frame_state(
     std::span<const std::byte> payload, VideoDecodeLimits limits = {});
+Result<std::vector<std::byte>> encode_encoded_audio_state(
+    const EncodedAudioState& state);
+Result<EncodedAudioState> decode_encoded_audio_state(
+    std::span<const std::byte> payload,
+    EncodedAudioDecodeLimits limits = {});
 
 struct VideoFrameQuery {
   std::optional<StreamId> stream;
@@ -121,6 +160,17 @@ struct VerifiedVideoPcm16Audio {
   std::vector<RecordInfo> source_records;
   StreamProvenance provenance;
 };
+
+struct VerifiedVideoEncodedAudio {
+  EncodedAudioState state;
+  RecordInfo state_record;
+  std::vector<RecordInfo> source_records;
+  StreamProvenance provenance;
+};
+
+Result<std::vector<VerifiedVideoEncodedAudio>>
+query_verified_video_encoded_audio(
+    const CodaArchive& archive, const VideoAudioQuery& query = {});
 
 Result<std::vector<VerifiedVideoPcm16Audio>> query_verified_video_pcm16_audio(
     const CodaArchive& archive, const VideoAudioQuery& query = {});

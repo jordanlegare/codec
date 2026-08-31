@@ -72,6 +72,9 @@ add_library(codec_core
   src/transport/streaming_repair.cpp
   src/transport/xor_recovery.cpp
   src/video/audio_state_reader.cpp
+  src/video/encoded_audio_capture.cpp
+  src/video/encoded_audio_state.cpp
+  src/video/encoded_audio_state_reader.cpp
   src/video/ffmpeg_export_dispatch.cpp
   src/video/ffmpeg_ingest.cpp
   src/video/ffmpeg_ingest_dispatch.cpp
@@ -216,6 +219,9 @@ if(CODEC_BUILD_TESTS)
     tests/test_video_audio_state_reader.cpp
     tests/test_video_audio_state_reader_strict.cpp
     tests/test_video_audio_review_regressions.cpp
+    tests/test_video_encoded_audio_state.cpp
+    tests/test_video_encoded_audio_state_reader.cpp
+    tests/test_video_encoded_audio_capture.cpp
     tests/test_video_export.cpp
     tests/test_video_ffmpeg_audio.cpp
     tests/test_video_ffmpeg_ingest.cpp

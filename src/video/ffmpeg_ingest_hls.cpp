@@ -601,27 +601,28 @@ Result<FfmpegVideoIngestReport> ingest_video_ffmpeg(
     if (!captured_audio.state.has_value()) {
       return finish_profile_error(
           Error{ErrorCode::internal,
-                "audio was detected but no canonical PCM16 state was produced",
+                "audio was detected but no encoded audio state was produced",
                 false});
     }
-    auto encoded_audio = encode_pcm16_state(*captured_audio.state);
+    auto encoded_audio = encode_encoded_audio_state(*captured_audio.state);
     if (!encoded_audio) return finish_profile_error(encoded_audio.error());
+    captured_audio.state.reset();
     auto audio_state = writer.append_raw(
-        video_pcm16_audio_state_record_type, request.descriptor.id,
+        video_encoded_audio_state_record_type, request.descriptor.id,
         captured_audio.start_ns, captured_audio.end_ns, *encoded_audio);
     if (!audio_state) return audio_state.error();
 
     const ProvenanceProcess audio_process{
-        .operation = hls ? "codec.video.pcm16.canonicalize.hls"
-                         : "codec.video.pcm16.canonicalize",
+        .operation = hls ? "codec.video.encoded-audio.preserve.hls"
+                         : "codec.video.encoded-audio.preserve",
         .implementation_id = "codec.video",
         .implementation_version = "1",
         .implementation_hash = std::nullopt,
         .configuration_hash = std::nullopt,
         .created_utc_ns = created_utc_ns,
         .details_type =
-            hls ? "application/vnd.codec.video.hls-audio-canonicalization.v1"
-                : "application/vnd.codec.video.audio-canonicalization.v1",
+            hls ? "application/vnd.codec.video.hls-encoded-audio.v1"
+                : "application/vnd.codec.video.encoded-audio.v1",
         .details = {std::byte{0x01}},
     };
     Result<RecordInfo> audio_provenance = [&]() -> Result<RecordInfo> {

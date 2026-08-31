@@ -167,6 +167,7 @@ grep -q '"ok":true' "$test_dir/probe-verify.json"
 # A direct audiovisual source exposes its strict H.1 PCM state through the CLI
 # and honors the dedicated decoded-audio resource bound.
 audio_archive="$test_dir/audio.coda"
+set +e
 "$codec_bin" video ingest \
   --source "$audio_fixture" \
   --archive "$audio_archive" \
@@ -176,6 +177,13 @@ audio_archive="$test_dir/audio.coda"
   --layout yuv420p8 \
   --maximum-decoded-audio-bytes 1048576 \
   > "$test_dir/audio-ingest.json"
+audio_ingest_status=$?
+set -e
+if [ "$audio_ingest_status" -ne 0 ]; then
+  echo "audiovisual CLI ingest failed with status $audio_ingest_status" >&2
+  cat "$test_dir/audio-ingest.json" >&2 || true
+  exit 1
+fi
 grep -q '"state_exact":true' "$test_dir/audio-ingest.json"
 grep -q '"audio_present":true' "$test_dir/audio-ingest.json"
 grep -q '"audio_state_exact":true' "$test_dir/audio-ingest.json"

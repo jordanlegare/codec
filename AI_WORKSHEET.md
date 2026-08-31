@@ -6,59 +6,65 @@ Canonical work loop for ChatGPT, Codex, and other agentic contributors.
 
 > Read `README.md` first. Read deeper design docs only when the task touches their subject. Do not reread large historical plans unless they are directly relevant.
 
-## Active work record — Preservation-first HLS video ingest
+## Active work record — H.1 encoded-audio preservation
 
 ```yaml
-task: Extend the H.1 FFmpeg Video Profile bridge with bounded same-origin unencrypted HTTP/HTTPS HLS capture and versioned source-frontier provenance.
+task: Replace new H.1 PCM16 audio-state writes with a bounded versioned bundle of original compressed audio packets while retaining legacy PCM16 reads and exports.
 base_ref: main
-base_head_sha: f68515068a022ef4f16eefdc1df0512b94bcec77
-work_branch: codex/video-hls-ingest
+base_head_sha: bbc286348d0a78474a4569588b91743300483c16
+work_branch: codex/encoded-audio-state
 current_version: 0.3.0
-active_roadmap_stage: H — H.1 Video Stream Profile integration follow-on; H.2 telemetry remains paused on its separate branch and Stage G remains deferred.
+active_roadmap_stage: H — user-directed H.1 storage/runtime correction before H.2 telemetry; Stage G remains deferred.
 continuity_evidence:
-  - git_head: GitHub main at f68515068a022ef4f16eefdc1df0512b94bcec77 when the HLS branch was created
-  - open_prs: draft PR 50 is the active HLS pull request
-  - exact_head_ci: Task 3 lifecycle fix GREEN in run 375 at 1bc0e6363a5475b1e958b3893739cc1d74a4ff5d; Task 4 reader RED in run 377, reader GREEN in run 378, actual-ingest RED in run 379, and complete Task 4 GREEN in run 380 at cae82fea0b14a848ef9716322511342a70a1c436; Task 5 CLI RED in run 381; final documentation/evidence head still requires exact-head CI
-  - roadmap_issue: issue 10 is the unique exact-title CODEC v1.0 roadmap execution log; runtime code and tests remain authoritative
+  - git_head: GitHub main and origin/main at bbc286348d0a78474a4569588b91743300483c16 when this isolated worktree was created
+  - open_prs: none returned by the GitHub plugin at task start; draft PR 56 now carries codex/encoded-audio-state
+  - exact_head_ci: no combined statuses or pull-request workflow runs are attached to merge commit bbc286348d0a78474a4569588b91743300483c16; exact branch-head CI is required before merge
+  - roadmap_issue: issue 10 is the unique exact-title CODEC v1.0 roadmap execution log; its merged HLS and video-export evidence is consistent with current code, while runtime code and tests remain authoritative
 roadmap_issue_title: CODEC v1.0 roadmap execution log
 scope: [other-profile, docs]
-touched_truth_classes: [S0, S1]
-current_behavior_verified_from: [code, tests, cli, cmake, changelog, HLS design]
-new_capability_claim: With the FFmpeg backend enabled, CODEC can ingest bounded same-origin unencrypted HTTP/HTTPS HLS while preserving the primary manifest and each accepted child snapshot as exact S0 before read, then emit canonical VFR1 S1 under exact versioned source-frontier provenance.
+touched_truth_classes: [S1]
+current_behavior_verified_from: [code, tests, cli, cmake, changelog, H.1 audio design]
+new_capability_claim: New H.1 audiovisual ingest preserves a bounded, versioned, provenance-verified bundle of original compressed audio packets and compatible MP4 export remuxes those packets without PCM16 persistence or AAC re-encoding; legacy 0x0102 PCM16 archives remain readable and exportable.
 change_class: profile_specific_behavior
 verification:
-  task3_exact_head: pass — CI run 375 at 1bc0e6363a5475b1e958b3893739cc1d74a4ff5d passed GCC, Clang, sanitizers/LSan, FFmpeg-disabled, install, and package consumers after the callback-open lifecycle fix
-  task4_tdd: pass — run 377 failed only on valid HLS frontier rejection after fixture correction; run 379 failed only on the legacy direct process emitted by actual HLS ingest
-  task4_green: pass — CI run 380 at cae82fea0b14a848ef9716322511342a70a1c436 passed GCC, Clang, sanitizers, FFmpeg-disabled, install, and package consumers
-  task5_cli_red: pass — CI run 381 at 432d5b2f615b40f0283d457f0411cbcd7d7395b8 failed at the new CLI contract before parser/output implementation
-  local_compile: pass for dependency-free reader/tests, CLI, and installed consumer with GCC warnings-as-errors; FFmpeg development headers are unavailable locally, so enabled production proof is authoritative in GitHub CI
-  final_exact_head_ci: pending — required after CLI/package/docs commit and before merge
+  release_configure: pass — GitHub Actions run 476, exact implementation head d77bcaa4d9ebba46474374a473878fc117d319df, GCC and Clang
+  release_build: pass — run 476 build jobs for GCC and Clang
+  tests: pass — run 476 GCC/Clang CTest, including direct/HLS ingest, export, CLI, and legacy compatibility
+  sanitizer_build: pass — run 476 ASan/UBSan/LSan build
+  sanitizer_tests: pass — run 476 sanitizer CTest
+  ffmpeg_disabled: pass — run 476 configure/build/CTest/install with CODEC_ENABLE_FFMPEG_VIDEO=OFF
+  install_and_package_consumer: pass — run 476 GCC, Clang, and FFmpeg-disabled installed-consumer gates
+  pre_review_exact_head_ci: pass — run 477 at 0c7ec4f6f1418b53e2c9db9f0a5c1c9bc2a92f02; superseded by review remediation
+  review_ci_diagnostics: runs 478 and 479 exposed HLS transport side-data and nested CLI regressions; run 481 localized the remaining CLI failure to decoder priming extending beyond the retained packet timeline
+  review_remediation: 12 EAP1 bounds/timing tests and 7 capture/timeline tests pass locally with GCC warnings-as-errors; FFmpeg-disabled ingest, HLS, and export dispatch units compile; final exact-head CI remains authoritative
+  exact_head_ci: pending on the review-remediation head; immutable PR 56 checks must pass before merge
 ```
 
 ```text
-BEFORE: The FFmpeg bridge can preserve and decode one self-contained source object, but HLS secondary opens are denied and the verified reader accepts only same-stream direct provenance.
-AFTER: Same-origin unencrypted HTTP/HTTPS HLS is captured through CODEC-owned secondary AVIO, each accepted object is exact S0 on its own stream, live decode is bounded, and each canonical HLS VFR1 S1 validates against its ordered versioned source frontier; the direct-media contract remains unchanged.
+BEFORE: H.1 stores source media as exact S0, then decodes, resamples, and accumulates the audio again as a large 0x0102 PCM16 S1 record before AAC-encoding it during MP4 export.
+AFTER: New H.1 writes store the selected stream's unchanged compressed packet payloads and codec/timeline metadata as bounded 0x0103 S1, validate audio in streaming decode without accumulating PCM, and remux compatible packets during export; old 0x0102 archives retain their existing reader/export path.
 ```
 
 ```yaml
 proof:
-  regression_test: tests/test_video_hls_ingest.cpp proves exact manifest/segment preservation, HLS process identity, ordered source frontiers, and public verified-reader retrieval; tests/test_video_state_reader.cpp proves manual valid/malformed HLS lineage while retaining direct rules
-  exactness_test: the primary manifest and committed TS fixtures are extracted byte-for-byte, child payload hashes/lengths match, and emitted VFR1 remains canonical H.1 state
-  compatibility_test: direct MP4/BMP provenance and nested-open denial remain unchanged; FFmpeg-disabled, installed-package, CLI, C ABI, audio, archive, transport, recovery, distributed, and generic unknown-record tests remain green
-  failure_path_test: encrypted/cross-origin/file/crypto/private-denied/malformed children, per-resource/aggregate/count exhaustion, callback lifecycle failures, and live-duration termination preserve every accepted S0 prefix and write no partial S1 on profile failure
-  security_test: FFmpeg never receives native network/file protocol authority; each HLS child is independently same-origin authorized, captured, bounded, archived as S0, and only then exposed through read-only memory AVIO
-  benchmark: n/a — no performance, latency, codec coverage, or scale claim is made
+  regression_test: new encoded-state schema/reader tests plus direct/HLS ingest and MP4 export tests prove 0x0103 writes, no new 0x0102 writes, and audiovisual output
+  exactness_test: packet payloads, codec parameters/extradata, timestamps, durations, flags, and presentation window round-trip byte-for-byte through encode/decode and verified ingest/query
+  compatibility_test: existing 0x0102 reader/export tests remain green; old/no-audio archives remain exportable; standalone Audio Profile and generic CODA APIs are unchanged
+  failure_path_test: malformed/forged packet bundles, count/table/configuration/payload limits, timestamp overflow/discontinuity, out-of-window packets, retained semantic side data, time-filtered state-form conflict, unsupported codec/remux, decode-validation failure, and provenance corruption fail closed without muting known audio
+  security_test: direct/HLS source authorization and memory-only FFmpeg protocol policy remain unchanged; export performs no source re-fetch
+  benchmark: fixture operation evidence proves no PCM16 state write and no AAC encoder on compatible passthrough; storage math is reported as workload-specific, not a universal throughput claim
 ```
 
 Invariant decisions:
 
-- [x] The primary manifest and every accepted HLS child are distinct exact S0 objects committed before FFmpeg reads the child; generic source extraction is never fabricated by concatenation.
-- [x] Direct media retains the exact `codec.video.raw-frame.canonicalize` same-stream contract; HLS alone uses `codec.video.raw-frame.canonicalize.hls` with the exact version byte and ordered parent/opaque-child frontier.
-- [x] FFmpeg has no native HTTP/HTTPS/file/crypto/data/concat fallback; HLS expansion is limited to CODEC-authorized same-origin HTTP/HTTPS capture.
-- [x] Encrypted and cross-origin HLS, DASH, browser-session behavior, playback, export/transcoding, GPU/model/inference, quality, performance, and scale remain explicit non-capabilities.
-- [x] Live HLS duration is a decoded-media-timeline bound, not a wall-clock recording guarantee; resource count/bytes remain independent bounds.
-- [x] Generic archive/stream/capture authorization, CLI `record`, C ABI, audio, transport, distributed, telemetry, and Stage G semantics are unchanged.
-- [x] FFmpeg-disabled builds retain the media-library-independent H.1 schema/reader and explicit backend-unavailable behavior.
+- [x] S0 source/container and HLS-resource records remain byte-exact and unchanged; 0x0103 is an additional deterministic profile state, not a replacement for S0.
+- [x] 0x0102 is a compatibility tombstone for new writes but remains supported by the existing verified reader and PCM16-to-AAC legacy export path.
+- [x] 0x0103 is profile-local, versioned, bounded, and includes exact packet bytes plus sufficient codec/timing metadata for deterministic verification and container export.
+- [x] Audio validation remains fail-closed and streaming; decoded frames are discarded and no libswresample/aggregate PCM allocation is used by new ingest.
+- [x] Logical presentation is capped to complete frames supported by retained packets; decoder priming carried only by a discarded negative-time skip packet is validated but never fabricated as presented audio.
+- [x] Compatible MP4 audio uses packet remux; unsupported exact trims or codecs fail explicitly, never silently mute.
+- [x] Direct-video and HLS video-frame provenance, authorization, CLI syntax, generic archive/C ABI, standalone Audio Profile, transport, distributed, telemetry, and Stage G semantics are unchanged.
+- [x] FFmpeg-disabled builds retain the media-library-independent encoded-audio schema/reader and explicit backend-unavailable export behavior.
 
 ## 0. Work record
 

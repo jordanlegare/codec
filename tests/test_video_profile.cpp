@@ -79,6 +79,49 @@ video::RawVideoFrameState frame(video::PixelLayout layout,
   };
 }
 
+video::EncodedVideoState encoded_video_state() {
+  return video::EncodedVideoState{
+      .codec = video::EncodedVideoCodec::h264,
+      .framing = video::EncodedVideoPacketFraming::length_prefixed,
+      .codec_profile = 100,
+      .codec_level = 40,
+      .coded_width = 1920,
+      .coded_height = 1080,
+      .sample_aspect_ratio_numerator = 1,
+      .sample_aspect_ratio_denominator = 1,
+      .validated_frames = 3,
+      .presentation_lead_ns = 0,
+      .decoder_config = {std::byte{0x01}, std::byte{0x64}, std::byte{0x00},
+                         std::byte{0x28}},
+      .packets = {
+          video::EncodedVideoPacket{
+              .pts_offset_ns = 66'666'666,
+              .dts_offset_ns = 0,
+              .duration_ns = 33'333'333,
+              .flags = 1,
+              .payload = {std::byte{0x00}, std::byte{0x00}, std::byte{0x00},
+                          std::byte{0x02}, std::byte{0x65}, std::byte{0x88}},
+          },
+          video::EncodedVideoPacket{
+              .pts_offset_ns = 0,
+              .dts_offset_ns = 33'333'333,
+              .duration_ns = 33'333'333,
+              .flags = 0,
+              .payload = {std::byte{0x00}, std::byte{0x00}, std::byte{0x00},
+                          std::byte{0x02}, std::byte{0x41}, std::byte{0x9a}},
+          },
+          video::EncodedVideoPacket{
+              .pts_offset_ns = 33'333'333,
+              .dts_offset_ns = 66'666'666,
+              .duration_ns = 33'333'334,
+              .flags = 0,
+              .payload = {std::byte{0x00}, std::byte{0x00}, std::byte{0x00},
+                          std::byte{0x02}, std::byte{0x01}, std::byte{0x20}},
+          },
+      },
+  };
+}
+
 }  // namespace
 
 TEST(video_profile_record_codes_are_profile_owned_and_stable) {
@@ -86,6 +129,69 @@ TEST(video_profile_record_codes_are_profile_owned_and_stable) {
             codec::RecordTypeCode{0x0100});
   EXPECT_EQ(video::raw_video_frame_state_record_type,
             codec::RecordTypeCode{0x0101});
+  EXPECT_EQ(video::video_pcm16_audio_state_record_type,
+            codec::RecordTypeCode{0x0102});
+  EXPECT_EQ(video::video_encoded_audio_state_record_type,
+            codec::RecordTypeCode{0x0103});
+  EXPECT_EQ(video::video_encoded_video_state_record_type,
+            codec::RecordTypeCode{0x0104});
+}
+
+TEST(video_profile_encoded_video_state_round_trips_reordered_h264_packets) {
+  const auto state = encoded_video_state();
+  auto encoded = video::encode_encoded_video_state(state);
+  EXPECT_TRUE(encoded);
+  if (!encoded) return;
+  EXPECT_EQ((*encoded)[0], std::byte{'E'});
+  EXPECT_EQ((*encoded)[1], std::byte{'V'});
+  EXPECT_EQ((*encoded)[2], std::byte{'P'});
+  EXPECT_EQ((*encoded)[3], std::byte{'1'});
+
+  auto decoded = video::decode_encoded_video_state(*encoded);
+  EXPECT_TRUE(decoded);
+  if (!decoded) return;
+  EXPECT_EQ(*decoded, state);
+  EXPECT_EQ(decoded->packets[0].pts_offset_ns, std::int64_t{66'666'666});
+  EXPECT_EQ(decoded->packets[1].pts_offset_ns, std::int64_t{0});
+  EXPECT_EQ(decoded->packets[2].pts_offset_ns, std::int64_t{33'333'333});
+}
+
+TEST(video_profile_encoded_video_state_allows_in_band_h264_configuration) {
+  auto state = encoded_video_state();
+  state.framing = video::EncodedVideoPacketFraming::annex_b;
+  state.decoder_config.clear();
+  state.packets.front().payload = {
+      std::byte{0x00}, std::byte{0x00}, std::byte{0x00}, std::byte{0x01},
+      std::byte{0x67}, std::byte{0x64}, std::byte{0x00}, std::byte{0x28}};
+
+  auto encoded = video::encode_encoded_video_state(state);
+  EXPECT_TRUE(encoded);
+  if (!encoded) return;
+  auto decoded = video::decode_encoded_video_state(*encoded);
+  EXPECT_TRUE(decoded);
+  if (decoded) EXPECT_EQ(*decoded, state);
+}
+
+TEST(video_profile_encoded_video_state_rejects_invalid_geometry_and_timing) {
+  auto state = encoded_video_state();
+  state.coded_width = 0;
+  EXPECT_FALSE(video::encode_encoded_video_state(state));
+
+  state = encoded_video_state();
+  state.validated_frames = 0;
+  EXPECT_FALSE(video::encode_encoded_video_state(state));
+
+  state = encoded_video_state();
+  state.packets.front().dts_offset_ns = -1;
+  EXPECT_FALSE(video::encode_encoded_video_state(state));
+
+  state = encoded_video_state();
+  state.packets[2].dts_offset_ns = 1;
+  EXPECT_FALSE(video::encode_encoded_video_state(state));
+
+  state = encoded_video_state();
+  state.packets.front().flags = 0x80000000U;
+  EXPECT_FALSE(video::encode_encoded_video_state(state));
 }
 
 TEST(video_profile_descriptor_encoding_matches_vpd1_golden_bytes) {

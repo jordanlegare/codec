@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -47,6 +48,15 @@ std::vector<std::byte> decode_base64(std::string_view encoded) {
   return output;
 }
 
+std::vector<std::byte> fixture(std::string_view name) {
+  const auto path = std::filesystem::path{__FILE__}.parent_path() / "fixtures" /
+                    std::string{name};
+  std::ifstream input(path, std::ios::binary);
+  std::string encoded((std::istreambuf_iterator<char>(input)),
+                      std::istreambuf_iterator<char>());
+  return decode_base64(encoded);
+}
+
 bool write_bytes(const std::filesystem::path& path,
                  const std::vector<std::byte>& bytes) {
   std::ofstream output(path, std::ios::binary | std::ios::trunc);
@@ -54,27 +64,6 @@ bool write_bytes(const std::filesystem::path& path,
   output.write(reinterpret_cast<const char*>(bytes.data()),
                static_cast<std::streamsize>(bytes.size()));
   return static_cast<bool>(output);
-}
-
-std::vector<std::byte> audiovisual_mono_fixture() {
-  constexpr std::string_view encoded =
-      "AAAAHGZ0eXBpc29tAAACAGlzb21pc28ybXA0MQAABZVtb292AAAAbG12aGQAAAAAAAAAAAAAAAAAAAPoAAAA+gABAAABAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADAAACa3RyYWsAAABcdGtoZAAAAAMAAAAAAAAAAAAAAAEAAAAAAAAA+gAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAEAAAAAACAAAAAgAAAAAACRlZHRzAAAAHGVsc3QAAAAAAAAAAQAAAPoAAAAAAAEAAAAAAeNtZGlhAAAAIG1kaGQAAAAAAAAAAAAAAAAAAEAAAAAQAFXEAAAAAAAtaGRscgAAAAAAAAAAdmlkZQAAAAAAAAAAAAAAAFZpZGVvSGFuZGxlcgAAAAGObWluZgAAABR2bWhkAAAAAQAAAAAAAAAAAAAAJGRpbmYAAAAcZHJlZgAAAAAAAAABAAAADHVybCAAAAABAAABTnN0YmwAAADqc3RzZAAAAAAAAAABAAAA2m1wNHYAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAACAAIAEgAAABIAAAAAAAAAAETTGF2YzYxLjE5LjEwMSBtcGVnNAAAAAAAAAAAAAAAAAAY//8AAABgZXNkcwAAAAADgICATwABAASAgIBBIBEAAAAAAw1AAAACgAWAgIAvAAABsAEAAAG1iRMAAAEAAAABIADEjYgAJQBEARRjAAABskxhdmM2MS4xOS4xMDEGgICAAQIAAAAQcGFzcAAAAAEAAAABAAAAFGJ0cnQAAAAAAAMNQAAAAoAAAAAYc3R0cwAAAAAAAAABAAAAAQAAEAAAAAAcc3RzYwAAAAAAAAABAAAAAQAAAAEAAAABAAAAFHN0c3oAAAAAAAAAFAAAAAEAAAAUc3RjbwAAAAAAAAABAAAHMwAAAlV0cmFrAAAAXHRraGQAAAADAAAAAAAAAAAAAAACAAAAAAAAAPoAAAAAAAAAAAAAAAEBAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAkZWR0cwAAABxlbHN0AAAAAAAAAAEAAAD6AAAEAAABAAAAAAHNbWRpYQAAACBtZGhkAAAAAAAAAAAAAAAAAAAfQAAAC9BVxAAAAAAALWhkbHIAAAAAAAAAAHNvdW4AAAAAAAAAAAAAAABTb3VuZEhhbmRsZXIAAAABeG1pbmYAAAAQc21oZAAAAAAAAAAAAAAAJGRpbmYAAAAcZHJlZgAAAAAAAAABAAAADHVybCAAAAABAAABPHN0YmwAAAB+c3RzZAAAAAAAAAABAAAAbm1wNGEAAAAAAAAAAQAAAAAAAAAAAAEAEAAAAAAfQAAAAAAANmVzZHMAAAAAA4CAgCUAAgAEgICAF0AVAAAAAABM4gAATOIFgICABRWIVuUABoCAgAECAAAAFGJ0cnQAAAAAAABM4gAATOIAAAAgc3R0cwAAAAAAAAACAAAAAgAABAAAAAABAAAD0AAAAChzdHNjAAAAAAAAAAIAAAABAAAAAQAAAAEAAAACAAAAAgAAAAEAAAAgc3RzegAAAAAAAAAAAAAAAwAAAXIAAADhAAABTwAAABhzdGNvAAAAAAAAAAIAAAXBAAAHRwAAABpzZ3BkAQAAAHJvbGwAAAACAAAAAf//AAAAHHNiZ3AAAAAAcm9sbAAAAAEAAAADAAAAAQAAAGF1ZHRhAAAAWW1ldGEAAAAAAAAAIWhkbHIAAAAAAAAAAG1kaXJhcHBsAAAAAAAAAAAAAAAALGlsc3QAAAAkqXRvbwAAABxkYXRhAAAAAQAAAABMYXZmNjEuNy4xMDMAAAAIZnJlZQAAA75tZGF03gIATGF2YzYxLjE5LjEwMQACJKdZGLCLHRkWwkuv7U676ulVWq9ev1u8uepIkjzvixbVs21bNtWzmLMOYsw5izD2V2T3V2T3V3TxdsXi7i3i7i1nZ2dnZ2dnZ2eaSaSaRnZ2cokokomdNnTZ01plplqa1NnTZ01plpmczOmtMtRWps6aUzGZjTZ03G1uNm67m67tYdDZCitJTzeWErTZar9Er0zN1p4T+xzzm9RbaFftutZbYrTHUr9Sv1Zpn2rPr8+v0Kqqr9VX59hn2GfYZauWrlpRJRJS1ctXLVy1ctKJKWrlq5auJXElElSyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy/I/kfyP5H8j+R/I/kfyP5H8j0HoOWWWWWWWWWVGjlMyzyzyzyzyzyzyzyxLCwsLCwsLEs8s8s8s8s8s8s8s8s8s8s8s8s8s8s8s/AAAAbMAEAcAAAG2EwKMKDbBZA8HARie2DiyFsoQ4shbKEOLIWzBDiyFswX//j/8f/+f/3//H//D/+n/z//z//P/1Acc0vC1AAA44f/YAAAq8KHIJQ458yOF84AHHPmRwvnAA458yOF84AABxw/+wAAAABxw/+wAAAABxw/+wAABV4UOQS1eFDkEtXhQ5BKHHP3v8L+BAA45+9/hfwIAHHP3v8L+BAAAOOaHhKQAAAABxzQ8JSAAAAAOOaHhKQAABBfw63Luq1gi/Bfw63Luq1gi/Bfw63Luq1gi+HHP3v8L+BAAAOOa/hLIAABBfw63Luq1gi/wAJKftKA7IMZfDm+A/Ljif/8//+M//x//7v/9Xipmev/p/+XWgBEVVVXLlyQhAcc+lfC+owDjn0r4X1GAcc+lfC+owlGcozlGZkqZKmSqgUCgW3wLb4Ft8BHJKJ53AEhMutIAQXMIgi8qfLAEzRCEd/pu8AAmmkSTJ33+1AJYkk5kfybxsAICkkTwudPwwBL4yBUU7fQBfpvPgAVvWJRU48lE2tysDz3pDisAALcpkYiCcshBsSsSfgv584AABaNAlKGQnrJvlfvvuvfnKYAAW9Es2CTiHIFhZBXMzfBe3st6k4u1aAAAAQcYmFuQjWqomkmQFZNFL6Lk97s3Dpvq3FqNAAAAACBiW+f/lMhiYxz4X+rRZSARymSeKStmjoPGtPSTDJCAAAAAAD91WBM7jnYVEgscmTByaGZgWYOndOh8gzdC35IU2wgAAAAAAOA=";
-  return decode_base64(encoded);
-}
-
-std::vector<std::byte> audiovisual_multichannel_fixture() {
-  constexpr std::string_view encoded =
-      "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";
-  return decode_base64(encoded);
-}
-
-std::vector<std::byte> video_only_fixture() {
-  constexpr std::string_view encoded =
-      "AAAAHGZ0eXBpc29tAAACAGlzb21pc28ybXA0MQAAA2Rtb292AAAAbG12aGQAAAAAAAAAAAAAAAAAAAPoAAAD6AABAAABAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAACj3RyYWsAAABcdGtoZAAAAAMAAAAAAAAAAAAAAAEAAAAAAAAD6AAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAEAAAAAAEAAAABAAAAAAACRlZHRzAAAAHGVsc3QAAAAAAAAAAQAAA+gAAAAAAAEAAAAAAgdtZGlhAAAAIG1kaGQAAAAAAAAAAAAAAAAAAEAAAABAAFXEAAAAAAAtaGRscgAAAAAAAAAAdmlkZQAAAAAAAAAAAAAAAFZpZGVvSGFuZGxlcgAAAAGybWluZgAAABR2bWhkAAAAAQAAAAAAAAAAAAAAJGRpbmYAAAAcZHJlZgAAAAAAAAABAAAADHVybCAAAAABAAABcnN0YmwAAADqc3RzZAAAAAAAAAABAAAA2m1wNHYAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAEAAQAEgAAABIAAAAAAAAAAETTGF2YzYxLjE5LjEwMSBtcGVnNAAAAAAAAAAAAAAAGP//AAAAYGVzZHMAAAAAA4CAgE8AAQAEgICAQQghAAAAAAMNQAAAAUgFgICAIwAAAbABAAABtYkTAAABAAAAASAAxI2IACUAhAIUYwAAAaJMYXZjNjEuMTkuMTAxBoCAgAECAAAAEHBhc3AAAAABAAAAAQAAABRidHJ0AAAAAAADDVAAAAVIAA AAGHN0dHMAAAAAAAAAAQAAAAQAAEAAAAAAFHN0c3MAAAAAAAAAAQAAAAEAAAAUc3RzYwAAAAAAAAABAAAAAQAAAAQAAAABAAAAJHN0c3oAAAAAAAAAAAAAAAQAAAAUAAAAAQAAAAcAAAAHAAAAFHN0Y28AAAAAAAAAAQAAA5AAAABhdWR0YQAAAFltZXRhAAAAAAAAACFoZGxyAAAAAAAAAABtZGlyYXBwbAAAAAAAAAAAAAAAA CxpbHN0AAAAJKl0b28AAAAcZGF0YQAAAAEAAAAATGF2ZjYxLjcuMTAzAAAACGZyZWUAAAAxbWRhdAAAA bMAEAcAAAG2EwKMKDbBaBQfAAABtleBGwAAAbZbARsAAAG2X4Eb";
-  std::string cleaned;
-  cleaned.reserve(encoded.size());
-  for (char ch : encoded) if (ch != ' ') cleaned.push_back(ch);
-  return decode_base64(cleaned);
 }
 
 video::FfmpegVideoIngestRequest request_for(
@@ -111,7 +100,7 @@ TEST(video_ffmpeg_audio_direct_ingest_writes_verified_pcm16) {
   const auto source = audio_ingest_path("mono.mp4");
   const auto archive_path = audio_ingest_path("mono.coda");
   cleanup(source, archive_path);
-  EXPECT_TRUE(write_bytes(source, audiovisual_mono_fixture()));
+  EXPECT_TRUE(write_bytes(source, fixture("video_audio_mono.mp4.b64")));
   const auto stream = codec::derive_stream_id("video-audio-direct-mono");
   auto report = video::ingest_video_ffmpeg(request_for(source, archive_path, stream));
   EXPECT_TRUE(report);
@@ -148,7 +137,7 @@ TEST(video_ffmpeg_audio_direct_ingest_reuses_existing_pcm16_encoding) {
   const auto source = audio_ingest_path("pcm-reuse.mp4");
   const auto archive_path = audio_ingest_path("pcm-reuse.coda");
   cleanup(source, archive_path);
-  EXPECT_TRUE(write_bytes(source, audiovisual_mono_fixture()));
+  EXPECT_TRUE(write_bytes(source, fixture("video_audio_mono.mp4.b64")));
   const auto stream = codec::derive_stream_id("video-audio-direct-pcm-reuse");
   auto report = video::ingest_video_ffmpeg(request_for(source, archive_path, stream));
   EXPECT_TRUE(report);
@@ -172,9 +161,11 @@ TEST(video_ffmpeg_audio_direct_no_audio_remains_video_only_exact) {
   const auto source = audio_ingest_path("video-only.mp4");
   const auto archive_path = audio_ingest_path("video-only.coda");
   cleanup(source, archive_path);
-  EXPECT_TRUE(write_bytes(source, video_only_fixture()));
+  EXPECT_TRUE(write_bytes(source, fixture("video_h264.mp4.b64")));
   const auto stream = codec::derive_stream_id("video-audio-direct-video-only");
-  auto report = video::ingest_video_ffmpeg(request_for(source, archive_path, stream));
+  auto request = request_for(source, archive_path, stream);
+  request.end_ns = 2'000'000'000;
+  auto report = video::ingest_video_ffmpeg(request);
   EXPECT_TRUE(report);
   if (report) {
     EXPECT_FALSE(report->audio_present);
@@ -191,7 +182,7 @@ TEST(video_ffmpeg_audio_direct_multichannel_is_profile_error_but_keeps_video_s1)
   const auto source = audio_ingest_path("multichannel.mp4");
   const auto archive_path = audio_ingest_path("multichannel.coda");
   cleanup(source, archive_path);
-  EXPECT_TRUE(write_bytes(source, audiovisual_multichannel_fixture()));
+  EXPECT_TRUE(write_bytes(source, fixture("video_audio_multichannel.mp4.b64")));
   const auto stream = codec::derive_stream_id("video-audio-direct-multichannel");
   auto report = video::ingest_video_ffmpeg(request_for(source, archive_path, stream));
   EXPECT_TRUE(report);
@@ -212,7 +203,7 @@ TEST(video_ffmpeg_audio_direct_audio_limit_is_enforced) {
   const auto source = audio_ingest_path("limit.mp4");
   const auto archive_path = audio_ingest_path("limit.coda");
   cleanup(source, archive_path);
-  EXPECT_TRUE(write_bytes(source, audiovisual_mono_fixture()));
+  EXPECT_TRUE(write_bytes(source, fixture("video_audio_mono.mp4.b64")));
   const auto stream = codec::derive_stream_id("video-audio-direct-limit");
   auto request = request_for(source, archive_path, stream);
   request.maximum_decoded_audio_bytes = 2;

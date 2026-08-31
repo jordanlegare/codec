@@ -135,6 +135,7 @@ struct FfmpegVideoIngestRequest {
   std::size_t capture_chunk_bytes{256U * 1024U};
   std::uint64_t maximum_source_bytes{1024ULL * 1024ULL * 1024ULL};
   std::uint64_t maximum_decoded_bytes{1024ULL * 1024ULL * 1024ULL};
+  std::uint64_t maximum_decoded_audio_bytes{1024ULL * 1024ULL * 1024ULL};
   std::size_t maximum_frames{4096};
   std::uint32_t maximum_redirects{5};
   bool deny_private_network{true};
@@ -152,10 +153,18 @@ struct FfmpegVideoIngestReport {
   std::optional<Error> profile_error;
   std::vector<RecordInfo> secondary_descriptors{};
   std::vector<RecordInfo> secondary_sources{};
+  bool audio_present{};
+  std::optional<RecordInfo> audio_state{};
+  std::optional<RecordInfo> audio_provenance{};
+
+  bool audio_state_exact() const noexcept {
+    return !audio_present ||
+           (audio_state.has_value() && audio_provenance.has_value());
+  }
 
   bool state_exact() const noexcept {
     return !states.empty() && states.size() == provenance.size() &&
-           !profile_error.has_value();
+           audio_state_exact() && !profile_error.has_value();
   }
 };
 

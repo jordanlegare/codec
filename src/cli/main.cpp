@@ -357,6 +357,8 @@ int video_export_all_command(
               << "\",\"payload_type\":\""
               << codec::detail::json_escape(exported->output.payload_type)
               << "\",\"frames\":" << exported->state_records.size()
+              << ",\"audio\":"
+              << (exported->audio_state_record.has_value() ? "true" : "false")
               << ",\"bytes\":" << exported->output.payload.size() << "}\n";
   }
   return any_failure ? 1 : 0;

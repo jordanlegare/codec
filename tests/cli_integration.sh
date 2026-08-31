@@ -172,4 +172,6 @@ fi
 
 bash "$script_dir/video_cli_integration.sh" "$codec_bin"
 bash "$script_dir/video_cli_concurrency.sh" "$codec_bin"
+bash "$script_dir/video_cli_audio_grouped.sh" "$codec_bin"
+bash "$script_dir/video_cli_audio_export_all.sh" "$codec_bin"
 bash "$script_dir/video_cli_export_all.sh" "$codec_bin"

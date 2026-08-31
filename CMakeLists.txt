@@ -25,6 +25,7 @@ if(CODEC_ENABLE_FFMPEG_VIDEO)
   pkg_check_modules(AVCODEC REQUIRED IMPORTED_TARGET libavcodec)
   pkg_check_modules(AVUTIL REQUIRED IMPORTED_TARGET libavutil)
   pkg_check_modules(SWSCALE REQUIRED IMPORTED_TARGET libswscale)
+  pkg_check_modules(SWRESAMPLE REQUIRED IMPORTED_TARGET libswresample)
   set(CODEC_HAS_FFMPEG_VIDEO ON)
 endif()
 
@@ -70,7 +71,8 @@ add_library(codec_core
   src/transport/recovery.cpp
   src/transport/streaming_repair.cpp
   src/transport/xor_recovery.cpp
-  src/video/ffmpeg_export.cpp
+  src/video/audio_state_reader.cpp
+  src/video/ffmpeg_export_dispatch.cpp
   src/video/ffmpeg_ingest.cpp
   src/video/ffmpeg_ingest_dispatch.cpp
   src/video/hls_policy.cpp
@@ -103,7 +105,8 @@ if(CODEC_HAS_FFMPEG_VIDEO)
     PkgConfig::AVFORMAT
     PkgConfig::AVCODEC
     PkgConfig::AVUTIL
-    PkgConfig::SWSCALE)
+    PkgConfig::SWSCALE
+    PkgConfig::SWRESAMPLE)
   message(STATUS "CODEC FFmpeg Video Profile ingest backend: enabled")
 else()
   message(STATUS "CODEC FFmpeg Video Profile ingest backend: unavailable (set CODEC_ENABLE_FFMPEG_VIDEO=ON to enable)")
@@ -210,7 +213,11 @@ if(CODEC_BUILD_TESTS)
     tests/test_transport_recovery_integration.cpp
     tests/test_transport_streaming_repair.cpp
     tests/test_transport_xor_recovery.cpp
+    tests/test_video_audio_state_reader.cpp
+    tests/test_video_audio_state_reader_strict.cpp
+    tests/test_video_audio_review_regressions.cpp
     tests/test_video_export.cpp
+    tests/test_video_ffmpeg_audio.cpp
     tests/test_video_ffmpeg_ingest.cpp
     tests/test_video_ffmpeg_ingest_limits.cpp
     tests/test_video_ffmpeg_layouts.cpp
@@ -227,6 +234,9 @@ if(CODEC_BUILD_TESTS)
   )
   target_include_directories(codec_tests PRIVATE tests)
   target_link_libraries(codec_tests PRIVATE codec::codec PkgConfig::FLAC)
+  if(CODEC_HAS_FFMPEG_VIDEO)
+    target_compile_definitions(codec_tests PRIVATE CODEC_TEST_HAS_FFMPEG_VIDEO=1)
+  endif()
   if(CODEC_HAS_ONNXRUNTIME)
     target_compile_definitions(codec_tests PRIVATE
       CODEC_TEST_ONNXRUNTIME_LIBRARY="${CODEC_ONNXRUNTIME_LIBRARY}")

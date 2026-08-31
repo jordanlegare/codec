@@ -140,8 +140,9 @@ inline Result<std::vector<GroupedVideoIngest>> parse_grouped_video_ingests(
           name == "--source" || name == "--label" || name == "--start-ns" ||
           name == "--end-ns" || name == "--layout" ||
           name == "--maximum-source-bytes" ||
-          name == "--maximum-decoded-bytes" || name == "--maximum-frames" ||
-          name == "--maximum-hls-resources" ||
+          name == "--maximum-decoded-bytes" ||
+          name == "--maximum-decoded-audio-bytes" ||
+          name == "--maximum-frames" || name == "--maximum-hls-resources" ||
           name == "--maximum-hls-resource-bytes" ||
           name == "--maximum-hls-total-bytes";
       if (!supported) {
@@ -191,6 +192,7 @@ inline Result<std::vector<GroupedVideoIngest>> parse_grouped_video_ingests(
 
     std::uint64_t maximum_source_bytes = 1024ULL * 1024ULL * 1024ULL;
     std::uint64_t maximum_decoded_bytes = 1024ULL * 1024ULL * 1024ULL;
+    std::uint64_t maximum_decoded_audio_bytes = 1024ULL * 1024ULL * 1024ULL;
     std::size_t maximum_frames = 4096U;
     std::size_t maximum_hls_resources = 256U;
     std::uint64_t maximum_hls_resource_bytes = 64ULL * 1024ULL * 1024ULL;
@@ -211,6 +213,9 @@ inline Result<std::vector<GroupedVideoIngest>> parse_grouped_video_ingests(
     auto parsed_decoded =
         parse_u64("--maximum-decoded-bytes", maximum_decoded_bytes);
     if (!parsed_decoded) return parsed_decoded.error();
+    auto parsed_audio = parse_u64("--maximum-decoded-audio-bytes",
+                                  maximum_decoded_audio_bytes);
+    if (!parsed_audio) return parsed_audio.error();
     auto parsed_hls_resource =
         parse_u64("--maximum-hls-resource-bytes", maximum_hls_resource_bytes);
     if (!parsed_hls_resource) return parsed_hls_resource.error();
@@ -266,6 +271,7 @@ inline Result<std::vector<GroupedVideoIngest>> parse_grouped_video_ingests(
             .output_layout = layout,
             .maximum_source_bytes = maximum_source_bytes,
             .maximum_decoded_bytes = maximum_decoded_bytes,
+            .maximum_decoded_audio_bytes = maximum_decoded_audio_bytes,
             .maximum_frames = maximum_frames,
             .maximum_hls_resources = maximum_hls_resources,
             .maximum_hls_resource_bytes = maximum_hls_resource_bytes,
@@ -395,6 +401,11 @@ inline void print_group_report(
             << ",\"provenance\":" << report.provenance.size()
             << ",\"secondary_sources\":" << report.secondary_sources.size()
             << ",\"secondary_source_bytes\":" << secondary_source_bytes
+            << ",\"audio_present\":"
+            << (report.audio_present ? "true" : "false")
+            << ",\"audio_state_exact\":"
+            << (report.audio_present && report.audio_state_exact() ? "true"
+                                                                   : "false")
             << ",\"state_exact\":"
             << (report.state_exact() ? "true" : "false")
             << ",\"preserved\":true";

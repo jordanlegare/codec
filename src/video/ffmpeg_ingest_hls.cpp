@@ -2,6 +2,7 @@
 #include "ffmpeg_ingest.cpp"
 #undef ingest_video_ffmpeg
 
+#include "ffmpeg_audio_capture.hpp"
 #include "hls_policy.hpp"
 
 #include <new>
@@ -493,6 +494,11 @@ Result<FfmpegVideoIngestReport> ingest_video_ffmpeg(
       .states = {},
       .provenance = {},
       .profile_error = std::nullopt,
+      .secondary_descriptors = {},
+      .secondary_sources = {},
+      .audio_present = false,
+      .audio_state = std::nullopt,
+      .audio_provenance = std::nullopt,
   };
   const auto finish_profile_error =
       [&writer, &report](Error error) -> Result<FfmpegVideoIngestReport> {
@@ -503,6 +509,9 @@ Result<FfmpegVideoIngestReport> ingest_video_ffmpeg(
   };
 
   const bool hls = detail::looks_like_hls_manifest(source_bytes);
+  auto audio_started = detail::begin_ffmpeg_audio_capture(request, true);
+  if (!audio_started) return finish_profile_error(audio_started.error());
+
   auto decoded = [&]() -> Result<DecodedVideo> {
     if (!hls) return decode_video_bytes(source_bytes, request);
 
@@ -524,6 +533,7 @@ Result<FfmpegVideoIngestReport> ingest_video_ffmpeg(
     };
     return decode_hls_video_bytes(source_bytes, request, session);
   }();
+  auto captured_audio = detail::take_ffmpeg_audio_capture(request);
   if (!decoded) return finish_profile_error(decoded.error());
 
   auto intervals = map_frame_times(*decoded, request);
@@ -581,6 +591,62 @@ Result<FfmpegVideoIngestReport> ingest_video_ffmpeg(
     if (!provenance) return provenance.error();
     report.states.push_back(*state_record);
     report.provenance.push_back(*provenance);
+  }
+
+  report.audio_present = captured_audio.present;
+  if (captured_audio.error.has_value()) {
+    return finish_profile_error(std::move(*captured_audio.error));
+  }
+  if (captured_audio.present) {
+    if (!captured_audio.state.has_value()) {
+      return finish_profile_error(
+          Error{ErrorCode::internal,
+                "audio was detected but no canonical PCM16 state was produced",
+                false});
+    }
+    auto encoded_audio = encode_pcm16_state(*captured_audio.state);
+    if (!encoded_audio) return finish_profile_error(encoded_audio.error());
+    auto audio_state = writer.append_raw(
+        video_pcm16_audio_state_record_type, request.descriptor.id,
+        captured_audio.start_ns, captured_audio.end_ns, *encoded_audio);
+    if (!audio_state) return audio_state.error();
+
+    const ProvenanceProcess audio_process{
+        .operation = hls ? "codec.video.pcm16.canonicalize.hls"
+                         : "codec.video.pcm16.canonicalize",
+        .implementation_id = "codec.video",
+        .implementation_version = "1",
+        .implementation_hash = std::nullopt,
+        .configuration_hash = std::nullopt,
+        .created_utc_ns = created_utc_ns,
+        .details_type =
+            hls ? "application/vnd.codec.video.hls-audio-canonicalization.v1"
+                : "application/vnd.codec.video.audio-canonicalization.v1",
+        .details = {std::byte{0x01}},
+    };
+    Result<RecordInfo> audio_provenance = [&]() -> Result<RecordInfo> {
+      if (!hls) {
+        return writer.append_stream_provenance(
+            *audio_state, TruthClass::state_exact, direct_inputs, audio_process);
+      }
+      if (report.secondary_sources.empty()) {
+        return fail<RecordInfo>(
+            ErrorCode::internal,
+            "verified HLS audio has no preserved secondary source frontier");
+      }
+      std::vector<RecordInfo> hls_audio_inputs;
+      hls_audio_inputs.reserve(1U + report.secondary_sources.size());
+      hls_audio_inputs.push_back(*source);
+      hls_audio_inputs.insert(hls_audio_inputs.end(),
+                              report.secondary_sources.begin(),
+                              report.secondary_sources.end());
+      return writer.append_stream_provenance(
+          *audio_state, TruthClass::state_exact, hls_audio_inputs,
+          audio_process);
+    }();
+    if (!audio_provenance) return audio_provenance.error();
+    report.audio_state = *audio_state;
+    report.audio_provenance = *audio_provenance;
   }
 
   auto finalized = writer.finalize();

@@ -4,6 +4,7 @@
 #include <codec/profiles/video.hpp>
 
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 namespace codec::profiles::video {
@@ -16,6 +17,8 @@ struct VerifiedVideoMp4Export {
   ExportResult output;
   std::vector<RecordInfo> state_records;
   std::vector<StreamProvenance> provenance;
+  std::optional<RecordInfo> audio_state_record{};
+  std::optional<StreamProvenance> audio_provenance{};
 };
 
 bool ffmpeg_video_export_available() noexcept;

@@ -26,7 +26,9 @@ cleanup() {
 trap cleanup EXIT
 
 fixture="$test_dir/fixture.mp4"
+audio_fixture="$test_dir/audio-fixture.mp4"
 base64 --decode "$script_dir/fixtures/video_4x4_h264.mp4.b64" > "$fixture"
+base64 --decode "$script_dir/fixtures/video_audio_mono.mp4.b64" > "$audio_fixture"
 
 "$codec_bin" --help > "$test_dir/help.txt"
 grep -Fq 'codec video ingest' "$test_dir/help.txt"
@@ -35,6 +37,14 @@ grep -Fq -- 'codec video ingest --archive FILE' "$test_dir/help.txt"
 grep -Fq -- '--maximum-hls-resources' "$test_dir/help.txt"
 grep -Fq -- '--maximum-hls-resource-bytes' "$test_dir/help.txt"
 grep -Fq -- '--maximum-hls-total-bytes' "$test_dir/help.txt"
+grep -Fxq '    --maximum-decoded-audio-bytes N' "$test_dir/help.txt"
+python3 - "$test_dir/help.txt" <<'PY'
+import sys
+lines = open(sys.argv[1], encoding="utf-8").read().splitlines()
+long = [(index + 1, len(line), line) for index, line in enumerate(lines) if len(line) > 100]
+if long:
+    raise SystemExit(f"video help contains overlong lines: {long}")
+PY
 
 set +e
 "$codec_bin" video ingest --source "$fixture" \
@@ -96,6 +106,25 @@ for hls_option in \
   [ ! -e "$invalid_hls_archive" ]
 done
 
+invalid_audio_limit_archive="$test_dir/maximum-decoded-audio-bytes.coda"
+set +e
+"$codec_bin" video ingest \
+  --source "$audio_fixture" \
+  --archive "$invalid_audio_limit_archive" \
+  --label invalid-audio-limit \
+  --start-ns 0 \
+  --end-ns 1000000000 \
+  --maximum-decoded-audio-bytes 0 \
+  > "$test_dir/maximum-decoded-audio-bytes.stdout" \
+  2> "$test_dir/maximum-decoded-audio-bytes.stderr"
+invalid_audio_limit_status=$?
+set -e
+if [ "$invalid_audio_limit_status" -ne 2 ]; then
+  echo "--maximum-decoded-audio-bytes zero case should exit 2, got $invalid_audio_limit_status" >&2
+  exit 1
+fi
+[ ! -e "$invalid_audio_limit_archive" ]
+
 probe_archive="$test_dir/probe.coda"
 set +e
 "$codec_bin" video ingest \
@@ -126,12 +155,56 @@ grep -q '"secondary_sources":0' "$test_dir/probe.stdout"
 grep -q '"secondary_source_bytes":0' "$test_dir/probe.stdout"
 grep -q '"layout":"yuv420p8"' "$test_dir/probe.stdout"
 grep -q '"stream_id":"' "$test_dir/probe.stdout"
+grep -q '"audio_present":false' "$test_dir/probe.stdout"
+grep -q '"audio_state_exact":false' "$test_dir/probe.stdout"
 if grep -Fqa "$fixture" "$probe_archive"; then
   echo "video ingest archive persisted the raw source URI/path" >&2
   exit 1
 fi
 "$codec_bin" verify "$probe_archive" --level full > "$test_dir/probe-verify.json"
 grep -q '"ok":true' "$test_dir/probe-verify.json"
+
+# A direct audiovisual source exposes its strict H.1 PCM state through the CLI
+# and honors the dedicated decoded-audio resource bound.
+audio_archive="$test_dir/audio.coda"
+"$codec_bin" video ingest \
+  --source "$audio_fixture" \
+  --archive "$audio_archive" \
+  --label camera-audio \
+  --start-ns 0 \
+  --end-ns 1000000000 \
+  --layout yuv420p8 \
+  --maximum-decoded-audio-bytes 1048576 \
+  > "$test_dir/audio-ingest.json"
+grep -q '"state_exact":true' "$test_dir/audio-ingest.json"
+grep -q '"audio_present":true' "$test_dir/audio-ingest.json"
+grep -q '"audio_state_exact":true' "$test_dir/audio-ingest.json"
+"$codec_bin" verify "$audio_archive" --level full > "$test_dir/audio-verify.json"
+grep -q '"ok":true' "$test_dir/audio-verify.json"
+
+audio_stream=$(python3 - "$test_dir/audio-ingest.json" <<'PY'
+import json
+import sys
+print(json.load(open(sys.argv[1], encoding="utf-8"))["stream_id"])
+PY
+)
+audio_export="$test_dir/audio-export.mp4"
+"$codec_bin" video export "$audio_archive" \
+  --stream "$audio_stream" \
+  --output "$audio_export" \
+  --maximum-frames 8 \
+  --maximum-input-bytes 1048576 \
+  --maximum-output-bytes 1048576 \
+  > "$test_dir/audio-export.json"
+grep -q '"payload_type":"video/mp4"' "$test_dir/audio-export.json"
+grep -q '"audio":true' "$test_dir/audio-export.json"
+test -s "$audio_export"
+python3 - "$audio_export" <<'PY'
+import sys
+payload = open(sys.argv[1], "rb").read()
+if b"soun" not in payload:
+    raise SystemExit("audiovisual CLI export has no MP4 audio handler")
+PY
 
 # Two valid repeated --video groups land in one CODA and emit ordered JSONL.
 multi_archive="$test_dir/multi.coda"
@@ -166,6 +239,8 @@ if [record["layout"] for record in records] != ["gray8", "rgb24"]:
     raise SystemExit("repeated-ingest layouts do not match their groups")
 if not all(record["state_exact"] for record in records):
     raise SystemExit("repeated-ingest group did not produce exact state")
+if any(record["audio_present"] or record["audio_state_exact"] for record in records):
+    raise SystemExit("video-only repeated-ingest group unexpectedly reported audio")
 streams = [record["stream_id"] for record in records]
 if streams[0] == streams[1]:
     raise SystemExit("distinct repeated-ingest groups unexpectedly share a stream ID")
@@ -185,6 +260,7 @@ for index in 0 1; do
     > "$test_dir/multi-$index-export.json"
   grep -q '"payload_type":"video/mp4"' "$test_dir/multi-$index-export.json"
   grep -q '"frames":1' "$test_dir/multi-$index-export.json"
+  grep -q '"audio":false' "$test_dir/multi-$index-export.json"
   test -s "$output"
 done
 
@@ -204,6 +280,7 @@ export_output="$test_dir/probe-export.mp4"
   > "$test_dir/export.json"
 grep -q '"payload_type":"video/mp4"' "$test_dir/export.json"
 grep -q '"frames":1' "$test_dir/export.json"
+grep -q '"audio":false' "$test_dir/export.json"
 grep -q "\"stream_id\":\"$probe_stream\"" "$test_dir/export.json"
 test -s "$export_output"
 python3 - "$export_output" <<'PY'
@@ -243,6 +320,8 @@ for layout in gray8 rgb24 rgba32; do
     > "$test_dir/$layout.json"
   grep -q '"state_exact":true' "$test_dir/$layout.json"
   grep -q '"frames":1' "$test_dir/$layout.json"
+  grep -q '"audio_present":false' "$test_dir/$layout.json"
+  grep -q '"audio_state_exact":false' "$test_dir/$layout.json"
   grep -q "\"layout\":\"$layout\"" "$test_dir/$layout.json"
   "$codec_bin" verify "$archive" --level full > "$test_dir/$layout-verify.json"
   grep -q '"ok":true' "$test_dir/$layout-verify.json"
@@ -267,6 +346,8 @@ if [ "$malformed_status" -ne 1 ]; then
 fi
 grep -q '"state_exact":false' "$test_dir/malformed.stdout"
 grep -q '"frames":0' "$test_dir/malformed.stdout"
+grep -q '"audio_present":false' "$test_dir/malformed.stdout"
+grep -q '"audio_state_exact":false' "$test_dir/malformed.stdout"
 grep -q '"profile_error":"decode"' "$test_dir/malformed.stdout"
 "$codec_bin" verify "$malformed_archive" --level full > "$test_dir/malformed-verify.json"
 grep -q '"ok":true' "$test_dir/malformed-verify.json"

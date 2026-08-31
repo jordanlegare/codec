@@ -192,7 +192,17 @@ struct VerifiedRawVideoFrame {
   StreamProvenance provenance;
 };
 
+struct VerifiedVideoEncodedVideo {
+  EncodedVideoState state;
+  RecordInfo state_record;
+  std::vector<RecordInfo> source_records;
+  StreamProvenance provenance;
+};
+
 Result<std::vector<VerifiedRawVideoFrame>> query_verified_raw_video_frames(
+    const CodaArchive& archive, const VideoFrameQuery& query = {});
+Result<std::vector<VerifiedVideoEncodedVideo>>
+query_verified_video_encoded_video(
     const CodaArchive& archive, const VideoFrameQuery& query = {});
 
 struct VideoAudioQuery {

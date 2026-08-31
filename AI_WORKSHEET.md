@@ -17,7 +17,7 @@ current_version: 0.3.0
 active_roadmap_stage: H — user-directed H.1 storage/runtime correction before H.2 telemetry; Stage G remains deferred.
 continuity_evidence:
   - git_head: GitHub main and origin/main at bbc286348d0a78474a4569588b91743300483c16 when this isolated worktree was created
-  - open_prs: none returned by the GitHub plugin at task start
+  - open_prs: none returned by the GitHub plugin at task start; draft PR 56 now carries codex/encoded-audio-state
   - exact_head_ci: no combined statuses or pull-request workflow runs are attached to merge commit bbc286348d0a78474a4569588b91743300483c16; exact branch-head CI is required before merge
   - roadmap_issue: issue 10 is the unique exact-title CODEC v1.0 roadmap execution log; its merged HLS and video-export evidence is consistent with current code, while runtime code and tests remain authoritative
 roadmap_issue_title: CODEC v1.0 roadmap execution log
@@ -27,14 +27,14 @@ current_behavior_verified_from: [code, tests, cli, cmake, changelog, H.1 audio d
 new_capability_claim: New H.1 audiovisual ingest preserves a bounded, versioned, provenance-verified bundle of original compressed audio packets and compatible MP4 export remuxes those packets without PCM16 persistence or AAC re-encoding; legacy 0x0102 PCM16 archives remain readable and exportable.
 change_class: profile_specific_behavior
 verification:
-  release_configure: pending
-  release_build: pending
-  tests: pending
-  sanitizer_build: pending
-  sanitizer_tests: pending
-  ffmpeg_disabled: pending
-  install_and_package_consumer: pending
-  exact_head_ci: pending
+  release_configure: pass — GitHub Actions run 476, exact implementation head d77bcaa4d9ebba46474374a473878fc117d319df, GCC and Clang
+  release_build: pass — run 476 build jobs for GCC and Clang
+  tests: pass — run 476 GCC/Clang CTest, including direct/HLS ingest, export, CLI, and legacy compatibility
+  sanitizer_build: pass — run 476 ASan/UBSan/LSan build
+  sanitizer_tests: pass — run 476 sanitizer CTest
+  ffmpeg_disabled: pass — run 476 configure/build/CTest/install with CODEC_ENABLE_FFMPEG_VIDEO=OFF
+  install_and_package_consumer: pass — run 476 GCC, Clang, and FFmpeg-disabled installed-consumer gates
+  exact_head_ci: required on the final documentation commit and recorded by immutable PR 56 checks before merge
 ```
 
 ```text
@@ -58,7 +58,7 @@ Invariant decisions:
 - [x] 0x0102 is a compatibility tombstone for new writes but remains supported by the existing verified reader and PCM16-to-AAC legacy export path.
 - [x] 0x0103 is profile-local, versioned, bounded, and includes exact packet bytes plus sufficient codec/timing metadata for deterministic verification and container export.
 - [x] Audio validation remains fail-closed and streaming; decoded frames are discarded and no libswresample/aggregate PCM allocation is used by new ingest.
-- [x] Compatible MP4 audio uses packet remux; unsupported exact trims or codecs use a bounded transient transcode path or fail explicitly, never silently mute.
+- [x] Compatible MP4 audio uses packet remux; unsupported exact trims or codecs fail explicitly, never silently mute.
 - [x] Direct-video and HLS video-frame provenance, authorization, CLI syntax, generic archive/C ABI, standalone Audio Profile, transport, distributed, telemetry, and Stage G semantics are unchanged.
 - [x] FFmpeg-disabled builds retain the media-library-independent encoded-audio schema/reader and explicit backend-unavailable export behavior.
 

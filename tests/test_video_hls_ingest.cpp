@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -34,11 +35,11 @@ std::vector<std::byte> decode_base64(std::string_view encoded) {
 
   std::vector<std::byte> output;
   output.reserve((encoded.size() * 3U) / 4U);
-  std::uint32_t accumulator = 0;
+  std::uint32_t accumulator = 0U;
   int bits = 0;
   for (const char ch : encoded) {
     if (ch == '=') break;
-    const int digit = value(ch);
+    const auto digit = value(ch);
     if (digit < 0) continue;
     accumulator = (accumulator << 6U) | static_cast<std::uint32_t>(digit);
     bits += 6;
@@ -65,9 +66,18 @@ std::filesystem::path test_path(std::string_view name) {
          ("codec-video-hls-" + std::string{name});
 }
 
+video::VideoFrameQuery query_for(const codec::StreamId& stream) {
+  return video::VideoFrameQuery{
+      .stream = stream,
+      .time = std::nullopt,
+      .maximum_results = 8,
+      .maximum_encoded_bytes = 1024U * 1024U,
+  };
+}
+
 }  // namespace
 
-TEST(video_hls_ingest_preserves_manifest_and_segments_before_decode) {
+TEST(video_hls_ingest_preserves_manifest_segments_and_emits_one_evp1) {
   if (!video::ffmpeg_video_ingest_available()) return;
 
   const auto segment0 = fixture("hls_4x4_seg0.ts.b64");
@@ -125,6 +135,9 @@ TEST(video_hls_ingest_preserves_manifest_and_segments_before_decode) {
   EXPECT_TRUE(report);
   if (!report) return;
   EXPECT_TRUE(report->state_exact());
+  EXPECT_EQ(report->states.size(), std::size_t{1});
+  EXPECT_EQ(report->states.front().type_code(),
+            video::video_encoded_video_state_record_type);
   EXPECT_EQ(report->secondary_descriptors.size(), std::size_t{2});
   EXPECT_EQ(report->secondary_sources.size(), std::size_t{2});
   EXPECT_EQ(server.requests("/live/seg0.ts"), std::size_t{1});
@@ -153,7 +166,7 @@ TEST(video_hls_ingest_preserves_manifest_and_segments_before_decode) {
   auto descriptors = archive->streams();
   EXPECT_TRUE(descriptors);
   if (descriptors) {
-    std::size_t opaque_children = 0;
+    std::size_t opaque_children = 0U;
     for (const auto& descriptor : *descriptors) {
       if (descriptor.id == stream) continue;
       ++opaque_children;
@@ -166,21 +179,25 @@ TEST(video_hls_ingest_preserves_manifest_and_segments_before_decode) {
     EXPECT_EQ(opaque_children, std::size_t{2});
   }
 
-  auto frames = video::query_verified_raw_video_frames(*archive);
-  EXPECT_TRUE(frames);
-  if (frames) {
-    EXPECT_EQ(frames->size(), std::size_t{2});
-    for (const auto& frame : *frames) {
-      EXPECT_EQ(frame.provenance.process.operation,
-                std::string{"codec.video.raw-frame.canonicalize.hls"});
-      EXPECT_TRUE(frame.source_records.size() >= std::size_t{2});
-      EXPECT_EQ(frame.source_records.front().hash, report->source.hash);
-    }
-    if (frames->size() == 2U) {
-      EXPECT_EQ(frames->back().source_records.size(), std::size_t{3});
-      EXPECT_EQ(frames->back().source_records[1].hash,
+  auto raw = video::query_verified_raw_video_frames(*archive, query_for(stream));
+  EXPECT_TRUE(raw);
+  if (raw) EXPECT_TRUE(raw->empty());
+  auto encoded = video::query_verified_video_encoded_video(*archive, query_for(stream));
+  EXPECT_TRUE(encoded);
+  if (encoded) {
+    EXPECT_EQ(encoded->size(), std::size_t{1});
+    if (!encoded->empty()) {
+      EXPECT_EQ(encoded->front().state.codec, video::EncodedVideoCodec::h264);
+      EXPECT_EQ(encoded->front().state.framing,
+                video::EncodedVideoPacketFraming::annex_b);
+      EXPECT_TRUE(!encoded->front().state.packets.empty());
+      EXPECT_EQ(encoded->front().provenance.process.operation,
+                std::string{"codec.video.encoded-video.preserve.hls"});
+      EXPECT_EQ(encoded->front().source_records.size(), std::size_t{3});
+      EXPECT_EQ(encoded->front().source_records[0].hash, report->source.hash);
+      EXPECT_EQ(encoded->front().source_records[1].hash,
                 report->secondary_sources[0].hash);
-      EXPECT_EQ(frames->back().source_records[2].hash,
+      EXPECT_EQ(encoded->front().source_records[2].hash,
                 report->secondary_sources[1].hash);
     }
   }
@@ -242,6 +259,7 @@ TEST(video_hls_ingest_reopens_same_url_as_distinct_snapshots) {
   EXPECT_EQ(report->secondary_sources.size(), std::size_t{2});
   EXPECT_EQ(server.requests("/live/same.ts"), std::size_t{2});
   EXPECT_TRUE(report->state_exact());
+  EXPECT_EQ(report->states.size(), std::size_t{1});
 
   auto archive = codec::CodaArchive::open(archive_path);
   EXPECT_TRUE(archive);

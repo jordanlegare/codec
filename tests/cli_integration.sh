@@ -35,6 +35,12 @@ expect_status_2() {
   fi
 }
 
+"$codec_bin" --version > "$test_dir/version.txt"
+grep -Fxq "codec $expected_version" "$test_dir/version.txt"
+"$codec_bin" --help > "$test_dir/help.txt"
+grep -Fq "CODEC $expected_version - " "$test_dir/help.txt"
+grep -Fq "preservation-first multi-stream capture, CODA archival, and media preservation" "$test_dir/help.txt"
+
 printf 'internet audio source bytes\n' > "$test_dir/input.bin"
 "$codec_bin" capabilities > "$test_dir/capabilities.json"
 grep -Fq "\"version\":\"$expected_version\"" "$test_dir/capabilities.json"
@@ -158,7 +164,6 @@ expect_status_2 "$test_dir/watermark.stdout" "$test_dir/watermark.stderr" \
 [ ! -e "$test_dir/issuer.key" ]
 [ ! -e "$test_dir/issuer.pub" ]
 
-"$codec_bin" --help > "$test_dir/help.txt"
 if grep -Eq 'codec watermark|codec list streams|extract .*--stream' \
     "$test_dir/help.txt"; then
   echo "help still advertises a retired CLI surface" >&2

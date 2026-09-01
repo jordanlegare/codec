@@ -31,7 +31,7 @@ using Strings = std::vector<std::string_view>;
 void usage(std::ostream& output) {
   output
       << "CODEC " << CODEC_VERSION_STRING
-      << " - preservation-first audio feed archive and identity\n\n"
+      << " - preservation-first multi-stream capture, CODA archival, and media preservation\n\n"
       << "Usage:\n"
       << "  codec capabilities\n"
       << "  codec record --archive FILE --feed LABEL=URI [--feed ...]\n"

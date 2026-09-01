@@ -6,71 +6,76 @@ Canonical work loop for ChatGPT, Codex, and other agentic contributors.
 
 > Read `README.md` first. Read deeper design docs only when the task touches their subject. Do not reread large historical plans unless they are directly relevant.
 
-## Active work record — H.1 encoded-video preservation
+## Active work record — CODEC v0.4.0 release preparation
 
 ```yaml
-task: Replace new H.1 raw-pixel VFR1 video-state writes with a bounded versioned bundle of original compressed H.264 packets while retaining legacy VFR1 reads/exports and encoded AAC preservation.
+task: Promote the merged Stage H.1 compressed-media implementation to CODEC v0.4.0 with synchronized CMake/package/CLI version reporting and release-grade user documentation.
 base_ref: main
-base_head_sha: 2900742a52c0dd8c6dea1277e767a8592db1d840
-work_branch: codex/encoded-video-state
-current_version: 0.3.0
-active_roadmap_stage: H — user-directed H.1 storage/runtime correction before H.2 telemetry; Stage G remains deferred.
+base_head_sha: 50bede31c21f5e1972d3e697ff2dd4580701f3c0
+work_branch: codex/release-0.4.0-prep
+current_version: 0.4.0
+target_version: 0.4.0
+active_roadmap_stage: H.1 is merged and release-ready; this bounded task packages that proven state as v0.4.0 without advancing to H.2 or Stage G.
 continuity_evidence:
-  - git_head: GitHub main at 2900742a52c0dd8c6dea1277e767a8592db1d840 when codex/encoded-video-state was created
-  - pull_request: PR 58 tracks codex/encoded-video-state against the unchanged base 2900742a52c0dd8c6dea1277e767a8592db1d840
-  - verified_snapshot: feature head f80268271fe54cf0570fbcbb3db6e65b359325fb passed CI run 33460186092 across GCC, Clang, sanitizers, FFmpeg-disabled, CLI integration, install, and installed-package consumers before final changelog/CMake/worksheet edits
-  - exact_head_ci: final exact-head CI remains mandatory after this worksheet update; PR checks are authoritative because recording a head SHA inside this file would itself move that SHA
-  - roadmap_issue: issue 10 is the unique exact-title CODEC v1.0 roadmap execution log; runtime code/tests remain authoritative
+  - git_head: main is 50bede31c21f5e1972d3e697ff2dd4580701f3c0, the verified merge of PR 59 leading-trim MP4 passthrough
+  - release_pr: PR 60 tracks codex/release-0.4.0-prep against that main base
+  - verified_snapshot: release-prep head 116d1333d5b8af75c3a49fd8b337d7654d254ee3 passed CI run 33485588883 across GCC, Clang, sanitizers, FFmpeg-disabled, CLI integration, install, and installed-package consumers
+  - exact_head_ci: final exact-head CI remains mandatory after this worksheet evidence commit; PR checks are authoritative because recording the final SHA inside this file would itself move that SHA
+  - release_workflow: release/v* requires branch head to equal main, CMake/README/changelog version consistency, and publishes GitHub tag/release v<version>
+  - roadmap_issue: issue 10 is the unique exact-title CODEC v1.0 roadmap execution log; current code/tests/build/docs remain authoritative
 roadmap_issue_title: CODEC v1.0 roadmap execution log
-scope: [other-profile, docs]
-touched_truth_classes: [S1]
-current_behavior_verified_from: [code, tests, cli, cmake, changelog, H.1 video design, H.1 encoded-audio implementation]
-new_capability_claim: New H.1 audiovisual ingest preserves a bounded, versioned, provenance-verified bundle of original compressed H.264 video packets plus existing encoded AAC state; compatible MP4 export remuxes those packets without persisted raw pixels, video re-encoding, PCM16 persistence, or AAC re-encoding; legacy 0x0101 VFR1 and 0x0102 PCM16 archives remain readable/exportable.
-change_class: profile_specific_behavior
+scope: [docs, cli-version, package-version]
+touched_truth_classes: []
+current_behavior_verified_from: [main HEAD, CMakeLists.txt, src/cli/main.cpp, tests/cli_integration.sh, README.md, CHANGELOG.md, docs/releases/0.4.0.md, release workflow]
+new_capability_claim: none; v0.4.0 packages already-merged H.1 behavior and synchronizes release/version documentation.
+change_class: documentation_only
 verification:
-  release_configure: pass on verified snapshot f80268271fe54cf0570fbcbb3db6e65b359325fb; final-head rerun pending
-  release_build: pass on verified snapshot f80268271fe54cf0570fbcbb3db6e65b359325fb; final-head rerun pending
-  tests: pass on verified snapshot f80268271fe54cf0570fbcbb3db6e65b359325fb; final-head rerun pending
-  sanitizer_build: pass on verified snapshot f80268271fe54cf0570fbcbb3db6e65b359325fb; final-head rerun pending
-  sanitizer_tests: pass on verified snapshot f80268271fe54cf0570fbcbb3db6e65b359325fb; final-head rerun pending
-  ffmpeg_disabled: pass on verified snapshot f80268271fe54cf0570fbcbb3db6e65b359325fb; final-head rerun pending
-  install_and_package_consumer: pass on verified snapshot f80268271fe54cf0570fbcbb3db6e65b359325fb; final-head rerun pending
-  cli_capabilities: pass through the CI/CLI integration surface on verified snapshot f80268271fe54cf0570fbcbb3db6e65b359325fb; final-head rerun pending
-  targeted_proof: pass on verified snapshot, including HLS Annex-B H.264 plus empty-config ADTS AAC remux followed by real FFmpeg re-ingest, zero-new-VFR1 assertions, EVP1 layout independence, and fail-closed irrecoverable configuration
-  exact_head_ci: pending after final worksheet commit
+  release_configure: pass on verified snapshot 116d1333d5b8af75c3a49fd8b337d7654d254ee3; final-head rerun pending
+  release_build: pass on verified snapshot 116d1333d5b8af75c3a49fd8b337d7654d254ee3; final-head rerun pending
+  tests: pass on verified snapshot 116d1333d5b8af75c3a49fd8b337d7654d254ee3; final-head rerun pending
+  sanitizer_build: pass on verified snapshot 116d1333d5b8af75c3a49fd8b337d7654d254ee3; final-head rerun pending
+  sanitizer_tests: pass on verified snapshot 116d1333d5b8af75c3a49fd8b337d7654d254ee3; final-head rerun pending
+  ffmpeg_disabled: pass on verified snapshot 116d1333d5b8af75c3a49fd8b337d7654d254ee3; final-head rerun pending
+  install_and_package_consumer: pass on verified snapshot 116d1333d5b8af75c3a49fd8b337d7654d254ee3; final-head rerun pending
+  cli_version: pass; CLI integration verifies `codec --version` = `codec 0.4.0`
+  cli_help: pass; CLI integration verifies `CODEC 0.4.0` plus the release program description
+  cli_capabilities: pass; CLI integration verifies JSON `"version":"0.4.0"`
+  release_metadata: pass on verified snapshot; CMake project version, README machine-readable manifest, changelog 0.4.0 section, CLI expected version, and package version derive consistently
+  exact_head_ci: pending after this final worksheet evidence commit
 review:
-  diff_scope: profile-local Video H.1 code, tests, fixtures, CMake source/test registration, and documentation only; no generic archive/core/C ABI behavior change
-  cleanup: unrelated CMake formatting churn removed before final verification
-  fixtures: audiovisual MP4 fixtures were regenerated with H.264 video so H.1 v1 H.264-only ingest can continue exercising AAC behavior
-  manual_review: no Critical or Important correctness issue remains after checking packet timing, HLS provenance frontier, legacy fallback, state contradiction handling, and EAP1 one-state-per-stream selection semantics
-  performance_claim: no universal ratio claimed; proof is structural removal of persisted VFR1 pixel copies plus compressed-domain EVP1/EAP1 storage/remux
+  diff_scope: CMake version, one CLI help-description line, CLI version/description assertions, README, CHANGELOG, release guide, and worksheet only
+  compatibility: no archive/API/CLI command semantics change; versioned shared-library/package metadata remains SOVERSION 0 because it derives from CMake major version
+  description: README/release guide and CLI help describe CODEC as preservation-first multi-stream capture, CODA archival, and compressed-media preservation without claiming general transcoding, identity authentication, or remote-worker service behavior
+  performance_claim: no universal storage or throughput ratio; documentation describes structural removal of VFR1/PCM16 duplication and gives workload-specific examples only
 ```
 
 ```text
-BEFORE: H.1 preserves source media as exact S0, then decodes every video frame, converts/copies the complete Gray/RGB/RGBA/YUV pixel buffer, and persists one 0x0101 VFR1 S1 record per frame. Export later MPEG-4-encodes those raw frames. Encoded AAC already uses 0x0103 packet preservation.
-AFTER: New H.1 writes preserve the selected H.264 stream's unchanged compressed packet payloads and codec/timeline metadata as bounded 0x0104 EVP1 S1 while still decoding only for fail-closed validation and discarding pixels. Compatible MP4 export remuxes EVP1 + EAP1 without video/AAC re-encoding; legacy VFR1/PCM16 readers and exports remain available.
+BEFORE: Merged main contains the H.1 EVP1/EAP1 compressed-media ingest/export implementation, but project/package/CLI metadata and release-facing documentation still identify the tree as 0.3.0 or unreleased H.1.
+AFTER: The same runtime behavior is packaged and documented consistently as CODEC 0.4.0; CMake/package metadata, `codec --help`, `codec --version`, `codec capabilities`, README, changelog, and release documentation agree on 0.4.0.
 ```
 
 ```yaml
 proof:
-  regression_test: direct and HLS ingest tests prove new video ingest writes 0x0104 EVP1 and no new 0x0101 VFR1 states
-  exactness_test: EVP1 schema/reader tests round-trip codec parameters/extradata, packet bytes, timestamps, durations, flags, dimensions, and presentation interval exactly
-  compatibility_test: existing VFR1 reader/export and 0x0102 PCM16 compatibility tests remain green; old/no-audio archives remain exportable
-  failure_path_test: malformed/forged EVP1 bundles, packet/configuration/payload limits, timestamp overflow/discontinuity, unsupported codec/framing/remux, decode-validation failure, contradictory state forms, and provenance corruption fail closed
-  security_test: direct/HLS source authorization and memory-only FFmpeg protocol policy remain unchanged; export performs no source re-fetch
-  benchmark: fixture/archive evidence proves no VFR1 pixel-state writes and no video/AAC encoder on compatible packet passthrough; storage claims remain workload-specific
+  regression_test: CLI integration verifies `--version`, help banner/description, and capabilities all use the CMake-provided 0.4.0 release identity
+  exactness_test: n/a; no S0/S1/D encoding change
+  compatibility_test: full unit/CLI/install/package-consumer matrix remains green, including legacy VFR1/PCM16 compatibility
+  failure_path_test: release workflow metadata validation remains able to reject inconsistent branch/version/changelog metadata
+  security_test: n/a; no capture/network authorization change
+  benchmark: n/a; no new performance claim
 ```
 
-Invariant decisions:
+Release documentation requirements:
 
-- [x] S0 source/container and HLS-resource records remain byte-exact and unchanged; 0x0104 is an additional deterministic profile state, not a replacement for S0.
-- [x] 0x0101 VFR1 and 0x0102 PCM16 become compatibility-only state forms for new audiovisual ingest but remain supported by verified readers and legacy export paths.
-- [x] 0x0103 EAP1 remains the encoded-audio state; its missing-AudioSpecificConfig export case is repaired without reintroducing PCM16 persistence.
-- [x] 0x0104 EVP1 is profile-local, versioned, bounded, and includes exact H.264 packet bytes plus sufficient codec/timing metadata for deterministic verification and MP4 remux.
-- [x] Video validation remains fail-closed and streaming; decoded frames are discarded and no aggregate raw-frame pixel state is persisted by new ingest.
-- [x] Compatible MP4 video/audio uses packet remux; unsupported exact framing/configuration fails explicitly rather than silently transcoding.
-- [x] Direct-video and HLS source provenance, authorization, CLI syntax, generic archive/C ABI, standalone Audio Profile, transport, distributed, telemetry, and Stage G semantics remain outside the change.
-- [x] FFmpeg-disabled builds retain media-library-independent EVP1/EAP1 schemas/readers and explicit backend-unavailable export behavior.
+- [x] Present CODEC with a concise, accurate program description suitable for the README/release page.
+- [x] Explain preservation-first S0/S1/D semantics without implying inference or identity guarantees.
+- [x] Document the v0.4.0 H.1 storage model: exact source/container S0 plus compressed H.264 EVP1 (`0x0104`) and AAC EAP1 (`0x0103`).
+- [x] State that new H.1 ingest decodes video/audio only for validation and does not persist decoded VFR1 pixels or Video Profile PCM16.
+- [x] Document direct media and same-origin unencrypted HLS capture boundaries.
+- [x] Document MP4 packet remux, Annex-B `extract_extradata`, ADTS `aac_adtstoasc`, and representable AAC leading trim via MP4 edit lists.
+- [x] Document fail-closed cases and legacy VFR1 (`0x0101`) / Video PCM16 (`0x0102`) compatibility.
+- [x] Synchronize user-visible current-release 0.3.0 references to 0.4.0 while retaining historical 0.3.0 changelog/release references.
+- [x] Add durable `docs/releases/0.4.0.md` release notes/migration guidance.
+- [x] Verify the existing `release/v0.4.0` workflow contract before publication.
 
 ## 0. Work record
 

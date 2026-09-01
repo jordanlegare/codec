@@ -75,6 +75,7 @@ add_library(codec_core
   src/video/encoded_video_state.cpp
   src/video/encoded_video_state_reader.cpp
   src/video/ffmpeg_export_dispatch.cpp
+  src/video/ffmpeg_packet_mux.cpp
   src/video/ffmpeg_ingest.cpp
   src/video/ffmpeg_ingest_dispatch.cpp
   src/video/hls_policy.cpp

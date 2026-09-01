@@ -13,37 +13,39 @@ task: Promote the merged Stage H.1 compressed-media implementation to CODEC v0.4
 base_ref: main
 base_head_sha: 50bede31c21f5e1972d3e697ff2dd4580701f3c0
 work_branch: codex/release-0.4.0-prep
-current_version: 0.3.0
+current_version: 0.4.0
 target_version: 0.4.0
 active_roadmap_stage: H.1 is merged and release-ready; this bounded task packages that proven state as v0.4.0 without advancing to H.2 or Stage G.
 continuity_evidence:
   - git_head: main is 50bede31c21f5e1972d3e697ff2dd4580701f3c0, the verified merge of PR 59 leading-trim MP4 passthrough
-  - open_prs: none at release-prep branch creation
-  - prior_exact_head_ci: PR 59 head bd7600912c2ff3bb0752226ec3568d7cba23ab02 passed CI run 33466004590 across GCC, Clang, sanitizers, FFmpeg-disabled, CLI integration, install, and installed-package consumers before merge
+  - release_pr: PR 60 tracks codex/release-0.4.0-prep against that main base
+  - verified_snapshot: release-prep head 116d1333d5b8af75c3a49fd8b337d7654d254ee3 passed CI run 33485588883 across GCC, Clang, sanitizers, FFmpeg-disabled, CLI integration, install, and installed-package consumers
+  - exact_head_ci: final exact-head CI remains mandatory after this worksheet evidence commit; PR checks are authoritative because recording the final SHA inside this file would itself move that SHA
   - release_workflow: release/v* requires branch head to equal main, CMake/README/changelog version consistency, and publishes GitHub tag/release v<version>
   - roadmap_issue: issue 10 is the unique exact-title CODEC v1.0 roadmap execution log; current code/tests/build/docs remain authoritative
 roadmap_issue_title: CODEC v1.0 roadmap execution log
 scope: [docs, cli-version, package-version]
 touched_truth_classes: []
-current_behavior_verified_from: [main HEAD, CMakeLists.txt, src/cli/main.cpp, tests/cli_integration.sh, README.md, CHANGELOG.md, release workflow]
+current_behavior_verified_from: [main HEAD, CMakeLists.txt, src/cli/main.cpp, tests/cli_integration.sh, README.md, CHANGELOG.md, docs/releases/0.4.0.md, release workflow]
 new_capability_claim: none; v0.4.0 packages already-merged H.1 behavior and synchronizes release/version documentation.
 change_class: documentation_only
 verification:
-  release_configure: pending exact-head CI
-  release_build: pending exact-head CI
-  tests: pending exact-head CI
-  sanitizer_build: pending exact-head CI
-  sanitizer_tests: pending exact-head CI
-  ffmpeg_disabled: pending exact-head CI
-  install_and_package_consumer: pending exact-head CI
-  cli_version: require `codec --version` = `codec 0.4.0`
-  cli_help: require help banner begins with `CODEC 0.4.0`
-  cli_capabilities: require JSON `"version":"0.4.0"`
-  release_metadata: require CMake project version, README machine-readable manifest, changelog section, CLI integration expected version, and package version to agree on 0.4.0
-  exact_head_ci: pending after final release-prep commit
+  release_configure: pass on verified snapshot 116d1333d5b8af75c3a49fd8b337d7654d254ee3; final-head rerun pending
+  release_build: pass on verified snapshot 116d1333d5b8af75c3a49fd8b337d7654d254ee3; final-head rerun pending
+  tests: pass on verified snapshot 116d1333d5b8af75c3a49fd8b337d7654d254ee3; final-head rerun pending
+  sanitizer_build: pass on verified snapshot 116d1333d5b8af75c3a49fd8b337d7654d254ee3; final-head rerun pending
+  sanitizer_tests: pass on verified snapshot 116d1333d5b8af75c3a49fd8b337d7654d254ee3; final-head rerun pending
+  ffmpeg_disabled: pass on verified snapshot 116d1333d5b8af75c3a49fd8b337d7654d254ee3; final-head rerun pending
+  install_and_package_consumer: pass on verified snapshot 116d1333d5b8af75c3a49fd8b337d7654d254ee3; final-head rerun pending
+  cli_version: pass; CLI integration verifies `codec --version` = `codec 0.4.0`
+  cli_help: pass; CLI integration verifies `CODEC 0.4.0` plus the release program description
+  cli_capabilities: pass; CLI integration verifies JSON `"version":"0.4.0"`
+  release_metadata: pass on verified snapshot; CMake project version, README machine-readable manifest, changelog 0.4.0 section, CLI expected version, and package version derive consistently
+  exact_head_ci: pending after this final worksheet evidence commit
 review:
-  diff_scope: version metadata, CLI version assertions, README, CHANGELOG, release documentation, and worksheet only
-  compatibility: no archive/API/CLI command semantics change; versioned shared-library/package metadata advances to major SOVERSION 0 as already derived from CMake major version
+  diff_scope: CMake version, one CLI help-description line, CLI version/description assertions, README, CHANGELOG, release guide, and worksheet only
+  compatibility: no archive/API/CLI command semantics change; versioned shared-library/package metadata remains SOVERSION 0 because it derives from CMake major version
+  description: README/release guide and CLI help describe CODEC as preservation-first multi-stream capture, CODA archival, and compressed-media preservation without claiming general transcoding, identity authentication, or remote-worker service behavior
   performance_claim: no universal storage or throughput ratio; documentation describes structural removal of VFR1/PCM16 duplication and gives workload-specific examples only
 ```
 
@@ -54,9 +56,9 @@ AFTER: The same runtime behavior is packaged and documented consistently as CODE
 
 ```yaml
 proof:
-  regression_test: CLI integration must verify `--version`, help banner, and capabilities all use the CMake-provided 0.4.0 version
+  regression_test: CLI integration verifies `--version`, help banner/description, and capabilities all use the CMake-provided 0.4.0 release identity
   exactness_test: n/a; no S0/S1/D encoding change
-  compatibility_test: full existing unit/CLI/install/package-consumer matrix remains green, including legacy VFR1/PCM16 compatibility
+  compatibility_test: full unit/CLI/install/package-consumer matrix remains green, including legacy VFR1/PCM16 compatibility
   failure_path_test: release workflow metadata validation remains able to reject inconsistent branch/version/changelog metadata
   security_test: n/a; no capture/network authorization change
   benchmark: n/a; no new performance claim
@@ -64,16 +66,16 @@ proof:
 
 Release documentation requirements:
 
-- [ ] Present CODEC with a concise, accurate program description suitable for the README/release page.
-- [ ] Explain preservation-first S0/S1/D semantics without implying inference or identity guarantees.
-- [ ] Document the v0.4.0 H.1 storage model: exact source/container S0 plus compressed H.264 EVP1 (`0x0104`) and AAC EAP1 (`0x0103`).
-- [ ] State that new H.1 ingest decodes video/audio only for validation and does not persist decoded VFR1 pixels or Video Profile PCM16.
-- [ ] Document direct MP4 and same-origin unencrypted HLS capture boundaries.
-- [ ] Document MP4 packet remux, Annex-B `extract_extradata`, ADTS `aac_adtstoasc`, and representable AAC leading trim via MP4 edit lists.
-- [ ] Document fail-closed cases and legacy VFR1 (`0x0101`) / Video PCM16 (`0x0102`) compatibility.
-- [ ] Synchronize all user-visible 0.3.0 version references that describe the current release to 0.4.0 while retaining historical 0.3.0 changelog/release references.
-- [ ] Add durable `docs/releases/0.4.0.md` release notes/migration guidance.
-- [ ] Verify the existing `release/v0.4.0` workflow contract before publication.
+- [x] Present CODEC with a concise, accurate program description suitable for the README/release page.
+- [x] Explain preservation-first S0/S1/D semantics without implying inference or identity guarantees.
+- [x] Document the v0.4.0 H.1 storage model: exact source/container S0 plus compressed H.264 EVP1 (`0x0104`) and AAC EAP1 (`0x0103`).
+- [x] State that new H.1 ingest decodes video/audio only for validation and does not persist decoded VFR1 pixels or Video Profile PCM16.
+- [x] Document direct media and same-origin unencrypted HLS capture boundaries.
+- [x] Document MP4 packet remux, Annex-B `extract_extradata`, ADTS `aac_adtstoasc`, and representable AAC leading trim via MP4 edit lists.
+- [x] Document fail-closed cases and legacy VFR1 (`0x0101`) / Video PCM16 (`0x0102`) compatibility.
+- [x] Synchronize user-visible current-release 0.3.0 references to 0.4.0 while retaining historical 0.3.0 changelog/release references.
+- [x] Add durable `docs/releases/0.4.0.md` release notes/migration guidance.
+- [x] Verify the existing `release/v0.4.0` workflow contract before publication.
 
 ## 0. Work record
 

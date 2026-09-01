@@ -1,4 +1,5 @@
 #include "test.hpp"
+#include "hls_http_fixture.hpp"
 
 #include <codec/profiles/video.hpp>
 #include <codec/profiles/video_export.hpp>
@@ -60,6 +61,11 @@ std::vector<std::byte> media_fixture(std::string_view name) {
   return decode_base64(encoded);
 }
 
+std::vector<std::byte> bytes(std::string_view text) {
+  const auto view = std::as_bytes(std::span{text.data(), text.size()});
+  return {view.begin(), view.end()};
+}
+
 bool write_bytes(const std::filesystem::path& path,
                  std::span<const std::byte> bytes) {
   std::ofstream output(path, std::ios::binary | std::ios::trunc);
@@ -67,6 +73,53 @@ bool write_bytes(const std::filesystem::path& path,
   output.write(reinterpret_cast<const char*>(bytes.data()),
                static_cast<std::streamsize>(bytes.size()));
   return static_cast<bool>(output);
+}
+
+HlsHttpFixture hls_adts_server() {
+  const auto master = bytes(
+      "#EXTM3U\n"
+      "#EXT-X-VERSION:3\n"
+      "#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID=\"audio\",NAME=\"mono\",DEFAULT=YES,AUTOSELECT=YES,URI=\"audio.m3u8\"\n"
+      "#EXT-X-STREAM-INF:BANDWIDTH=100000,CODECS=\"avc1.42c00a,mp4a.40.2\",AUDIO=\"audio\"\n"
+      "video.m3u8\n");
+  const auto video_manifest = bytes(
+      "#EXTM3U\n"
+      "#EXT-X-VERSION:3\n"
+      "#EXT-X-TARGETDURATION:1\n"
+      "#EXT-X-MEDIA-SEQUENCE:0\n"
+      "#EXTINF:1.000000,\n"
+      "video.ts\n"
+      "#EXT-X-ENDLIST\n");
+  const auto audio_manifest = bytes(
+      "#EXTM3U\n"
+      "#EXT-X-VERSION:3\n"
+      "#EXT-X-TARGETDURATION:1\n"
+      "#EXT-X-MEDIA-SEQUENCE:0\n"
+      "#EXTINF:0.250000,\n"
+      "audio.ts\n"
+      "#EXT-X-ENDLIST\n");
+  return HlsHttpFixture({
+      {"/master.m3u8",
+       HlsHttpResponse{.status = 200,
+                       .content_type = "application/vnd.apple.mpegurl",
+                       .body = master}},
+      {"/video.m3u8",
+       HlsHttpResponse{.status = 200,
+                       .content_type = "application/vnd.apple.mpegurl",
+                       .body = video_manifest}},
+      {"/audio.m3u8",
+       HlsHttpResponse{.status = 200,
+                       .content_type = "application/vnd.apple.mpegurl",
+                       .body = audio_manifest}},
+      {"/video.ts",
+       HlsHttpResponse{.status = 200,
+                       .content_type = "video/mp2t",
+                       .body = media_fixture("hls_4x4_seg0.ts.b64")}},
+      {"/audio.ts",
+       HlsHttpResponse{.status = 200,
+                       .content_type = "video/mp2t",
+                       .body = media_fixture("hls_audio_mono.ts.b64")}},
+  });
 }
 
 video::RawVideoFrameState frame(std::uint8_t luma) {
@@ -129,10 +182,12 @@ struct TrimArchive {
   video::EncodedAudioState audio;
 };
 
-TrimArchive make_trim_archive(const video::EncodedAudioState& source_state) {
-  const auto path = trim_test_path("leading-trim.coda");
+TrimArchive make_trim_archive(const video::EncodedAudioState& source_state,
+                              std::string_view name) {
+  const auto path = trim_test_path(std::string{name} + ".coda");
   std::filesystem::remove(path);
-  const auto stream = codec::derive_stream_id("aac-leading-trim-export");
+  const auto stream = codec::derive_stream_id(std::string{"aac-leading-trim-"} +
+                                               std::string{name});
 
   auto state = source_state;
   EXPECT_EQ(state.trim_start_frames, std::uint64_t{0});
@@ -211,6 +266,24 @@ TrimArchive make_trim_archive(const video::EncodedAudioState& source_state) {
   return TrimArchive{path, stream, std::move(state)};
 }
 
+video::VideoFrameQuery video_query(const codec::StreamId& stream) {
+  return video::VideoFrameQuery{
+      .stream = stream,
+      .time = std::nullopt,
+      .maximum_results = 8,
+      .maximum_encoded_bytes = 1024U * 1024U,
+  };
+}
+
+video::VideoAudioQuery audio_query(const codec::StreamId& stream) {
+  return video::VideoAudioQuery{
+      .stream = stream,
+      .time = std::nullopt,
+      .maximum_results = 1,
+      .maximum_encoded_bytes = 1024U * 1024U,
+  };
+}
+
 }  // namespace
 
 TEST(video_export_passthrough_represents_aac_leading_trim_with_mp4_edit_list) {
@@ -247,25 +320,17 @@ TEST(video_export_passthrough_represents_aac_leading_trim_with_mp4_edit_list) {
   EXPECT_TRUE(source_archive);
   if (!source_archive) return;
   auto encoded = video::query_verified_video_encoded_audio(
-      *source_archive,
-      video::VideoAudioQuery{.stream = source_stream,
-                             .time = std::nullopt,
-                             .maximum_results = 1,
-                             .maximum_encoded_bytes = 1024U * 1024U});
+      *source_archive, audio_query(source_stream));
   EXPECT_TRUE(encoded);
   if (!encoded || encoded->size() != 1U) return;
   EXPECT_TRUE(!encoded->front().state.decoder_config.empty());
 
-  auto fixture = make_trim_archive(encoded->front().state);
+  auto fixture = make_trim_archive(encoded->front().state, "asc");
   auto archive = codec::CodaArchive::open(fixture.path);
   EXPECT_TRUE(archive);
   if (!archive) return;
   auto exported = video::export_verified_video_mp4(
-      *archive,
-      video::VideoFrameQuery{.stream = fixture.stream,
-                             .time = std::nullopt,
-                             .maximum_results = 8,
-                             .maximum_encoded_bytes = 1024U * 1024U},
+      *archive, video_query(fixture.stream),
       video::VideoMp4ExportLimits{.maximum_output_bytes = 1024U * 1024U});
   EXPECT_TRUE(exported);
   if (exported) {
@@ -276,4 +341,59 @@ TEST(video_export_passthrough_represents_aac_leading_trim_with_mp4_edit_list) {
   std::filesystem::remove(fixture.path);
   std::filesystem::remove(source_archive_path);
   std::filesystem::remove(source_path);
+}
+
+TEST(video_export_passthrough_represents_adts_aac_leading_trim_with_mp4_edit_list) {
+  if (!video::ffmpeg_video_ingest_available() ||
+      !video::ffmpeg_video_export_available()) {
+    return;
+  }
+
+  auto server = hls_adts_server();
+  const auto source_archive_path = trim_test_path("adts-source.coda");
+  std::filesystem::remove(source_archive_path);
+  const auto source_stream = codec::derive_stream_id("aac-leading-trim-adts-source");
+  auto ingested = video::ingest_video_ffmpeg(video::FfmpegVideoIngestRequest{
+      .source_uri = server.url("/master.m3u8"),
+      .archive_path = source_archive_path,
+      .descriptor = codec::StreamDescriptor{
+          .id = source_stream,
+          .type = codec::StreamType::video,
+          .label = "ADTS AAC leading trim source",
+          .source_id = "fixture",
+          .payload_type = "application/vnd.apple.mpegurl",
+      },
+      .start_ns = 0,
+      .end_ns = 1'000'000'000,
+      .output_layout = video::PixelLayout::yuv420p8,
+      .maximum_frames = 4,
+      .deny_private_network = false,
+  });
+  EXPECT_TRUE(ingested);
+  if (!ingested) return;
+
+  auto source_archive = codec::CodaArchive::open(source_archive_path);
+  EXPECT_TRUE(source_archive);
+  if (!source_archive) return;
+  auto encoded = video::query_verified_video_encoded_audio(
+      *source_archive, audio_query(source_stream));
+  EXPECT_TRUE(encoded);
+  if (!encoded || encoded->size() != 1U) return;
+  EXPECT_TRUE(encoded->front().state.decoder_config.empty());
+
+  auto fixture = make_trim_archive(encoded->front().state, "adts");
+  auto archive = codec::CodaArchive::open(fixture.path);
+  EXPECT_TRUE(archive);
+  if (!archive) return;
+  auto exported = video::export_verified_video_mp4(
+      *archive, video_query(fixture.stream),
+      video::VideoMp4ExportLimits{.maximum_output_bytes = 1024U * 1024U});
+  EXPECT_TRUE(exported);
+  if (exported) {
+    EXPECT_TRUE(exported->audio_packet_passthrough);
+    EXPECT_TRUE(exported->audio_state_record.has_value());
+  }
+
+  std::filesystem::remove(fixture.path);
+  std::filesystem::remove(source_archive_path);
 }

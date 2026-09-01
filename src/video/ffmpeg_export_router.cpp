@@ -1,3 +1,4 @@
+#include "ffmpeg_aac_trim_mux.hpp"
 #include "ffmpeg_packet_mux.hpp"
 
 #define export_verified_video_mp4 export_verified_video_mp4_video_only
@@ -128,7 +129,7 @@ Result<VerifiedVideoMp4Export> export_verified_video_mp4(
   const bool packet_passthrough = !encoded_audio->empty();
   const auto muxed = [&]() -> Result<std::vector<std::byte>> {
     if (packet_passthrough) {
-      return mux_verified_encoded_audio_packets(
+      return mux_verified_encoded_audio_trim_aware(
           video_only->output.payload, encoded_audio->front(),
           video_only->state_records.front().start_ns,
           limits.maximum_output_bytes);

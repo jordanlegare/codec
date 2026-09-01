@@ -25,7 +25,7 @@ roadmap_issue_title: CODEC v1.0 roadmap execution log
 scope: [other-profile, docs]
 touched_truth_classes: [S1]
 current_behavior_verified_from: [code, tests, cli, cmake, changelog, H.1 video design, H.1 encoded-audio implementation]
-new_capability_claim: New H.1 audiovisual ingest preserves a bounded, versioned, provenance-verified bundle of original compressed H.264 video packets plus existing encoded AAC state; compatible MP4 export remuxes those packets without persisted raw pixels, H.264 re-encoding, PCM16 persistence, or AAC re-encoding; legacy 0x0101 VFR1 and 0x0102 PCM16 archives remain readable/exportable.
+new_capability_claim: New H.1 audiovisual ingest preserves a bounded, versioned, provenance-verified bundle of original compressed H.264 video packets plus existing encoded AAC state; compatible MP4 export remuxes those packets without persisted raw pixels, video re-encoding, PCM16 persistence, or AAC re-encoding; legacy 0x0101 VFR1 and 0x0102 PCM16 archives remain readable/exportable.
 change_class: profile_specific_behavior
 verification:
   release_configure: pass on verified snapshot f80268271fe54cf0570fbcbb3db6e65b359325fb; final-head rerun pending
@@ -47,8 +47,8 @@ review:
 ```
 
 ```text
-BEFORE: H.1 preserves source media as exact S0, then decodes every video frame, converts/copies the complete Gray/RGB/RGBA/YUV pixel buffer, and persists one 0x0101 VFR1 S1 record per frame. Export later H.264-encodes those raw frames. Encoded AAC already uses 0x0103 packet preservation.
-AFTER: New H.1 writes preserve the selected H.264 stream's unchanged compressed packet payloads and codec/timeline metadata as bounded 0x0104 EVP1 S1 while still decoding only for fail-closed validation and discarding pixels. Compatible MP4 export remuxes EVP1 + EAP1 without H.264/AAC re-encoding; legacy VFR1/PCM16 readers and exports remain available.
+BEFORE: H.1 preserves source media as exact S0, then decodes every video frame, converts/copies the complete Gray/RGB/RGBA/YUV pixel buffer, and persists one 0x0101 VFR1 S1 record per frame. Export later MPEG-4-encodes those raw frames. Encoded AAC already uses 0x0103 packet preservation.
+AFTER: New H.1 writes preserve the selected H.264 stream's unchanged compressed packet payloads and codec/timeline metadata as bounded 0x0104 EVP1 S1 while still decoding only for fail-closed validation and discarding pixels. Compatible MP4 export remuxes EVP1 + EAP1 without video/AAC re-encoding; legacy VFR1/PCM16 readers and exports remain available.
 ```
 
 ```yaml
@@ -58,7 +58,7 @@ proof:
   compatibility_test: existing VFR1 reader/export and 0x0102 PCM16 compatibility tests remain green; old/no-audio archives remain exportable
   failure_path_test: malformed/forged EVP1 bundles, packet/configuration/payload limits, timestamp overflow/discontinuity, unsupported codec/framing/remux, decode-validation failure, contradictory state forms, and provenance corruption fail closed
   security_test: direct/HLS source authorization and memory-only FFmpeg protocol policy remain unchanged; export performs no source re-fetch
-  benchmark: fixture/archive evidence proves no VFR1 pixel-state writes and no H.264/AAC encoder on compatible packet passthrough; storage claims remain workload-specific
+  benchmark: fixture/archive evidence proves no VFR1 pixel-state writes and no video/AAC encoder on compatible packet passthrough; storage claims remain workload-specific
 ```
 
 Invariant decisions:

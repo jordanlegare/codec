@@ -192,9 +192,9 @@ TEST(video_export_remuxes_hls_annex_b_h264_and_adts_aac) {
   EXPECT_TRUE(exported);
   if (exported) {
     EXPECT_TRUE(has_mp4_ftyp(exported->output.payload));
-    EXPECT_TRUE(exported->encoded_audio_passthrough);
+    EXPECT_TRUE(exported->audio_packet_passthrough);
     EXPECT_TRUE(!exported->state_records.empty());
-    EXPECT_TRUE(!exported->audio_state_records.empty());
+    EXPECT_TRUE(exported->audio_state_record.has_value());
   }
 
   std::filesystem::remove(archive_path);

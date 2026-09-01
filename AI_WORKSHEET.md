@@ -17,8 +17,9 @@ current_version: 0.3.0
 active_roadmap_stage: H — user-directed H.1 storage/runtime correction before H.2 telemetry; Stage G remains deferred.
 continuity_evidence:
   - git_head: GitHub main at 2900742a52c0dd8c6dea1277e767a8592db1d840 when codex/encoded-video-state was created
-  - open_prs: GitHub returned no open pull requests at task start
-  - exact_head_ci: main merge commit 2900742a52c0dd8c6dea1277e767a8592db1d840 has no combined status contexts; exact feature-head CI is required before merge
+  - pull_request: PR 58 tracks codex/encoded-video-state against the unchanged base 2900742a52c0dd8c6dea1277e767a8592db1d840
+  - verified_snapshot: feature head f80268271fe54cf0570fbcbb3db6e65b359325fb passed CI run 33460186092 across GCC, Clang, sanitizers, FFmpeg-disabled, CLI integration, install, and installed-package consumers before final changelog/CMake/worksheet edits
+  - exact_head_ci: final exact-head CI remains mandatory after this worksheet update; PR checks are authoritative because recording a head SHA inside this file would itself move that SHA
   - roadmap_issue: issue 10 is the unique exact-title CODEC v1.0 roadmap execution log; runtime code/tests remain authoritative
 roadmap_issue_title: CODEC v1.0 roadmap execution log
 scope: [other-profile, docs]
@@ -27,16 +28,22 @@ current_behavior_verified_from: [code, tests, cli, cmake, changelog, H.1 video d
 new_capability_claim: New H.1 audiovisual ingest preserves a bounded, versioned, provenance-verified bundle of original compressed H.264 video packets plus existing encoded AAC state; compatible MP4 export remuxes those packets without persisted raw pixels, H.264 re-encoding, PCM16 persistence, or AAC re-encoding; legacy 0x0101 VFR1 and 0x0102 PCM16 archives remain readable/exportable.
 change_class: profile_specific_behavior
 verification:
-  release_configure: pending
-  release_build: pending
-  tests: pending
-  sanitizer_build: pending
-  sanitizer_tests: pending
-  ffmpeg_disabled: pending
-  install_and_package_consumer: pending
-  cli_capabilities: pending
-  targeted_proof: pending
-  exact_head_ci: pending
+  release_configure: pass on verified snapshot f80268271fe54cf0570fbcbb3db6e65b359325fb; final-head rerun pending
+  release_build: pass on verified snapshot f80268271fe54cf0570fbcbb3db6e65b359325fb; final-head rerun pending
+  tests: pass on verified snapshot f80268271fe54cf0570fbcbb3db6e65b359325fb; final-head rerun pending
+  sanitizer_build: pass on verified snapshot f80268271fe54cf0570fbcbb3db6e65b359325fb; final-head rerun pending
+  sanitizer_tests: pass on verified snapshot f80268271fe54cf0570fbcbb3db6e65b359325fb; final-head rerun pending
+  ffmpeg_disabled: pass on verified snapshot f80268271fe54cf0570fbcbb3db6e65b359325fb; final-head rerun pending
+  install_and_package_consumer: pass on verified snapshot f80268271fe54cf0570fbcbb3db6e65b359325fb; final-head rerun pending
+  cli_capabilities: pass through the CI/CLI integration surface on verified snapshot f80268271fe54cf0570fbcbb3db6e65b359325fb; final-head rerun pending
+  targeted_proof: pass on verified snapshot, including HLS Annex-B H.264 plus empty-config ADTS AAC remux followed by real FFmpeg re-ingest, zero-new-VFR1 assertions, EVP1 layout independence, and fail-closed irrecoverable configuration
+  exact_head_ci: pending after final worksheet commit
+review:
+  diff_scope: profile-local Video H.1 code, tests, fixtures, CMake source/test registration, and documentation only; no generic archive/core/C ABI behavior change
+  cleanup: unrelated CMake formatting churn removed before final verification
+  fixtures: audiovisual MP4 fixtures were regenerated with H.264 video so H.1 v1 H.264-only ingest can continue exercising AAC behavior
+  manual_review: no Critical or Important correctness issue remains after checking packet timing, HLS provenance frontier, legacy fallback, state contradiction handling, and EAP1 one-state-per-stream selection semantics
+  performance_claim: no universal ratio claimed; proof is structural removal of persisted VFR1 pixel copies plus compressed-domain EVP1/EAP1 storage/remux
 ```
 
 ```text

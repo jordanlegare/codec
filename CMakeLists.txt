@@ -29,6 +29,9 @@ if(CODEC_ENABLE_FFMPEG_VIDEO)
   set(CODEC_HAS_FFMPEG_VIDEO ON)
 endif()
 
+# Keep the proven direct-media implementation intact while the public entry
+# point grows HLS-specific validation and dispatch. Task 2 removes this
+# transitional rename when HLS is integrated at the decode seam.
 set_source_files_properties(src/video/ffmpeg_ingest.cpp PROPERTIES
   COMPILE_DEFINITIONS "ingest_video_ffmpeg=ingest_video_ffmpeg_direct")
 
@@ -94,18 +97,23 @@ set_target_properties(codec_core PROPERTIES
   SOVERSION ${PROJECT_VERSION_MAJOR}
   POSITION_INDEPENDENT_CODE ON
 )
-target_include_directories(codec_core PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
-  PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_include_directories(codec_core
+  PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+  PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
 target_link_libraries(codec_core PUBLIC OpenSSL::Crypto CURL::libcurl PkgConfig::FLAC)
 target_link_libraries(codec_core PRIVATE ${CMAKE_DL_LIBS})
 
 if(CODEC_HAS_FFMPEG_VIDEO)
   target_compile_definitions(codec_core PRIVATE CODEC_HAS_FFMPEG_VIDEO=1)
   target_link_libraries(codec_core PUBLIC
-    PkgConfig::AVFORMAT PkgConfig::AVCODEC PkgConfig::AVUTIL
-    PkgConfig::SWSCALE PkgConfig::SWRESAMPLE)
+    PkgConfig::AVFORMAT
+    PkgConfig::AVCODEC
+    PkgConfig::AVUTIL
+    PkgConfig::SWSCALE
+    PkgConfig::SWRESAMPLE)
   message(STATUS "CODEC FFmpeg Video Profile ingest backend: enabled")
 else()
   message(STATUS "CODEC FFmpeg Video Profile ingest backend: unavailable (set CODEC_ENABLE_FFMPEG_VIDEO=ON to enable)")
@@ -113,17 +121,25 @@ endif()
 
 set(CODEC_HAS_ONNXRUNTIME OFF)
 if(CODEC_ONNXRUNTIME_ROOT)
-  find_path(CODEC_ONNXRUNTIME_INCLUDE_DIR NAMES onnxruntime_c_api.h
-    PATHS "${CODEC_ONNXRUNTIME_ROOT}/include" NO_DEFAULT_PATH)
+  find_path(CODEC_ONNXRUNTIME_INCLUDE_DIR
+    NAMES onnxruntime_c_api.h
+    PATHS "${CODEC_ONNXRUNTIME_ROOT}/include"
+    NO_DEFAULT_PATH)
   if(WIN32)
-    find_file(CODEC_ONNXRUNTIME_LIBRARY NAMES onnxruntime.dll
-      PATHS "${CODEC_ONNXRUNTIME_ROOT}/lib" "${CODEC_ONNXRUNTIME_ROOT}/bin" NO_DEFAULT_PATH)
+    find_file(CODEC_ONNXRUNTIME_LIBRARY
+      NAMES onnxruntime.dll
+      PATHS "${CODEC_ONNXRUNTIME_ROOT}/lib"
+            "${CODEC_ONNXRUNTIME_ROOT}/bin"
+      NO_DEFAULT_PATH)
   else()
-    find_library(CODEC_ONNXRUNTIME_LIBRARY NAMES onnxruntime
-      PATHS "${CODEC_ONNXRUNTIME_ROOT}/lib" NO_DEFAULT_PATH)
+    find_library(CODEC_ONNXRUNTIME_LIBRARY
+      NAMES onnxruntime
+      PATHS "${CODEC_ONNXRUNTIME_ROOT}/lib"
+      NO_DEFAULT_PATH)
   endif()
   if(NOT CODEC_ONNXRUNTIME_INCLUDE_DIR OR NOT CODEC_ONNXRUNTIME_LIBRARY)
-    message(FATAL_ERROR "CODEC_ONNXRUNTIME_ROOT must contain include/onnxruntime_c_api.h and the ONNX Runtime shared library")
+    message(FATAL_ERROR
+      "CODEC_ONNXRUNTIME_ROOT must contain include/onnxruntime_c_api.h and the ONNX Runtime shared library")
   endif()
   set(CODEC_HAS_ONNXRUNTIME ON)
   target_include_directories(codec_core PRIVATE ${CODEC_ONNXRUNTIME_INCLUDE_DIR})
@@ -158,9 +174,15 @@ codec_enable_warnings(codec_core)
 codec_enable_sanitizers(codec_core)
 
 add_executable(codec_cli src/cli/main.cpp)
-set_target_properties(codec_cli PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED YES CXX_EXTENSIONS NO OUTPUT_NAME codec)
+set_target_properties(codec_cli PROPERTIES
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED YES
+  CXX_EXTENSIONS NO
+  OUTPUT_NAME codec
+)
 target_include_directories(codec_cli PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_compile_definitions(codec_cli PRIVATE CODEC_VERSION_STRING="${PROJECT_VERSION}")
+target_compile_definitions(codec_cli PRIVATE
+  CODEC_VERSION_STRING="${PROJECT_VERSION}")
 target_link_libraries(codec_cli PRIVATE codec::codec)
 codec_enable_warnings(codec_cli)
 codec_enable_sanitizers(codec_cli)
@@ -216,51 +238,89 @@ if(CODEC_BUILD_TESTS)
     tests/test_video_hls_failures.cpp
     tests/test_video_hls_policy.cpp
     tests/test_video_profile.cpp
-    tests/test_video_state_reader.cpp)
-  set_target_properties(codec_tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED YES CXX_EXTENSIONS NO)
+    tests/test_video_state_reader.cpp
+  )
+  set_target_properties(codec_tests PROPERTIES
+    CXX_STANDARD 20
+    CXX_STANDARD_REQUIRED YES
+    CXX_EXTENSIONS NO
+  )
   target_include_directories(codec_tests PRIVATE tests)
   target_link_libraries(codec_tests PRIVATE codec::codec PkgConfig::FLAC)
   if(CODEC_HAS_FFMPEG_VIDEO)
     target_compile_definitions(codec_tests PRIVATE CODEC_TEST_HAS_FFMPEG_VIDEO=1)
   endif()
   if(CODEC_HAS_ONNXRUNTIME)
-    target_compile_definitions(codec_tests PRIVATE CODEC_TEST_ONNXRUNTIME_LIBRARY="${CODEC_ONNXRUNTIME_LIBRARY}")
+    target_compile_definitions(codec_tests PRIVATE
+      CODEC_TEST_ONNXRUNTIME_LIBRARY="${CODEC_ONNXRUNTIME_LIBRARY}")
   endif()
   codec_enable_warnings(codec_tests)
   codec_enable_sanitizers(codec_tests)
-  if(CODEC_ENABLE_SANITIZERS AND CODEC_HAS_ONNXRUNTIME AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-    add_test(NAME codec-unit COMMAND codec_tests --exclude-prefix audio_onnx_cpu_runtime_)
-    add_test(NAME codec-onnx-runtime COMMAND codec_tests --include-prefix audio_onnx_cpu_runtime_)
-    set_tests_properties(codec-onnx-runtime PROPERTIES ENVIRONMENT "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/tests/lsan_onnxruntime.supp:print_suppressions=1")
+
+  if(CODEC_ENABLE_SANITIZERS AND CODEC_HAS_ONNXRUNTIME AND
+     CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    add_test(NAME codec-unit
+      COMMAND codec_tests --exclude-prefix audio_onnx_cpu_runtime_)
+    add_test(NAME codec-onnx-runtime
+      COMMAND codec_tests --include-prefix audio_onnx_cpu_runtime_)
+    set_tests_properties(codec-onnx-runtime PROPERTIES
+      ENVIRONMENT
+        "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/tests/lsan_onnxruntime.supp:print_suppressions=1")
   else()
     add_test(NAME codec-unit COMMAND codec_tests)
   endif()
+
   add_executable(codec_c_api_test tests/test_c_api.c)
   set_target_properties(codec_c_api_test PROPERTIES LINKER_LANGUAGE CXX)
   target_link_libraries(codec_c_api_test PRIVATE codec::codec)
   codec_enable_warnings(codec_c_api_test)
   codec_enable_sanitizers(codec_c_api_test)
   add_test(NAME codec-c-api COMMAND codec_c_api_test)
-  add_test(NAME codec-cli-integration COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/cli_integration.sh $<TARGET_FILE:codec_cli> ${PROJECT_VERSION})
-  add_test(NAME codec-ai-contract COMMAND ${CMAKE_COMMAND} -DCODEC_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR} -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/ai_contract.cmake)
+
+  add_test(NAME codec-cli-integration
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/cli_integration.sh
+                 $<TARGET_FILE:codec_cli> ${PROJECT_VERSION})
+
+  add_test(NAME codec-ai-contract
+    COMMAND ${CMAKE_COMMAND}
+            -DCODEC_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/ai_contract.cmake)
 endif()
 
 if(CODEC_BUILD_EXAMPLES)
   add_executable(codec_capture_example examples/capture.cpp)
-  set_target_properties(codec_capture_example PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED YES CXX_EXTENSIONS NO)
+  set_target_properties(codec_capture_example PROPERTIES
+    CXX_STANDARD 20
+    CXX_STANDARD_REQUIRED YES
+    CXX_EXTENSIONS NO
+  )
   target_link_libraries(codec_capture_example PRIVATE codec::codec)
   codec_enable_warnings(codec_capture_example)
   codec_enable_sanitizers(codec_capture_example)
 endif()
 
-install(TARGETS codec_core codec_cli EXPORT codec-targets
+install(TARGETS codec_core codec_cli
+  EXPORT codec-targets
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
   INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 install(DIRECTORY include/codec DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+
 set(CODEC_PACKAGE_HAS_FFMPEG_VIDEO ${CODEC_HAS_FFMPEG_VIDEO})
-configure_package_config_file(cmake/codec-config.cmake.in ${CMAKE_CURRENT_BINARY_DIR}/codec-config.cmake INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/codec)
-write_basic_package_version_file(${CMAKE_CURRENT_BINARY_DIR}/codec-config-version.cmake VERSION ${PROJECT_VERSION} COMPATIBILITY SameMajorVersion)
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/codec-config.cmake ${CMAKE_CURRENT_BINARY_DIR}/codec-config-version.cmake DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/codec)
-install(EXPORT codec-targets FILE codec-targets.cmake NAMESPACE codec:: DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/codec)
+configure_package_config_file(
+  cmake/codec-config.cmake.in
+  ${CMAKE_CURRENT_BINARY_DIR}/codec-config.cmake
+  INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/codec)
+write_basic_package_version_file(
+  ${CMAKE_CURRENT_BINARY_DIR}/codec-config-version.cmake
+  VERSION ${PROJECT_VERSION}
+  COMPATIBILITY SameMajorVersion)
+install(FILES
+  ${CMAKE_CURRENT_BINARY_DIR}/codec-config.cmake
+  ${CMAKE_CURRENT_BINARY_DIR}/codec-config-version.cmake
+  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/codec)
+install(EXPORT codec-targets
+  FILE codec-targets.cmake
+  NAMESPACE codec::
+  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/codec)

@@ -328,11 +328,14 @@ Result<DecodedVideo> decode_hls_video_bytes(
         stream_index < 0 ? stream_index : AVERROR_DECODER_NOT_FOUND);
   }
   AVStream* stream = format->streams[stream_index];
-  if (stream == nullptr || stream->codecpar == nullptr ||
-      stream->time_base.num <= 0 || stream->time_base.den <= 0) {
+  if (stream == nullptr) {
     return fail<DecodedVideo>(ErrorCode::decode,
-                              "selected HLS video stream has invalid metadata");
+                              "selected HLS video stream is missing");
   }
+
+  DecodedVideo decoded;
+  auto initialized = initialize_encoded_video(decoded, *stream, request);
+  if (!initialized) return initialized.error();
 
   CodecPtr codec{avcodec_alloc_context3(decoder)};
   if (!codec) {
@@ -360,38 +363,7 @@ Result<DecodedVideo> decode_hls_video_bytes(
                               "cannot allocate FFmpeg HLS decode buffers");
   }
 
-  DecodedVideo decoded;
-  decoded.frames.reserve(std::min<std::size_t>(request.maximum_frames, 64U));
-  decoded.time_base = stream->time_base;
-  decoded.frame_rate = usable_frame_rate(*stream);
-  std::uint64_t decoded_bytes = 0U;
-
-  const auto accept_frame = [&]() -> Result<void> {
-    if (decoded.frames.size() >= request.maximum_frames) {
-      return fail(ErrorCode::resource_exhausted,
-                  "decoded HLS exceeds the configured frame limit");
-    }
-    auto state = canonicalize_frame(*frame, *stream, request.output_layout);
-    if (!state) return state.error();
-    const auto frame_bytes = static_cast<std::uint64_t>(state->pixels.size());
-    if (frame_bytes > request.maximum_decoded_bytes - decoded_bytes) {
-      return fail(ErrorCode::resource_exhausted,
-                  "decoded HLS exceeds the configured aggregate byte limit");
-    }
-    decoded_bytes += frame_bytes;
-    std::vector<RecordInfo> secondary_frontier;
-    secondary_frontier.reserve(session.resources.size());
-    for (const auto& resource : session.resources) {
-      secondary_frontier.push_back(resource->source_record);
-    }
-    decoded.frames.push_back(DecodedCandidate{
-        .state = std::move(*state),
-        .best_effort_timestamp = frame->best_effort_timestamp,
-        .secondary_frontier = std::move(secondary_frontier),
-    });
-    return {};
-  };
-
+  decoded.packets.reserve(std::min<std::size_t>(request.maximum_frames, 64U));
   const auto receive_available = [&]() -> Result<void> {
     for (;;) {
       const auto received = avcodec_receive_frame(codec.get(), frame.get());
@@ -400,7 +372,8 @@ Result<DecodedVideo> decode_hls_video_bytes(
         return hls_decode_error(session, "FFmpeg HLS frame decode failed",
                                 received);
       }
-      auto accepted = accept_frame();
+      auto accepted =
+          validate_decoded_video_frame(decoded, *frame, *stream, request);
       av_frame_unref(frame.get());
       if (!accepted) return accepted.error();
     }
@@ -413,6 +386,12 @@ Result<DecodedVideo> decode_hls_video_bytes(
       return hls_decode_error(session, "FFmpeg HLS packet demux failed", read);
     }
     if (packet->stream_index == stream_index) {
+      auto captured_packet =
+          capture_encoded_video_packet(decoded, *packet, request);
+      if (!captured_packet) {
+        av_packet_unref(packet.get());
+        return captured_packet.error();
+      }
       const auto sent = avcodec_send_packet(codec.get(), packet.get());
       av_packet_unref(packet.get());
       if (sent < 0) {
@@ -431,10 +410,8 @@ Result<DecodedVideo> decode_hls_video_bytes(
   }
   auto received = receive_available();
   if (!received) return received.error();
-  if (decoded.frames.empty()) {
-    return fail<DecodedVideo>(ErrorCode::decode,
-                              "captured HLS produced no decoded video frames");
-  }
+  auto finalized = finalize_encoded_video(decoded, request);
+  if (!finalized) return finalized.error();
   return decoded;
 }
 
@@ -465,7 +442,8 @@ Result<FfmpegVideoIngestReport> ingest_video_ffmpeg(
 
   std::vector<std::byte> source_bytes;
   source_bytes.reserve(static_cast<std::size_t>(
-      std::min<std::uint64_t>(request.maximum_source_bytes, 16U * 1024U * 1024U)));
+      std::min<std::uint64_t>(request.maximum_source_bytes,
+                              16U * 1024U * 1024U)));
   auto captured = prepared->run(
       [&source_bytes, &request](std::span<const std::byte> chunk) -> Result<void> {
         if (chunk.size() > request.maximum_source_bytes - source_bytes.size()) {
@@ -536,62 +514,49 @@ Result<FfmpegVideoIngestReport> ingest_video_ffmpeg(
   auto captured_audio = detail::take_ffmpeg_audio_capture(request);
   if (!decoded) return finish_profile_error(decoded.error());
 
-  auto intervals = map_frame_times(*decoded, request);
-  if (!intervals) return finish_profile_error(intervals.error());
-  if (intervals->size() != decoded->frames.size()) {
-    return finish_profile_error(
-        Error{ErrorCode::internal, "video frame timing count mismatch", false});
-  }
+  auto encoded_video = encode_encoded_video_state(decoded->state);
+  if (!encoded_video) return finish_profile_error(encoded_video.error());
+  auto video_state = writer.append_raw(
+      video_encoded_video_state_record_type, request.descriptor.id,
+      request.start_ns, request.end_ns, *encoded_video);
+  if (!video_state) return video_state.error();
 
-  const auto configuration_hash = ffmpeg_configuration_hash(request.output_layout);
   const auto created_utc_ns = provenance_created_utc_ns();
   const std::array direct_inputs{*source};
-  report.states.reserve(decoded->frames.size());
-  report.provenance.reserve(decoded->frames.size());
-  for (std::size_t index = 0; index < decoded->frames.size(); ++index) {
-    auto encoded = encode_raw_video_frame_state(decoded->frames[index].state);
-    if (!encoded) return finish_profile_error(encoded.error());
-    const auto [frame_start, frame_end] = (*intervals)[index];
-    auto state_record = writer.append_raw(
-        raw_video_frame_state_record_type, request.descriptor.id, frame_start,
-        frame_end, *encoded);
-    if (!state_record) return state_record.error();
-
-    const ProvenanceProcess process{
-        .operation = hls ? "codec.video.raw-frame.canonicalize.hls"
-                         : "codec.video.raw-frame.canonicalize",
-        .implementation_id = "codec.video",
-        .implementation_version = "1",
-        .implementation_hash = std::nullopt,
-        .configuration_hash = configuration_hash,
-        .created_utc_ns = created_utc_ns,
-        .details_type =
-            hls ? "application/vnd.codec.video.hls-canonicalization.v1"
-                : "application/vnd.codec.video.canonicalization.v1",
-        .details = {std::byte{0x01}},
-    };
-    Result<RecordInfo> provenance = [&]() -> Result<RecordInfo> {
-      if (!hls) {
-        return writer.append_stream_provenance(
-            *state_record, TruthClass::state_exact, direct_inputs, process);
-      }
-      const auto& frontier = decoded->frames[index].secondary_frontier;
-      if (frontier.empty()) {
-        return fail<RecordInfo>(
-            ErrorCode::internal,
-            "decoded HLS frame has no preserved secondary source frontier");
-      }
-      std::vector<RecordInfo> hls_inputs;
-      hls_inputs.reserve(1U + frontier.size());
-      hls_inputs.push_back(*source);
-      hls_inputs.insert(hls_inputs.end(), frontier.begin(), frontier.end());
+  const ProvenanceProcess video_process{
+      .operation = hls ? "codec.video.encoded-video.preserve.hls"
+                       : "codec.video.encoded-video.preserve",
+      .implementation_id = "codec.video",
+      .implementation_version = "1",
+      .implementation_hash = std::nullopt,
+      .configuration_hash = std::nullopt,
+      .created_utc_ns = created_utc_ns,
+      .details_type =
+          hls ? "application/vnd.codec.video.hls-encoded-video.v1"
+              : "application/vnd.codec.video.encoded-video.v1",
+      .details = {std::byte{0x01}},
+  };
+  Result<RecordInfo> video_provenance = [&]() -> Result<RecordInfo> {
+    if (!hls) {
       return writer.append_stream_provenance(
-          *state_record, TruthClass::state_exact, hls_inputs, process);
-    }();
-    if (!provenance) return provenance.error();
-    report.states.push_back(*state_record);
-    report.provenance.push_back(*provenance);
-  }
+          *video_state, TruthClass::state_exact, direct_inputs, video_process);
+    }
+    if (report.secondary_sources.empty()) {
+      return fail<RecordInfo>(
+          ErrorCode::internal,
+          "verified HLS video has no preserved secondary source frontier");
+    }
+    std::vector<RecordInfo> hls_inputs;
+    hls_inputs.reserve(1U + report.secondary_sources.size());
+    hls_inputs.push_back(*source);
+    hls_inputs.insert(hls_inputs.end(), report.secondary_sources.begin(),
+                      report.secondary_sources.end());
+    return writer.append_stream_provenance(
+        *video_state, TruthClass::state_exact, hls_inputs, video_process);
+  }();
+  if (!video_provenance) return video_provenance.error();
+  report.states.push_back(*video_state);
+  report.provenance.push_back(*video_provenance);
 
   report.audio_present = captured_audio.present;
   if (captured_audio.error.has_value()) {

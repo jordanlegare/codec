@@ -39,13 +39,17 @@ read_required("include/codec/archive.hpp" archive_header_contents)
 read_required("include/codec/result.hpp" result_header_contents)
 read_required("include/codec/codec_c.h" c_header_contents)
 read_required("include/codec/profiles/video.hpp" video_header_contents)
+read_required("include/codec/profiles/video_export.hpp" video_export_header_contents)
 read_required("src/archive/archive.cpp" archive_source_contents)
 read_required("src/core/sha256.cpp" core_source_contents)
 read_required("src/capi/codec_c.cpp" capi_source_contents)
 read_required("src/distributed/wire.cpp" wire_source_contents)
 read_required("src/video/frame_state.cpp" video_frame_state_contents)
 read_required("src/video/frame_state_reader.cpp" video_frame_reader_contents)
-read_required("src/video/ffmpeg_export_dispatch.cpp" video_export_dispatch_contents)
+read_required("src/video/encoded_video_state_reader.cpp" encoded_video_reader_contents)
+read_required("src/video/ffmpeg_audio_mux.cpp" video_audio_mux_contents)
+read_required("src/video/ffmpeg_export_router.cpp" video_export_router_contents)
+read_required("src/video/ffmpeg_packet_mux.cpp" video_packet_mux_contents)
 
 foreach(retired_symbol IN ITEMS
     "watermark_statement"
@@ -78,9 +82,10 @@ foreach(retired_file IN ITEMS
     "src/watermark/carrier.cpp"
     "src/watermark/statement.cpp"
     "tests/test_watermark.cpp"
-    "tests/test_statement.cpp")
+    "tests/test_statement.cpp"
+    "src/video/ffmpeg_export_dispatch.cpp")
   if(EXISTS "${CODEC_SOURCE_DIR}/${retired_file}")
-    message(FATAL_ERROR "Retired watermark file remains: ${retired_file}")
+    message(FATAL_ERROR "Retired file remains: ${retired_file}")
   endif()
 endforeach()
 
@@ -88,7 +93,8 @@ foreach(retired_build_text IN ITEMS
     "src/watermark/carrier.cpp"
     "src/watermark/statement.cpp"
     "tests/test_watermark.cpp"
-    "tests/test_statement.cpp")
+    "tests/test_statement.cpp"
+    "src/video/ffmpeg_export_dispatch.cpp")
   string(FIND "${cmake_contents}" "${retired_build_text}" retired_offset)
   if(NOT retired_offset EQUAL -1)
     message(FATAL_ERROR
@@ -176,14 +182,17 @@ endforeach()
 foreach(required_video_contract IN ITEMS
     "video_profile_descriptor_record_type = 0x0100"
     "raw_video_frame_state_record_type = 0x0101"
+    "video_encoded_video_state_record_type = 0x0104"
     "query_verified_raw_video_frames"
+    "query_verified_video_encoded_video"
     "ffmpeg_video_ingest_available"
     "codec.video.raw-frame.canonicalize.hls"
+    "codec.video.encoded-video.preserve"
     "same-origin unencrypted HTTP/HTTPS HLS"
     "Video Stream Profile — Stage H.1"
     "Stage G trust/selective-disclosure work is explicitly deferred")
   string(FIND
-    "${video_header_contents}\n${video_frame_reader_contents}\n${readme_contents}"
+    "${video_header_contents}\n${video_frame_reader_contents}\n${encoded_video_reader_contents}\n${readme_contents}"
     "${required_video_contract}" video_contract_offset)
   if(video_contract_offset EQUAL -1)
     message(FATAL_ERROR
@@ -192,7 +201,7 @@ foreach(required_video_contract IN ITEMS
 endforeach()
 
 set(video_foundation_contents
-  "${video_header_contents}\n${video_frame_state_contents}\n${video_frame_reader_contents}")
+  "${video_header_contents}\n${video_frame_state_contents}\n${video_frame_reader_contents}\n${encoded_video_reader_contents}")
 foreach(forbidden_video_foundation_dependency IN ITEMS
     "#include <libav"
     "AVCodecContext"
@@ -211,7 +220,8 @@ foreach(required_optional_video_build_contract IN ITEMS
     "libavformat"
     "libavcodec"
     "libavutil"
-    "libswscale")
+    "libswscale"
+    "libswresample")
   string(FIND "${cmake_contents}" "${required_optional_video_build_contract}"
     optional_video_offset)
   if(optional_video_offset EQUAL -1)
@@ -226,11 +236,28 @@ foreach(required_ffmpeg_audio_config_contract IN ITEMS
     "avcodec_get_supported_config"
     "AV_CODEC_CONFIG_SAMPLE_RATE"
     "AV_CODEC_CONFIG_SAMPLE_FORMAT")
-  string(FIND "${video_export_dispatch_contents}"
+  string(FIND "${video_audio_mux_contents}"
     "${required_ffmpeg_audio_config_contract}" ffmpeg_config_offset)
   if(ffmpeg_config_offset EQUAL -1)
     message(FATAL_ERROR
       "FFmpeg audio export compatibility contract is missing: ${required_ffmpeg_audio_config_contract}")
+  endif()
+endforeach()
+
+set(video_packet_export_contents
+  "${video_export_header_contents}\n${video_export_router_contents}\n${video_packet_mux_contents}\n${video_audio_mux_contents}")
+foreach(required_packet_export_contract IN ITEMS
+    "video_packet_passthrough"
+    "mux_verified_encoded_video_packets"
+    "mux_verified_encoded_audio_packets"
+    "aac_adtstoasc"
+    "extract_extradata"
+    "H.1 MP4 export found contradictory encoded and raw video states")
+  string(FIND "${video_packet_export_contents}"
+    "${required_packet_export_contract}" packet_export_offset)
+  if(packet_export_offset EQUAL -1)
+    message(FATAL_ERROR
+      "Encoded-video packet export contract is missing: ${required_packet_export_contract}")
   endif()
 endforeach()
 

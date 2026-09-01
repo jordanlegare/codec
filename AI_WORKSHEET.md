@@ -6,65 +6,71 @@ Canonical work loop for ChatGPT, Codex, and other agentic contributors.
 
 > Read `README.md` first. Read deeper design docs only when the task touches their subject. Do not reread large historical plans unless they are directly relevant.
 
-## Active work record — H.1 encoded-audio preservation
+## Active work record — H.1 encoded-video preservation
 
 ```yaml
-task: Replace new H.1 PCM16 audio-state writes with a bounded versioned bundle of original compressed audio packets while retaining legacy PCM16 reads and exports.
+task: Replace new H.1 raw-pixel VFR1 video-state writes with a bounded versioned bundle of original compressed H.264 packets while retaining legacy VFR1 reads/exports and encoded AAC preservation.
 base_ref: main
-base_head_sha: bbc286348d0a78474a4569588b91743300483c16
-work_branch: codex/encoded-audio-state
+base_head_sha: 2900742a52c0dd8c6dea1277e767a8592db1d840
+work_branch: codex/encoded-video-state
 current_version: 0.3.0
 active_roadmap_stage: H — user-directed H.1 storage/runtime correction before H.2 telemetry; Stage G remains deferred.
 continuity_evidence:
-  - git_head: GitHub main and origin/main at bbc286348d0a78474a4569588b91743300483c16 when this isolated worktree was created
-  - open_prs: none returned by the GitHub plugin at task start; draft PR 56 now carries codex/encoded-audio-state
-  - exact_head_ci: no combined statuses or pull-request workflow runs are attached to merge commit bbc286348d0a78474a4569588b91743300483c16; exact branch-head CI is required before merge
-  - roadmap_issue: issue 10 is the unique exact-title CODEC v1.0 roadmap execution log; its merged HLS and video-export evidence is consistent with current code, while runtime code and tests remain authoritative
+  - git_head: GitHub main at 2900742a52c0dd8c6dea1277e767a8592db1d840 when codex/encoded-video-state was created
+  - pull_request: PR 58 tracks codex/encoded-video-state against the unchanged base 2900742a52c0dd8c6dea1277e767a8592db1d840
+  - verified_snapshot: feature head f80268271fe54cf0570fbcbb3db6e65b359325fb passed CI run 33460186092 across GCC, Clang, sanitizers, FFmpeg-disabled, CLI integration, install, and installed-package consumers before final changelog/CMake/worksheet edits
+  - exact_head_ci: final exact-head CI remains mandatory after this worksheet update; PR checks are authoritative because recording a head SHA inside this file would itself move that SHA
+  - roadmap_issue: issue 10 is the unique exact-title CODEC v1.0 roadmap execution log; runtime code/tests remain authoritative
 roadmap_issue_title: CODEC v1.0 roadmap execution log
 scope: [other-profile, docs]
 touched_truth_classes: [S1]
-current_behavior_verified_from: [code, tests, cli, cmake, changelog, H.1 audio design]
-new_capability_claim: New H.1 audiovisual ingest preserves a bounded, versioned, provenance-verified bundle of original compressed audio packets and compatible MP4 export remuxes those packets without PCM16 persistence or AAC re-encoding; legacy 0x0102 PCM16 archives remain readable and exportable.
+current_behavior_verified_from: [code, tests, cli, cmake, changelog, H.1 video design, H.1 encoded-audio implementation]
+new_capability_claim: New H.1 audiovisual ingest preserves a bounded, versioned, provenance-verified bundle of original compressed H.264 video packets plus existing encoded AAC state; compatible MP4 export remuxes those packets without persisted raw pixels, video re-encoding, PCM16 persistence, or AAC re-encoding; legacy 0x0101 VFR1 and 0x0102 PCM16 archives remain readable/exportable.
 change_class: profile_specific_behavior
 verification:
-  release_configure: pass — GitHub Actions run 476, exact implementation head d77bcaa4d9ebba46474374a473878fc117d319df, GCC and Clang
-  release_build: pass — run 476 build jobs for GCC and Clang
-  tests: pass — run 476 GCC/Clang CTest, including direct/HLS ingest, export, CLI, and legacy compatibility
-  sanitizer_build: pass — run 476 ASan/UBSan/LSan build
-  sanitizer_tests: pass — run 476 sanitizer CTest
-  ffmpeg_disabled: pass — run 476 configure/build/CTest/install with CODEC_ENABLE_FFMPEG_VIDEO=OFF
-  install_and_package_consumer: pass — run 476 GCC, Clang, and FFmpeg-disabled installed-consumer gates
-  pre_review_exact_head_ci: pass — run 477 at 0c7ec4f6f1418b53e2c9db9f0a5c1c9bc2a92f02; superseded by review remediation
-  review_ci_diagnostics: runs 478 and 479 exposed HLS transport side-data and nested CLI regressions; run 481 localized the remaining CLI failure to decoder priming extending beyond the retained packet timeline
-  review_remediation: 12 EAP1 bounds/timing tests and 7 capture/timeline tests pass locally with GCC warnings-as-errors; FFmpeg-disabled ingest, HLS, and export dispatch units compile; final exact-head CI remains authoritative
-  exact_head_ci: pending on the review-remediation head; immutable PR 56 checks must pass before merge
+  release_configure: pass on verified snapshot f80268271fe54cf0570fbcbb3db6e65b359325fb; final-head rerun pending
+  release_build: pass on verified snapshot f80268271fe54cf0570fbcbb3db6e65b359325fb; final-head rerun pending
+  tests: pass on verified snapshot f80268271fe54cf0570fbcbb3db6e65b359325fb; final-head rerun pending
+  sanitizer_build: pass on verified snapshot f80268271fe54cf0570fbcbb3db6e65b359325fb; final-head rerun pending
+  sanitizer_tests: pass on verified snapshot f80268271fe54cf0570fbcbb3db6e65b359325fb; final-head rerun pending
+  ffmpeg_disabled: pass on verified snapshot f80268271fe54cf0570fbcbb3db6e65b359325fb; final-head rerun pending
+  install_and_package_consumer: pass on verified snapshot f80268271fe54cf0570fbcbb3db6e65b359325fb; final-head rerun pending
+  cli_capabilities: pass through the CI/CLI integration surface on verified snapshot f80268271fe54cf0570fbcbb3db6e65b359325fb; final-head rerun pending
+  targeted_proof: pass on verified snapshot, including HLS Annex-B H.264 plus empty-config ADTS AAC remux followed by real FFmpeg re-ingest, zero-new-VFR1 assertions, EVP1 layout independence, and fail-closed irrecoverable configuration
+  exact_head_ci: pending after final worksheet commit
+review:
+  diff_scope: profile-local Video H.1 code, tests, fixtures, CMake source/test registration, and documentation only; no generic archive/core/C ABI behavior change
+  cleanup: unrelated CMake formatting churn removed before final verification
+  fixtures: audiovisual MP4 fixtures were regenerated with H.264 video so H.1 v1 H.264-only ingest can continue exercising AAC behavior
+  manual_review: no Critical or Important correctness issue remains after checking packet timing, HLS provenance frontier, legacy fallback, state contradiction handling, and EAP1 one-state-per-stream selection semantics
+  performance_claim: no universal ratio claimed; proof is structural removal of persisted VFR1 pixel copies plus compressed-domain EVP1/EAP1 storage/remux
 ```
 
 ```text
-BEFORE: H.1 stores source media as exact S0, then decodes, resamples, and accumulates the audio again as a large 0x0102 PCM16 S1 record before AAC-encoding it during MP4 export.
-AFTER: New H.1 writes store the selected stream's unchanged compressed packet payloads and codec/timeline metadata as bounded 0x0103 S1, validate audio in streaming decode without accumulating PCM, and remux compatible packets during export; old 0x0102 archives retain their existing reader/export path.
+BEFORE: H.1 preserves source media as exact S0, then decodes every video frame, converts/copies the complete Gray/RGB/RGBA/YUV pixel buffer, and persists one 0x0101 VFR1 S1 record per frame. Export later MPEG-4-encodes those raw frames. Encoded AAC already uses 0x0103 packet preservation.
+AFTER: New H.1 writes preserve the selected H.264 stream's unchanged compressed packet payloads and codec/timeline metadata as bounded 0x0104 EVP1 S1 while still decoding only for fail-closed validation and discarding pixels. Compatible MP4 export remuxes EVP1 + EAP1 without video/AAC re-encoding; legacy VFR1/PCM16 readers and exports remain available.
 ```
 
 ```yaml
 proof:
-  regression_test: new encoded-state schema/reader tests plus direct/HLS ingest and MP4 export tests prove 0x0103 writes, no new 0x0102 writes, and audiovisual output
-  exactness_test: packet payloads, codec parameters/extradata, timestamps, durations, flags, and presentation window round-trip byte-for-byte through encode/decode and verified ingest/query
-  compatibility_test: existing 0x0102 reader/export tests remain green; old/no-audio archives remain exportable; standalone Audio Profile and generic CODA APIs are unchanged
-  failure_path_test: malformed/forged packet bundles, count/table/configuration/payload limits, timestamp overflow/discontinuity, out-of-window packets, retained semantic side data, time-filtered state-form conflict, unsupported codec/remux, decode-validation failure, and provenance corruption fail closed without muting known audio
+  regression_test: direct and HLS ingest tests prove new video ingest writes 0x0104 EVP1 and no new 0x0101 VFR1 states
+  exactness_test: EVP1 schema/reader tests round-trip codec parameters/extradata, packet bytes, timestamps, durations, flags, dimensions, and presentation interval exactly
+  compatibility_test: existing VFR1 reader/export and 0x0102 PCM16 compatibility tests remain green; old/no-audio archives remain exportable
+  failure_path_test: malformed/forged EVP1 bundles, packet/configuration/payload limits, timestamp overflow/discontinuity, unsupported codec/framing/remux, decode-validation failure, contradictory state forms, and provenance corruption fail closed
   security_test: direct/HLS source authorization and memory-only FFmpeg protocol policy remain unchanged; export performs no source re-fetch
-  benchmark: fixture operation evidence proves no PCM16 state write and no AAC encoder on compatible passthrough; storage math is reported as workload-specific, not a universal throughput claim
+  benchmark: fixture/archive evidence proves no VFR1 pixel-state writes and no video/AAC encoder on compatible packet passthrough; storage claims remain workload-specific
 ```
 
 Invariant decisions:
 
-- [x] S0 source/container and HLS-resource records remain byte-exact and unchanged; 0x0103 is an additional deterministic profile state, not a replacement for S0.
-- [x] 0x0102 is a compatibility tombstone for new writes but remains supported by the existing verified reader and PCM16-to-AAC legacy export path.
-- [x] 0x0103 is profile-local, versioned, bounded, and includes exact packet bytes plus sufficient codec/timing metadata for deterministic verification and container export.
-- [x] Audio validation remains fail-closed and streaming; decoded frames are discarded and no libswresample/aggregate PCM allocation is used by new ingest.
-- [x] Logical presentation is capped to complete frames supported by retained packets; decoder priming carried only by a discarded negative-time skip packet is validated but never fabricated as presented audio.
-- [x] Compatible MP4 audio uses packet remux; unsupported exact trims or codecs fail explicitly, never silently mute.
-- [x] Direct-video and HLS video-frame provenance, authorization, CLI syntax, generic archive/C ABI, standalone Audio Profile, transport, distributed, telemetry, and Stage G semantics are unchanged.
-- [x] FFmpeg-disabled builds retain the media-library-independent encoded-audio schema/reader and explicit backend-unavailable export behavior.
+- [x] S0 source/container and HLS-resource records remain byte-exact and unchanged; 0x0104 is an additional deterministic profile state, not a replacement for S0.
+- [x] 0x0101 VFR1 and 0x0102 PCM16 become compatibility-only state forms for new audiovisual ingest but remain supported by verified readers and legacy export paths.
+- [x] 0x0103 EAP1 remains the encoded-audio state; its missing-AudioSpecificConfig export case is repaired without reintroducing PCM16 persistence.
+- [x] 0x0104 EVP1 is profile-local, versioned, bounded, and includes exact H.264 packet bytes plus sufficient codec/timing metadata for deterministic verification and MP4 remux.
+- [x] Video validation remains fail-closed and streaming; decoded frames are discarded and no aggregate raw-frame pixel state is persisted by new ingest.
+- [x] Compatible MP4 video/audio uses packet remux; unsupported exact framing/configuration fails explicitly rather than silently transcoding.
+- [x] Direct-video and HLS source provenance, authorization, CLI syntax, generic archive/C ABI, standalone Audio Profile, transport, distributed, telemetry, and Stage G semantics remain outside the change.
+- [x] FFmpeg-disabled builds retain media-library-independent EVP1/EAP1 schemas/readers and explicit backend-unavailable export behavior.
 
 ## 0. Work record
 

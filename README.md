@@ -6,7 +6,7 @@ CODEC is a C++20 preservation-first capture and archive engine for temporal data
 
 The current development tree, based on **v0.3.0**, contains substantially more functionality in the installed C++ library than is exposed through the CLI, including generic stream/provenance APIs, transport multiplexing and bounded XOR recovery, audio-profile processing, the unreleased Stage H.1 Video Stream Profile foundation with an FFmpeg ingest bridge enabled by default at build time, and the Stage F.1-F.7 distributed-processing primitives.
 
-> **Important scope:** the distributed Stage F.1-F.7 implementation remains a C++ library/package capability with no `codec distributed ...` command or built-in remote HTTP/gRPC worker service. Video has a dedicated `codec video ingest` command when the FFmpeg backend is built. Generic `codec record` remains S0-only capture and never automatically decodes recorded video into S1 frames.
+> **Important scope:** the distributed Stage F.1-F.7 implementation remains a C++ library/package capability with no `codec distributed ...` command or built-in remote HTTP/gRPC worker service. Video has a dedicated `codec video ingest` command when the FFmpeg backend is built. Generic `codec record` remains S0-only capture and never automatically interprets recorded video into S1 media state.
 
 ## What CODEC is for
 
@@ -29,7 +29,7 @@ For a normal CLI user, the most important behavior is that `codec record` writes
 | Show version | `codec --version` |
 | Show runtime capability flags | `codec capabilities` |
 | Record one or more feeds | `codec record` |
-| Explicitly preserve and canonicalize encoded video | `codec video ingest` |
+| Explicitly preserve validated encoded H.264/AAC video state | `codec video ingest` |
 | Verify a CODA archive | `codec verify` |
 | Verify and show basic archive information | `codec inspect` |
 | List legacy feed descriptors | `codec list feeds` |
@@ -55,7 +55,7 @@ Default project requirements:
 - libcurl
 - pkg-config
 - libFLAC development headers/library
-- FFmpeg `libavformat`, `libavcodec`, `libavutil`, and `libswscale` development headers/libraries
+- FFmpeg `libavformat`, `libavcodec`, `libavutil`, `libswscale`, and `libswresample` development headers/libraries
 - a build tool such as Ninja or Make
 
 The FFmpeg Video Profile backend defaults to enabled. A dependency-free Video Profile foundation build remains supported by configuring `-DCODEC_ENABLE_FFMPEG_VIDEO=OFF`; that explicit opt-out does not require the FFmpeg development libraries.
@@ -79,10 +79,11 @@ sudo apt-get install -y \
   libavformat-dev \
   libavcodec-dev \
   libavutil-dev \
-  libswscale-dev
+  libswscale-dev \
+  libswresample-dev
 ```
 
-For a build that intentionally excludes the FFmpeg ingest bridge, the four `libav*`/`libswscale` packages above may be omitted and CMake must be configured with `-DCODEC_ENABLE_FFMPEG_VIDEO=OFF`.
+For a build that intentionally excludes the FFmpeg ingest bridge, the five FFmpeg development packages above may be omitted and CMake must be configured with `-DCODEC_ENABLE_FFMPEG_VIDEO=OFF`.
 
 To build with Clang as well:
 
@@ -146,7 +147,7 @@ These are the CODEC-specific CMake configuration switches in the current develop
 | `CODEC_BUILD_EXAMPLES` | `ON` | Build the example programs, including `codec_capture_example`. |
 | `CODEC_WARNINGS_AS_ERRORS` | `OFF` | Promote compiler warnings to errors (`-Werror` or `/WX`). CI enables this. |
 | `CODEC_ENABLE_SANITIZERS` | `OFF` | For GCC/Clang, compile/link with AddressSanitizer and UndefinedBehaviorSanitizer. |
-| `CODEC_ENABLE_FFMPEG_VIDEO` | `ON` | Enable the FFmpeg-backed Video Profile ingest bridge; requires `libavformat`, `libavcodec`, `libavutil`, and `libswscale` development packages discoverable through pkg-config. Set to `OFF` for the dependency-free Video Profile foundation build. |
+| `CODEC_ENABLE_FFMPEG_VIDEO` | `ON` | Enable the FFmpeg-backed Video Profile ingest/export bridge; requires `libavformat`, `libavcodec`, `libavutil`, `libswscale`, and `libswresample` development packages discoverable through pkg-config. Set to `OFF` for the dependency-free Video Profile foundation build. |
 | `CODEC_ONNXRUNTIME_ROOT` | empty | Optional path to an extracted ONNX Runtime distribution used by the Audio CPU separation backend. |
 
 Useful standard CMake switches include:
@@ -205,7 +206,7 @@ Even when this optional backend is compiled, `codec capabilities` still reports 
 
 ## FFmpeg Video Profile ingest backend — enabled by default
 
-The H.1 Video Stream Profile schema and verified reader remain usable without FFmpeg, but the normal build now enables the preservation-first encoded-video ingest bridge by default. Install the four FFmpeg development modules listed above and configure normally:
+The H.1 Video Stream Profile schemas and verified readers remain usable without FFmpeg, but the normal build now enables the preservation-first encoded-video ingest/export bridge by default. Install the five FFmpeg development modules listed above and configure normally:
 
 ```bash
 cmake -S . -B build -G Ninja \
@@ -218,19 +219,22 @@ When enabled, the installed C++ API exposes `codec::profiles::video::ingest_vide
 
 - captures the accepted file/HTTP/HTTPS source through CODEC's existing bounded capture policy;
 - commits the exact encoded/container representation as S0 before media interpretation;
-- decodes direct media only from those already captured in-memory bytes through FFmpeg custom AVIO and continues to reject secondary opens for direct media;
+- demuxes and decodes direct media only from those already captured in-memory bytes through FFmpeg custom AVIO and continues to reject secondary opens for direct media;
 - recognizes same-origin unencrypted HTTP/HTTPS HLS from captured manifest bytes, intercepts each FFmpeg-requested child, authorizes and captures it through CODEC, and commits that exact object as S0 on a deterministic opaque child stream before FFmpeg may read it;
 - denies encrypted, cross-origin, private-network-denied, malformed, and non-HTTP/HTTPS HLS children without falling back to FFmpeg's native file or network protocols;
-- canonicalizes decoded frames to an explicitly requested H.1 Gray8, RGB24, RGBA32, or planar YUV420P8 layout;
-- preserves the selected mono/stereo AAC track as bounded, unchanged compressed packets plus decoder/timeline metadata in the versioned `EAP1` (`0x0103`) Video Profile state while streaming decoded audio only for validation and immediately discarding decoded frames;
-- writes each successful direct-media `VFR1` frame with the unchanged exact same-stream S0 provenance contract and each HLS frame with the exact primary manifest plus the accepted child-resource frontier available when that frame was decoded;
-- finalizes a valid source-only archive with `profile_error` populated when media demux/decode/canonicalization fails after S0 preservation.
+- validates the selected H.264 stream by decoding frames under the existing frame/decoded-byte bounds, then immediately discards decoded pixel data instead of persisting per-frame raw buffers;
+- preserves the selected H.264 stream as one bounded, versioned `EVP1` (`0x0104`) S1 state containing compressed packet payloads, decoder configuration/framing metadata, timestamps, dimensions, and validation evidence;
+- preserves the selected mono/stereo AAC track as bounded, unchanged compressed packets plus decoder/timeline metadata in the versioned `EAP1` (`0x0103`) Video Profile state while decoding audio only for validation and immediately discarding decoded audio frames;
+- writes direct-media EVP1 with the exact same-stream S0 provenance contract and HLS EVP1 with the exact primary manifest plus accepted child-resource frontier;
+- finalizes a valid source-only archive with `profile_error` populated when media demux/decode/encoded-state validation fails after S0 preservation.
+
+The retained `--layout` option is compatibility syntax for the H.1 ingest command; new EVP1 persistence is compressed-packet based and the requested raw layout does not change stored EVP1 packet bytes.
 
 For live HLS, `end_ns - start_ns` bounds the decoded media timeline. It is
 not a wall-clock recording-duration guarantee; resource-count and byte limits
 remain independent fail-safes.
 
-The bridge does not change `codec record`: generic recording remains S0 capture and still requires `--feed LABEL=URI`. Encoded-video interpretation is explicit through `codec video ingest`; there is no automatic `codec record` MP4-to-VFR1 decoding mode.
+The bridge does not change `codec record`: generic recording remains S0 capture and still requires `--feed LABEL=URI`. Encoded-video interpretation is explicit through `codec video ingest`; there is no automatic `codec record` MP4-to-EVP1 decoding mode.
 
 To disable FFmpeg at build time:
 
@@ -283,7 +287,7 @@ cmake -S . -B build \
   -DCMAKE_PREFIX_PATH=/path/to/codec/install
 ```
 
-The consumer must always be able to resolve CODEC's public OpenSSL 3 Crypto, CURL, pkg-config, and FLAC dependencies. A default CODEC installation also requires the FFmpeg pkg-config modules because the installed package recreates `libavformat`, `libavcodec`, `libavutil`, and `libswscale` targets for consumers. An installation built explicitly with `CODEC_ENABLE_FFMPEG_VIDEO=OFF` does not add those FFmpeg package requirements.
+The consumer must always be able to resolve CODEC's public OpenSSL 3 Crypto, CURL, pkg-config, and FLAC dependencies. A default CODEC installation also requires the FFmpeg pkg-config modules because the installed package recreates `libavformat`, `libavcodec`, `libavutil`, `libswscale`, and `libswresample` targets for consumers. An installation built explicitly with `CODEC_ENABLE_FFMPEG_VIDEO=OFF` does not add those FFmpeg package requirements.
 
 ---
 
@@ -358,7 +362,7 @@ These are capability declarations, not performance measurements. The FFmpeg C++ 
 
 ## `codec video ingest`
 
-Explicitly capture one encoded-video source, preserve its accepted bytes as S0, and attempt Stage H.1 raw-frame S1 canonicalization:
+Explicitly capture one encoded-video source, preserve its accepted bytes as S0, validate its selected media streams, and persist compressed H.264/AAC H.1 S1 state:
 
 ```bash
 codec video ingest \
@@ -377,9 +381,9 @@ codec video ingest \
   [--maximum-hls-total-bytes N]
 ```
 
-`--source`, `--archive`, `--label`, `--start-ns`, and `--end-ns` are required. The interval must have positive duration. The default output layout is `yuv420p8`; the default source, decoded-video, and encoded-audio working-set limits are 1 GiB each, and the default frame limit is 4096. The retained `--maximum-decoded-audio-bytes` spelling is a compatibility name: new ingest uses it to bound the retained EAP1 header, packet table, AAC packet payloads, and decoder configuration, not an accumulated PCM buffer. Packet count has an independent one-million-packet ceiling. HLS defaults allow at most 256 accepted secondary snapshots, 64 MiB per resource, and 1 GiB in aggregate.
+`--source`, `--archive`, `--label`, `--start-ns`, and `--end-ns` are required. The interval must have positive duration. `--layout` remains accepted for compatibility and defaults to `yuv420p8`, but new EVP1 storage is layout-independent and does not persist decoded pixels. The default source and decoded-video validation limits are 1 GiB, and the default frame limit is 4096. The retained `--maximum-decoded-audio-bytes` spelling is a compatibility name: new ingest uses it to bound the retained EAP1 header, packet table, AAC packet payloads, and decoder configuration, not an accumulated PCM buffer. Packet count has an independent one-million-packet ceiling. HLS defaults allow at most 256 accepted secondary snapshots, 64 MiB per resource, and 1 GiB in aggregate.
 
-On successful S1 canonicalization, the command exits `0` and prints JSON including `stream_id`, `layout`, `source_bytes`, `frames`, `provenance`, `secondary_sources`, `secondary_source_bytes`, and `"state_exact":true`. If S0 capture succeeds but media demux/decode/canonicalization fails, CODEC finalizes an archive containing every exact S0 object accepted before failure, reports `profile_error` in JSON, and exits `1`. With an FFmpeg-disabled build, the command fails with `model_incompatible` before archive creation.
+On successful validation/preservation, the command exits `0` and prints JSON including `stream_id`, `layout`, `source_bytes`, `frames`, `provenance`, `secondary_sources`, `secondary_source_bytes`, and `"state_exact":true`. If S0 capture succeeds but media demux/decode/encoded-state validation fails, CODEC finalizes an archive containing every exact S0 object accepted before failure, reports `profile_error` in JSON, and exits `1`. With an FFmpeg-disabled build, the command fails with `model_incompatible` before archive creation.
 
 The command derives a stable stream ID from the label and source identity but does not persist the raw source URI/path in `StreamDescriptor::source_id`. Direct media still uses captured-memory-only decode. For HLS, each requested child must be same-origin HTTP/HTTPS and is routed through CODEC capture; raw requested child URLs are not persisted in child descriptors. Encryption/key capture, cross-origin resources, DASH, cookies/custom headers, redirects beyond existing capture policy, and arbitrary FFmpeg protocol/network authority are not supported.
 
@@ -395,11 +399,13 @@ codec video ingest \
   --layout yuv420p8
 ```
 
-New successful audiovisual ingest writes one provenance-verified `EAP1`
-encoded-audio state (`0x0103`) and does not write the former Video Profile
-PCM16 state (`0x0102`). The standalone Audio Stream Profile is unchanged.
-Existing archives containing verified `0x0102` remain readable and
-exportable.
+New successful video ingest writes one provenance-verified compressed-video
+`EVP1` state (`0x0104`) and does not write per-frame Video Profile `VFR1`
+state (`0x0101`). Compatible audiovisual ingest additionally writes one
+provenance-verified `EAP1` encoded-audio state (`0x0103`) and does not write
+the former Video Profile PCM16 state (`0x0102`). The standalone Audio Stream
+Profile is unchanged. Existing archives containing verified `0x0101` or
+`0x0102` remain readable and exportable through compatibility paths.
 
 ## `codec video export`
 
@@ -411,24 +417,42 @@ codec video export ARCHIVE --stream UUID --output FILE [EXPORT OPTIONS]
 codec video export ARCHIVE --all --output-dir DIR [EXPORT OPTIONS]
 ```
 
-For a compatible new `0x0103` state, export copies the verified AAC packet
-payloads into MP4 without decoding audio or running the AAC encoder. A final
-packet duration may be clipped to the verified presentation end. An exact
-leading trim that cannot be represented by packet passthrough fails explicitly
-instead of silently muting or changing the audio. Legacy verified `0x0102`
-archives retain their existing PCM16-to-AAC export path. An archive containing
-both verified forms for one stream is contradictory and fails closed.
-EAP1 v1 does not persist semantic FFmpeg packet side data: retained AAC
-skip/discard metadata or unsupported/configuration-changing side data causes
-an explicit profile incompatibility instead of being silently dropped.
-Non-semantic MPEG-TS stream-routing metadata does not alter AAC presentation
-and is not persisted.
+For a compatible new `0x0104` H.264 state, export remuxes the verified stored
+video packets into MP4 without decoding video or running a video encoder.
+Length-prefixed H.264 requires a valid AVC decoder configuration; Annex-B
+streams can recover in-band SPS/PPS configuration through FFmpeg's
+`extract_extradata` filter. If that configuration cannot be recovered safely,
+export fails with `model_incompatible` rather than silently transcoding.
+Legacy verified `0x0101` VFR1 archives retain their existing decode-free
+state-reader plus video-encoder compatibility export path. An archive with
+both verified EVP1 and VFR1 forms for the selected stream is contradictory
+and fails closed.
+
+For a compatible `0x0103` EAP1 state with decoder configuration, export copies
+the verified AAC packet payloads into MP4 without decoding audio or running
+the AAC encoder. When an HLS/MPEG-TS AAC state validly has no global decoder
+configuration, export uses FFmpeg `aac_adtstoasc` to derive MPEG-4
+AudioSpecificConfig and strip ADTS framing while remaining in the compressed
+packet domain. If recovery is impossible, export fails with
+`model_incompatible`. A final packet duration may be clipped to the verified
+presentation end. An exact leading trim that cannot be represented by packet
+passthrough fails explicitly instead of silently muting or changing the audio.
+Legacy verified `0x0102` archives retain their existing PCM16-to-AAC export
+path. An archive containing both verified audio forms for one stream is
+contradictory and fails closed. EAP1 v1 does not persist semantic FFmpeg
+packet side data: retained AAC skip/discard metadata or unsupported/
+configuration-changing side data causes an explicit profile incompatibility
+instead of being silently dropped. Non-semantic MPEG-TS stream-routing
+metadata does not alter AAC presentation and is not persisted.
 
 At 48 kHz stereo, PCM16 is 192,000 bytes/second (691.2 MB/hour), while a
 128-kbit/s compressed stream is 57.6 MB/hour before the bounded packet table,
-about twelve times smaller for that workload. The actual ratio depends on the
-source codec, bitrate, channels, sample rate, and packetization; CODEC makes no
-universal storage, throughput, or latency claim from this example.
+about twelve times smaller for that workload. For video, the storage delta is
+workload-dependent: new H.1 no longer duplicates every decoded pixel frame as
+VFR1, so archive growth tracks the preserved source plus compressed EVP1/EAP1
+state rather than a raw-frame copy. The actual ratio depends on source codec,
+bitrate, dimensions, frame rate, channels, sample rate, and packetization;
+CODEC makes no universal storage, throughput, or latency claim.
 
 ---
 
@@ -571,7 +595,7 @@ codec record \
   --feed 'camera3800=https://www.quebec511.info/Carte/Fenetres/camera.ashx?id=3800&format=mp4'
 ```
 
-That command preserves the remote response as S0. It does not invoke the FFmpeg profile bridge automatically; use `codec video ingest` when explicit encoded-video canonicalization is desired.
+That command preserves the remote response as S0. It does not invoke the FFmpeg profile bridge automatically; use `codec video ingest` when explicit encoded-video validation/preservation is desired.
 
 ---
 
@@ -856,18 +880,19 @@ No production neural model is bundled.
 The current C++ tree includes a media-library-independent Video Stream Profile foundation in `<codec/profiles/video.hpp>`:
 
 - deterministic, bounded `VPD1` video descriptors;
-- deterministic `VFR1` raw-frame S1 state for Gray8, RGB24, RGBA32, and planar YUV420P8;
+- deterministic `VFR1` raw-frame S1 state (`0x0101`) for Gray8, RGB24, RGBA32, and planar YUV420P8 retained for legacy archive compatibility;
 - deterministic bounded `EAP1` encoded-audio S1 state (`0x0103`) for unchanged AAC packet payloads, decoder configuration, and timeline metadata;
+- deterministic bounded `EVP1` encoded-video S1 state (`0x0104`) for H.264 packet payloads, framing/configuration, timestamps, dimensions, and validation evidence;
 - exact profile-local record codes used through CODA's existing raw-code archive boundary;
-- a verified reader that returns VFR1 as S1 only when its canonical bytes and either the exact direct-source contract or the exact versioned HLS source-frontier contract validate;
+- verified readers that return VFR1 or EVP1 as S1 only when canonical bytes and the applicable exact direct-source or versioned HLS source-frontier provenance contract validate;
 - a verified encoded-audio reader with the corresponding strict direct/HLS provenance contracts, while legacy Video Profile PCM16 `0x0102` remains read/export-only compatibility;
 - raw preservation, extraction, and repair of unknown future profile codes without interpretation.
 
-On top of that foundation, default builds provide the bounded FFmpeg ingest bridge described above. Direct media preserves one CODEC-authorized source snapshot and retains the original exact same-stream provenance contract. Same-origin unencrypted HTTP/HTTPS HLS additionally preserves every accepted child object as exact S0 on an opaque child stream before FFmpeg reads it and emits each successful frame with a versioned conservative source frontier. Both paths produce the same canonical H.1 VFR1 state model and, when compatible AAC is present, the same EAP1 packet-preservation model. Builds configured with `CODEC_ENABLE_FFMPEG_VIDEO=OFF` retain the media-library-independent H.1 schemas and verified readers without the FFmpeg integration.
+On top of that foundation, default builds provide the bounded FFmpeg ingest/export bridge described above. Direct media preserves one CODEC-authorized source snapshot and retains the original exact same-stream provenance contract. Same-origin unencrypted HTTP/HTTPS HLS additionally preserves every accepted child object as exact S0 on an opaque child stream before FFmpeg reads it. Both paths now write one compressed H.264 EVP1 state instead of per-frame VFR1 pixel states and, when compatible AAC is present, the same EAP1 packet-preservation state. Video and audio decoding remain validation-only during new ingest; decoded buffers are discarded. Builds configured with `CODEC_ENABLE_FFMPEG_VIDEO=OFF` retain the media-library-independent H.1 schemas and verified readers without the FFmpeg integration.
 
 Stage G trust/selective-disclosure work is explicitly deferred and is not claimed complete. Stage H is active at H.1; telemetry, sensor, document/event, network/system, domain schemas, and model-bundle work remain later milestones.
 
-H.1 still does **not** provide GStreamer integration, playback, general-purpose transcoding, automatic `codec record` decoding, DASH, encrypted or cross-origin HLS, arbitrary FFmpeg protocol access, GPU decode, streaming inference, or a video model. Its verified MP4 export is limited to the implemented canonical-video path plus compatible AAC packet passthrough or legacy H.1 PCM16-to-AAC compatibility. It makes no general codec-compatibility, model-quality, throughput, latency, storage-ratio, or scale claim; actual encoded-media support depends on the linked FFmpeg build.
+H.1 still does **not** provide GStreamer integration, playback, general-purpose transcoding, automatic `codec record` decoding, DASH, encrypted or cross-origin HLS, arbitrary FFmpeg protocol access, GPU decode, streaming inference, or a video model. Its verified MP4 export prefers compressed-domain EVP1 H.264 plus EAP1 AAC packet remux when compatible, with bounded configuration recovery for Annex-B H.264 and ADTS AAC; legacy VFR1 video encoding and PCM16-to-AAC remain compatibility fallbacks. It makes no general codec-compatibility, model-quality, throughput, latency, storage-ratio, or scale claim; actual encoded-media support depends on the linked FFmpeg build.
 
 ## Stage E transport and recovery
 
@@ -920,7 +945,7 @@ Applications may supply their own implementations behind the library interfaces.
 
 The current executable uses a **CODA development profile**, not a frozen normative CODA v1 binary standard. The code deliberately identifies the executable profile separately so that the project can evolve without pretending that this development layout is a permanently frozen interoperability contract.
 
-The same caution applies to development-profile `VPD1`, `VFR1`, `CMX1`, `XRF1`, `CDP1`, `DRQ1`, and `DRS1` structures: they have deterministic tested encodings in this implementation, but the current 0.x line should not be treated as a promise that all future major versions will preserve every development-profile byte layout indefinitely.
+The same caution applies to development-profile `VPD1`, `VFR1`, `EAP1`, `EVP1`, `CMX1`, `XRF1`, `CDP1`, `DRQ1`, and `DRS1` structures: they have deterministic tested encodings in this implementation, but the current 0.x line should not be treated as a promise that all future major versions will preserve every development-profile byte layout indefinitely.
 
 Within a given v0.3.0 workflow, integrity checks and exact-source extraction are the relevant guarantees to test.
 
@@ -934,7 +959,7 @@ Keep these distinctions in mind:
 
 - SHA-256 archive/frame/envelope hashes detect corruption under their defined structures; an active attacker who can rewrite data can generally recompute an unkeyed hash.
 - The CLI blocks private HTTP capture targets by default and refuses redirects, but this does not make arbitrary remote content trustworthy.
-- The default-enabled FFmpeg bridge decodes only already captured bytes and blocks libavformat secondary protocol I/O with both a reject-all direct `io_open` hook and an inherited whitelist containing no real FFmpeg URL protocol; that limits authorization expansion but does not make hostile media trustworthy or provide a decoder sandbox.
+- The default-enabled FFmpeg bridge decodes only already captured/authorized media and blocks unauthorized libavformat secondary protocol I/O; direct media uses memory-only custom AVIO, while HLS child requests must pass CODEC's same-origin/capture policy before bytes are supplied to FFmpeg. This limits authorization expansion but does not make hostile media trustworthy or provide a decoder sandbox.
 - Distributed F.1-F.7 labels and wire envelopes do not authenticate workers.
 - There is no encrypted remote-worker protocol in v0.3.0.
 - There are no published production-scale throughput, availability, or durability guarantees.
@@ -968,6 +993,8 @@ This README is the user-facing guide. Repository-maintenance and architecture ma
 - [Optional FFmpeg Video ingest implementation plan](docs/superpowers/plans/2026-08-30-video-ffmpeg-ingest.md) — TDD and verification sequence for the integration bridge.
 - [H.1 encoded-audio preservation design](docs/superpowers/specs/2026-08-31-video-encoded-audio-design.md) — approved `0x0103` packet-preservation and `0x0102` compatibility boundary.
 - [H.1 encoded-audio preservation implementation plan](docs/superpowers/plans/2026-08-31-video-encoded-audio.md) — test-first schema, ingest, export, and verification sequence.
+- [H.1 encoded-video preservation design](docs/superpowers/specs/2026-08-31-h1-encoded-video-preservation-design.md) — approved `0x0104` compressed H.264 state, validation-only decode, and legacy VFR1 compatibility boundary.
+- [H.1 encoded-video preservation implementation plan](docs/superpowers/plans/2026-08-31-h1-encoded-video-preservation.md) — test-first EVP1 ingest, compressed packet remux, compatibility, and verification sequence.
 - [Preservation-first HLS ingest design](docs/superpowers/specs/2026-08-30-video-hls-ingest-design.md) — same-origin capture authority, S0 resource graph, and versioned frontier contract.
 - [Preservation-first HLS ingest implementation plan](docs/superpowers/plans/2026-08-30-video-hls-ingest.md) — test-first security, provenance, CLI, and merge gates.
 

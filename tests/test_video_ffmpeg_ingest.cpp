@@ -2,11 +2,12 @@
 
 #include <codec/profiles/video.hpp>
 
-#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <span>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -31,11 +32,11 @@ std::vector<std::byte> decode_base64(std::string_view encoded) {
 
   std::vector<std::byte> output;
   output.reserve((encoded.size() * 3U) / 4U);
-  std::uint32_t accumulator = 0;
+  std::uint32_t accumulator = 0U;
   int bits = 0;
   for (const char ch : encoded) {
     if (ch == '=') break;
-    const int digit = value(ch);
+    const auto digit = value(ch);
     if (digit < 0) continue;
     accumulator = (accumulator << 6U) | static_cast<std::uint32_t>(digit);
     bits += 6;
@@ -48,21 +49,13 @@ std::vector<std::byte> decode_base64(std::string_view encoded) {
   return output;
 }
 
-std::vector<std::byte> mp4_h264_fixture() {
-  constexpr std::string_view encoded =
-      "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";
+std::vector<std::byte> fixture(std::string_view name) {
+  const auto path = std::filesystem::path{__FILE__}.parent_path() / "fixtures" /
+                    std::string{name};
+  std::ifstream input(path, std::ios::binary);
+  std::string encoded((std::istreambuf_iterator<char>(input)),
+                      std::istreambuf_iterator<char>());
   return decode_base64(encoded);
-}
-
-std::vector<std::byte> expected_yuv420p8() {
-  return {
-      std::byte{0x10}, std::byte{0x11}, std::byte{0x12}, std::byte{0x13},
-      std::byte{0x14}, std::byte{0x15}, std::byte{0x16}, std::byte{0x17},
-      std::byte{0x18}, std::byte{0x19}, std::byte{0x1a}, std::byte{0x1b},
-      std::byte{0x1c}, std::byte{0x1d}, std::byte{0x1e}, std::byte{0x1f},
-      std::byte{0x40}, std::byte{0x41}, std::byte{0x42}, std::byte{0x43},
-      std::byte{0xc0}, std::byte{0xc1}, std::byte{0xc2}, std::byte{0xc3},
-  };
 }
 
 bool write_bytes(const std::filesystem::path& path,
@@ -95,15 +88,24 @@ video::FfmpegVideoIngestRequest request_for(
   };
 }
 
+video::VideoFrameQuery query_for(const codec::StreamId& stream) {
+  return video::VideoFrameQuery{
+      .stream = stream,
+      .time = std::nullopt,
+      .maximum_results = 8,
+      .maximum_encoded_bytes = 1024U * 1024U,
+  };
+}
+
 }  // namespace
 
-TEST(video_ffmpeg_ingest_preserves_mp4_and_emits_verified_yuv420p8) {
+TEST(video_ffmpeg_ingest_preserves_mp4_and_emits_verified_encoded_h264) {
   const auto source_path = test_path("fixture.mp4");
   const auto archive_path = test_path("fixture.coda");
   std::filesystem::remove(source_path);
   std::filesystem::remove(archive_path);
-  const auto fixture = mp4_h264_fixture();
-  EXPECT_TRUE(write_bytes(source_path, fixture));
+  const auto source_bytes = fixture("video_4x4_h264.mp4.b64");
+  EXPECT_TRUE(write_bytes(source_path, source_bytes));
   const auto stream = codec::derive_stream_id("video-ffmpeg-fixture");
   const auto request = request_for(source_path, archive_path, stream);
 
@@ -123,6 +125,8 @@ TEST(video_ffmpeg_ingest_preserves_mp4_and_emits_verified_yuv420p8) {
   EXPECT_TRUE(report->state_exact());
   EXPECT_EQ(report->states.size(), std::size_t{1});
   EXPECT_EQ(report->provenance.size(), std::size_t{1});
+  EXPECT_EQ(report->states.front().type_code(),
+            video::video_encoded_video_state_record_type);
 
   auto archive = codec::CodaArchive::open(archive_path);
   EXPECT_TRUE(archive);
@@ -130,24 +134,34 @@ TEST(video_ffmpeg_ingest_preserves_mp4_and_emits_verified_yuv420p8) {
   EXPECT_TRUE(archive->verify().ok);
   auto extracted = archive->extract_stream(stream);
   EXPECT_TRUE(extracted);
-  if (extracted) EXPECT_EQ(*extracted, fixture);
+  if (extracted) EXPECT_EQ(*extracted, source_bytes);
 
-  auto frames = video::query_verified_raw_video_frames(*archive);
-  EXPECT_TRUE(frames);
-  if (frames) {
-    EXPECT_EQ(frames->size(), std::size_t{1});
-    if (!frames->empty()) {
-      const auto& frame = frames->front();
-      EXPECT_EQ(frame.state.descriptor.coded_width, std::uint32_t{4});
-      EXPECT_EQ(frame.state.descriptor.coded_height, std::uint32_t{4});
-      EXPECT_EQ(frame.state.descriptor.pixel_layout,
-                video::PixelLayout::yuv420p8);
-      EXPECT_EQ(frame.state.pixels, expected_yuv420p8());
-      EXPECT_EQ(frame.state_record.start_ns, std::int64_t{1'000'000'000});
-      EXPECT_EQ(frame.state_record.end_ns, std::int64_t{2'000'000'000});
-      EXPECT_EQ(frame.source_records.size(), std::size_t{1});
-      if (!frame.source_records.empty()) {
-        EXPECT_EQ(frame.source_records.front().hash, report->source.hash);
+  auto raw_frames = video::query_verified_raw_video_frames(*archive, query_for(stream));
+  EXPECT_TRUE(raw_frames);
+  if (raw_frames) EXPECT_TRUE(raw_frames->empty());
+
+  auto encoded = video::query_verified_video_encoded_video(*archive, query_for(stream));
+  EXPECT_TRUE(encoded);
+  if (encoded) {
+    EXPECT_EQ(encoded->size(), std::size_t{1});
+    if (!encoded->empty()) {
+      const auto& state = encoded->front().state;
+      EXPECT_EQ(state.codec, video::EncodedVideoCodec::h264);
+      EXPECT_EQ(state.framing,
+                video::EncodedVideoPacketFraming::length_prefixed);
+      EXPECT_EQ(state.coded_width, std::uint32_t{4});
+      EXPECT_EQ(state.coded_height, std::uint32_t{4});
+      EXPECT_TRUE(state.validated_frames > 0U);
+      EXPECT_TRUE(!state.decoder_config.empty());
+      EXPECT_TRUE(!state.packets.empty());
+      EXPECT_EQ(encoded->front().state_record.start_ns,
+                std::int64_t{1'000'000'000});
+      EXPECT_EQ(encoded->front().state_record.end_ns,
+                std::int64_t{2'000'000'000});
+      EXPECT_EQ(encoded->front().source_records.size(), std::size_t{1});
+      if (!encoded->front().source_records.empty()) {
+        EXPECT_EQ(encoded->front().source_records.front().hash,
+                  report->source.hash);
       }
     }
   }
@@ -187,9 +201,10 @@ TEST(video_ffmpeg_ingest_preserves_source_when_decode_fails) {
     auto extracted = archive->extract_stream(stream);
     EXPECT_TRUE(extracted);
     if (extracted) EXPECT_EQ(*extracted, malformed);
-    auto frames = video::query_verified_raw_video_frames(*archive);
-    EXPECT_TRUE(frames);
-    if (frames) EXPECT_TRUE(frames->empty());
+    auto encoded =
+        video::query_verified_video_encoded_video(*archive, query_for(stream));
+    EXPECT_TRUE(encoded);
+    if (encoded) EXPECT_TRUE(encoded->empty());
   }
 
   std::filesystem::remove(archive_path);
@@ -202,7 +217,7 @@ TEST(video_ffmpeg_ingest_accepts_negative_archive_interval) {
   const auto archive_path = test_path("negative-time.coda");
   std::filesystem::remove(source_path);
   std::filesystem::remove(archive_path);
-  EXPECT_TRUE(write_bytes(source_path, mp4_h264_fixture()));
+  EXPECT_TRUE(write_bytes(source_path, fixture("video_4x4_h264.mp4.b64")));
   const auto stream = codec::derive_stream_id("video-ffmpeg-negative-time");
   auto request = request_for(source_path, archive_path, stream);
   request.start_ns = -1'000'000'000;
@@ -215,12 +230,13 @@ TEST(video_ffmpeg_ingest_accepts_negative_archive_interval) {
     auto archive = codec::CodaArchive::open(archive_path);
     EXPECT_TRUE(archive);
     if (archive) {
-      auto frames = video::query_verified_raw_video_frames(*archive);
-      EXPECT_TRUE(frames);
-      if (frames && !frames->empty()) {
-        EXPECT_EQ(frames->front().state_record.start_ns,
+      auto encoded =
+          video::query_verified_video_encoded_video(*archive, query_for(stream));
+      EXPECT_TRUE(encoded);
+      if (encoded && !encoded->empty()) {
+        EXPECT_EQ(encoded->front().state_record.start_ns,
                   std::int64_t{-1'000'000'000});
-        EXPECT_EQ(frames->front().state_record.end_ns, std::int64_t{0});
+        EXPECT_EQ(encoded->front().state_record.end_ns, std::int64_t{0});
       }
     }
   }

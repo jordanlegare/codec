@@ -29,6 +29,42 @@ bool write_limit_bytes(const std::filesystem::path& path,
   return static_cast<bool>(output);
 }
 
+std::vector<std::byte> decode_base64(std::string_view encoded) {
+  const auto value = [](char ch) -> int {
+    if (ch >= 'A' && ch <= 'Z') return ch - 'A';
+    if (ch >= 'a' && ch <= 'z') return ch - 'a' + 26;
+    if (ch >= '0' && ch <= '9') return ch - '0' + 52;
+    if (ch == '+') return 62;
+    if (ch == '/') return 63;
+    return -1;
+  };
+  std::vector<std::byte> output;
+  std::uint32_t accumulator = 0U;
+  int bits = 0;
+  for (const char ch : encoded) {
+    if (ch == '=') break;
+    const auto digit = value(ch);
+    if (digit < 0) continue;
+    accumulator = (accumulator << 6U) | static_cast<std::uint32_t>(digit);
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      output.push_back(static_cast<std::byte>(
+          (accumulator >> static_cast<unsigned>(bits)) & 0xffU));
+    }
+  }
+  return output;
+}
+
+std::vector<std::byte> fixture(std::string_view name) {
+  const auto path = std::filesystem::path{__FILE__}.parent_path() / "fixtures" /
+                    std::string{name};
+  std::ifstream input(path, std::ios::binary);
+  std::string encoded((std::istreambuf_iterator<char>(input)),
+                      std::istreambuf_iterator<char>());
+  return decode_base64(encoded);
+}
+
 std::vector<std::byte> bmp_2x2_fixture() {
   return {
       std::byte{'B'}, std::byte{'M'},
@@ -57,9 +93,9 @@ std::vector<std::byte> concat_secondary_open_fixture(
   std::string manifest = "ffconcat version 1.0\nfile ";
   manifest += nested_name;
   manifest += '\n';
-  const auto bytes = std::as_bytes(
+  const auto view = std::as_bytes(
       std::span<const char>{manifest.data(), manifest.size()});
-  return {bytes.begin(), bytes.end()};
+  return {view.begin(), view.end()};
 }
 
 video::FfmpegVideoIngestRequest limit_request(
@@ -105,24 +141,33 @@ void expect_source_only_archive(
               std::vector<std::byte>(expected_source.begin(),
                                      expected_source.end()));
   }
-  auto frames = video::query_verified_raw_video_frames(*archive);
-  EXPECT_TRUE(frames);
-  if (frames) EXPECT_TRUE(frames->empty());
+  const video::VideoFrameQuery query{
+      .stream = stream,
+      .time = std::nullopt,
+      .maximum_results = 8,
+      .maximum_encoded_bytes = 1024U * 1024U,
+  };
+  auto raw = video::query_verified_raw_video_frames(*archive, query);
+  EXPECT_TRUE(raw);
+  if (raw) EXPECT_TRUE(raw->empty());
+  auto encoded = video::query_verified_video_encoded_video(*archive, query);
+  EXPECT_TRUE(encoded);
+  if (encoded) EXPECT_TRUE(encoded->empty());
 }
 
 }  // namespace
 
 TEST(video_ffmpeg_ingest_decoded_byte_limit_preserves_exact_s0_only) {
   if (!video::ffmpeg_video_ingest_available()) return;
-  const auto source_path = limit_test_path("decoded-limit.bmp");
+  const auto source_path = limit_test_path("decoded-limit.mp4");
   const auto archive_path = limit_test_path("decoded-limit.coda");
   std::filesystem::remove(source_path);
   std::filesystem::remove(archive_path);
-  const auto fixture = bmp_2x2_fixture();
-  EXPECT_TRUE(write_limit_bytes(source_path, fixture));
+  const auto source_bytes = fixture("video_4x4_h264.mp4.b64");
+  EXPECT_TRUE(write_limit_bytes(source_path, source_bytes));
   const auto stream = codec::derive_stream_id("video-ffmpeg-decoded-limit");
-  auto request = limit_request(source_path, archive_path, stream, "image/bmp");
-  request.maximum_decoded_bytes = 3;
+  auto request = limit_request(source_path, archive_path, stream, "video/mp4");
+  request.maximum_decoded_bytes = 15;
 
   auto report = video::ingest_video_ffmpeg(request);
   EXPECT_TRUE(report);
@@ -131,7 +176,7 @@ TEST(video_ffmpeg_ingest_decoded_byte_limit_preserves_exact_s0_only) {
     if (report->profile_error) {
       EXPECT_EQ(report->profile_error->code, codec::ErrorCode::resource_exhausted);
     }
-    expect_source_only_archive(*report, archive_path, stream, fixture);
+    expect_source_only_archive(*report, archive_path, stream, source_bytes);
   }
 
   std::filesystem::remove(archive_path);
@@ -150,8 +195,8 @@ TEST(video_ffmpeg_ingest_denies_nested_demuxer_resource_open) {
 
   const auto nested_fixture = bmp_2x2_fixture();
   EXPECT_TRUE(write_limit_bytes(nested_path, nested_fixture));
-  const auto fixture = concat_secondary_open_fixture(nested_name);
-  EXPECT_TRUE(write_limit_bytes(source_path, fixture));
+  const auto source_bytes = concat_secondary_open_fixture(nested_name);
+  EXPECT_TRUE(write_limit_bytes(source_path, source_bytes));
   const auto stream = codec::derive_stream_id("video-ffmpeg-secondary-open");
   auto request = limit_request(source_path, archive_path, stream, "text/plain");
 
@@ -159,7 +204,7 @@ TEST(video_ffmpeg_ingest_denies_nested_demuxer_resource_open) {
   EXPECT_TRUE(report);
   if (report) {
     EXPECT_TRUE(report->profile_error.has_value());
-    expect_source_only_archive(*report, archive_path, stream, fixture);
+    expect_source_only_archive(*report, archive_path, stream, source_bytes);
   }
 
   std::filesystem::remove(archive_path);

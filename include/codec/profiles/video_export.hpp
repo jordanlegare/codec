@@ -19,6 +19,7 @@ struct VerifiedVideoMp4Export {
   std::vector<StreamProvenance> provenance;
   std::optional<RecordInfo> audio_state_record{};
   std::optional<StreamProvenance> audio_provenance{};
+  bool video_packet_passthrough{};
   bool audio_packet_passthrough{};
 };
 

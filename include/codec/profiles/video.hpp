@@ -18,6 +18,7 @@ inline constexpr RecordTypeCode video_profile_descriptor_record_type = 0x0100;
 inline constexpr RecordTypeCode raw_video_frame_state_record_type = 0x0101;
 inline constexpr RecordTypeCode video_pcm16_audio_state_record_type = 0x0102;
 inline constexpr RecordTypeCode video_encoded_audio_state_record_type = 0x0103;
+inline constexpr RecordTypeCode video_encoded_video_state_record_type = 0x0104;
 
 enum class PixelLayout : std::uint8_t {
   gray8 = 1,
@@ -115,6 +116,48 @@ struct EncodedAudioDecodeLimits {
   std::uint64_t maximum_payload_bytes{1024ULL * 1024ULL * 1024ULL};
 };
 
+enum class EncodedVideoCodec : std::uint16_t {
+  h264 = 1,
+};
+
+enum class EncodedVideoPacketFraming : std::uint8_t {
+  unknown = 0,
+  length_prefixed = 1,
+  annex_b = 2,
+};
+
+struct EncodedVideoPacket {
+  std::int64_t pts_offset_ns{};
+  std::int64_t dts_offset_ns{};
+  std::uint64_t duration_ns{};
+  std::uint32_t flags{};
+  std::vector<std::byte> payload;
+  bool operator==(const EncodedVideoPacket&) const = default;
+};
+
+struct EncodedVideoState {
+  EncodedVideoCodec codec{EncodedVideoCodec::h264};
+  EncodedVideoPacketFraming framing{EncodedVideoPacketFraming::unknown};
+  std::int32_t codec_profile{};
+  std::int32_t codec_level{};
+  std::uint32_t coded_width{};
+  std::uint32_t coded_height{};
+  std::uint32_t sample_aspect_ratio_numerator{1};
+  std::uint32_t sample_aspect_ratio_denominator{1};
+  std::uint64_t validated_frames{};
+  std::uint64_t presentation_lead_ns{};
+  std::vector<std::byte> decoder_config;
+  std::vector<EncodedVideoPacket> packets;
+  bool operator==(const EncodedVideoState&) const = default;
+};
+
+struct EncodedVideoDecodeLimits {
+  std::size_t maximum_packets{1'000'000};
+  std::uint64_t maximum_decoder_config_bytes{4ULL * 1024ULL * 1024ULL};
+  std::uint64_t maximum_packet_bytes{64ULL * 1024ULL * 1024ULL};
+  std::uint64_t maximum_payload_bytes{1024ULL * 1024ULL * 1024ULL};
+};
+
 Result<std::vector<std::byte>> encode_video_profile_descriptor(
     const VideoProfileDescriptor& descriptor);
 Result<VideoProfileDescriptor> decode_video_profile_descriptor(
@@ -128,6 +171,11 @@ Result<std::vector<std::byte>> encode_encoded_audio_state(
 Result<EncodedAudioState> decode_encoded_audio_state(
     std::span<const std::byte> payload,
     EncodedAudioDecodeLimits limits = {});
+Result<std::vector<std::byte>> encode_encoded_video_state(
+    const EncodedVideoState& state);
+Result<EncodedVideoState> decode_encoded_video_state(
+    std::span<const std::byte> payload,
+    EncodedVideoDecodeLimits limits = {});
 
 struct VideoFrameQuery {
   std::optional<StreamId> stream;
@@ -144,7 +192,17 @@ struct VerifiedRawVideoFrame {
   StreamProvenance provenance;
 };
 
+struct VerifiedVideoEncodedVideo {
+  EncodedVideoState state;
+  RecordInfo state_record;
+  std::vector<RecordInfo> source_records;
+  StreamProvenance provenance;
+};
+
 Result<std::vector<VerifiedRawVideoFrame>> query_verified_raw_video_frames(
+    const CodaArchive& archive, const VideoFrameQuery& query = {});
+Result<std::vector<VerifiedVideoEncodedVideo>>
+query_verified_video_encoded_video(
     const CodaArchive& archive, const VideoFrameQuery& query = {});
 
 struct VideoAudioQuery {

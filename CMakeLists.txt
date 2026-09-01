@@ -77,6 +77,7 @@ add_library(codec_core
   src/video/encoded_audio_state_reader.cpp
   src/video/encoded_video_state.cpp
   src/video/encoded_video_state_reader.cpp
+  src/video/ffmpeg_aac_trim_mux.cpp
   src/video/ffmpeg_audio_mux.cpp
   src/video/ffmpeg_export_router.cpp
   src/video/ffmpeg_packet_mux.cpp
@@ -226,6 +227,7 @@ if(CODEC_BUILD_TESTS)
     tests/test_video_encoded_audio_state.cpp
     tests/test_video_encoded_audio_state_reader.cpp
     tests/test_video_encoded_audio_capture.cpp
+    tests/test_video_aac_trim_export.cpp
     tests/test_video_encoded_video_state_reader.cpp
     tests/test_video_encoded_video_ingest.cpp
     tests/test_video_encoded_video_export.cpp

@@ -1,3 +1,4 @@
+#include "ffmpeg_aac_trim_mux.hpp"
 #include "ffmpeg_packet_mux.hpp"
 
 #define export_verified_video_mp4 export_verified_video_mp4_video_only
@@ -11,6 +12,14 @@ bool overlaps_time_filter(const RecordInfo& record,
                           const std::optional<RecordTimeRange>& time) {
   return !time.has_value() ||
          (record.start_ns < time->end_ns && time->begin_ns < record.end_ns);
+}
+
+bool encoded_audio_trim_has_preroll(const EncodedAudioState& state) {
+  if (state.trim_start_frames == 0U) return true;
+  for (const auto& packet : state.packets) {
+    if (packet.pts_offset_ns < 0 || packet.dts_offset_ns < 0) return true;
+  }
+  return false;
 }
 
 ProvenanceRecordLink record_link(const RecordInfo& record) {
@@ -128,7 +137,12 @@ Result<VerifiedVideoMp4Export> export_verified_video_mp4(
   const bool packet_passthrough = !encoded_audio->empty();
   const auto muxed = [&]() -> Result<std::vector<std::byte>> {
     if (packet_passthrough) {
-      return mux_verified_encoded_audio_packets(
+      if (!encoded_audio_trim_has_preroll(encoded_audio->front().state)) {
+        return fail<std::vector<std::byte>>(
+            ErrorCode::model_incompatible,
+            "encoded AAC leading trim has no compressed preroll timestamps");
+      }
+      return mux_verified_encoded_audio_trim_aware(
           video_only->output.payload, encoded_audio->front(),
           video_only->state_records.front().start_ns,
           limits.maximum_output_bytes);

@@ -360,6 +360,7 @@ struct DecodedVideo {
 Result<void> initialize_encoded_video(DecodedVideo& decoded,
                                       const AVStream& stream,
                                       const FfmpegVideoIngestRequest& request) {
+  (void)request;
   if (stream.codecpar == nullptr || stream.time_base.num <= 0 ||
       stream.time_base.den <= 0) {
     return fail(ErrorCode::decode,
@@ -377,8 +378,7 @@ Result<void> initialize_encoded_video(DecodedVideo& decoded,
   }
   const auto config_bytes =
       static_cast<std::uint64_t>(stream.codecpar->extradata_size);
-  if (config_bytes > EncodedVideoDecodeLimits{}.maximum_decoder_config_bytes ||
-      config_bytes > request.maximum_decoded_bytes) {
+  if (config_bytes > EncodedVideoDecodeLimits{}.maximum_decoder_config_bytes) {
     return fail(ErrorCode::resource_exhausted,
                 "H.264 decoder configuration exceeds configured limits");
   }
@@ -415,12 +415,14 @@ Result<void> initialize_encoded_video(DecodedVideo& decoded,
       decoded.state.framing = EncodedVideoPacketFraming::length_prefixed;
     }
   }
+  decoded.captured_packet_bytes = config_bytes;
   return {};
 }
 
 Result<void> capture_encoded_video_packet(
     DecodedVideo& decoded, const AVPacket& packet,
     const FfmpegVideoIngestRequest& request) {
+  (void)request;
   if (packet.data == nullptr || packet.size <= 0) {
     return fail(ErrorCode::decode,
                 "selected H.264 packet has no encoded payload");
@@ -449,9 +451,11 @@ Result<void> capture_encoded_video_packet(
                 "encoded video exceeds the configured packet count limit");
   }
   const auto payload_bytes = static_cast<std::uint64_t>(packet.size);
-  if (decoded.captured_packet_bytes > request.maximum_decoded_bytes ||
+  const auto encoded_limits = EncodedVideoDecodeLimits{};
+  if (payload_bytes > encoded_limits.maximum_packet_bytes ||
+      decoded.captured_packet_bytes > encoded_limits.maximum_payload_bytes ||
       payload_bytes >
-          request.maximum_decoded_bytes - decoded.captured_packet_bytes) {
+          encoded_limits.maximum_payload_bytes - decoded.captured_packet_bytes) {
     return fail(ErrorCode::resource_exhausted,
                 "encoded video exceeds the configured aggregate byte limit");
   }

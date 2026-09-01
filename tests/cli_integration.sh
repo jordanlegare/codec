@@ -39,6 +39,7 @@ expect_status_2() {
 grep -Fxq "codec $expected_version" "$test_dir/version.txt"
 "$codec_bin" --help > "$test_dir/help.txt"
 grep -Fq "CODEC $expected_version - " "$test_dir/help.txt"
+grep -Fq "preservation-first multi-stream capture, CODA archival, and media preservation" "$test_dir/help.txt"
 
 printf 'internet audio source bytes\n' > "$test_dir/input.bin"
 "$codec_bin" capabilities > "$test_dir/capabilities.json"

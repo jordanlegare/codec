@@ -23,7 +23,6 @@ namespace codec::cli {
 namespace detail {
 
 constexpr std::size_t maximum_m3u_entries = 256U;
-constexpr std::size_t maximum_m3u_playlists = 256U;
 constexpr std::size_t maximum_m3u_line_bytes = 64U * 1024U;
 constexpr std::size_t maximum_m3u_file_bytes = 4U * 1024U * 1024U;
 
@@ -339,165 +338,6 @@ inline Result<std::vector<M3uEntry>> read_m3u_entries(
   return entries;
 }
 
-inline bool m3u_has_wildcards(std::string_view text) noexcept {
-  return text.find('*') != std::string_view::npos ||
-         text.find('?') != std::string_view::npos;
-}
-
-inline bool m3u_wildcard_match(std::string_view pattern,
-                               std::string_view text) noexcept {
-  std::size_t pattern_index = 0U;
-  std::size_t text_index = 0U;
-  std::size_t star_index = std::string_view::npos;
-  std::size_t star_text_index = 0U;
-
-  while (text_index < text.size()) {
-    if (pattern_index < pattern.size() &&
-        (pattern[pattern_index] == '?' ||
-         pattern[pattern_index] == text[text_index])) {
-      ++pattern_index;
-      ++text_index;
-      continue;
-    }
-    if (pattern_index < pattern.size() && pattern[pattern_index] == '*') {
-      star_index = pattern_index++;
-      star_text_index = text_index;
-      continue;
-    }
-    if (star_index != std::string_view::npos) {
-      pattern_index = star_index + 1U;
-      text_index = ++star_text_index;
-      continue;
-    }
-    return false;
-  }
-  while (pattern_index < pattern.size() && pattern[pattern_index] == '*') {
-    ++pattern_index;
-  }
-  return pattern_index == pattern.size();
-}
-
-inline Result<void> expand_m3u_glob_components(
-    const std::vector<std::filesystem::path>& components, std::size_t index,
-    const std::filesystem::path& current,
-    std::vector<std::filesystem::path>& matches) {
-  if (matches.size() > maximum_m3u_playlists) {
-    return fail(ErrorCode::resource_exhausted,
-                "M3U wildcard exceeds the 256-playlist ingest limit");
-  }
-  if (index >= components.size()) {
-    std::error_code status_error;
-    const bool regular = std::filesystem::is_regular_file(current, status_error);
-    if (status_error == std::errc::no_such_file_or_directory ||
-        status_error == std::errc::not_a_directory) {
-      return {};
-    }
-    if (status_error) {
-      return fail(ErrorCode::archive_io,
-                  "cannot inspect M3U wildcard candidate: " +
-                      status_error.message());
-    }
-    if (regular) matches.push_back(current.lexically_normal());
-    return {};
-  }
-
-  const auto component = components[index].string();
-  if (!m3u_has_wildcards(component)) {
-    return expand_m3u_glob_components(components, index + 1U,
-                                      current / components[index], matches);
-  }
-
-  std::error_code iteration_error;
-  std::filesystem::directory_iterator iterator(current, iteration_error);
-  if (iteration_error == std::errc::no_such_file_or_directory ||
-      iteration_error == std::errc::not_a_directory) {
-    return {};
-  }
-  if (iteration_error) {
-    return fail(ErrorCode::archive_io,
-                "cannot expand M3U wildcard directory: " +
-                    iteration_error.message());
-  }
-
-  std::vector<std::filesystem::directory_entry> candidates;
-  for (auto end = std::filesystem::directory_iterator{}; iterator != end;
-       iterator.increment(iteration_error)) {
-    if (iteration_error) {
-      return fail(ErrorCode::archive_io,
-                  "cannot expand M3U wildcard directory: " +
-                      iteration_error.message());
-    }
-    if (m3u_wildcard_match(component, iterator->path().filename().string())) {
-      candidates.push_back(*iterator);
-    }
-  }
-  if (iteration_error) {
-    return fail(ErrorCode::archive_io,
-                "cannot expand M3U wildcard directory: " +
-                    iteration_error.message());
-  }
-  std::sort(candidates.begin(), candidates.end(), [](const auto& left,
-                                                      const auto& right) {
-    return left.path().generic_string() < right.path().generic_string();
-  });
-
-  const bool last = index + 1U == components.size();
-  for (const auto& candidate : candidates) {
-    std::error_code type_error;
-    const bool usable = last ? candidate.is_regular_file(type_error)
-                             : candidate.is_directory(type_error);
-    if (type_error) {
-      return fail(ErrorCode::archive_io,
-                  "cannot inspect M3U wildcard candidate: " +
-                      type_error.message());
-    }
-    if (!usable) continue;
-    auto expanded = expand_m3u_glob_components(
-        components, index + 1U, candidate.path(), matches);
-    if (!expanded) return expanded.error();
-    if (matches.size() > maximum_m3u_playlists) {
-      return fail(ErrorCode::resource_exhausted,
-                  "M3U wildcard exceeds the 256-playlist ingest limit");
-    }
-  }
-  return {};
-}
-
-inline Result<std::vector<std::filesystem::path>> expand_m3u_playlist_paths(
-    std::string_view pattern) {
-  const std::filesystem::path pattern_path{std::string{pattern}};
-  if (!m3u_has_wildcards(pattern)) {
-    return std::vector<std::filesystem::path>{pattern_path};
-  }
-
-  std::vector<std::filesystem::path> components;
-  for (const auto& component : pattern_path.relative_path()) {
-    components.push_back(component);
-  }
-  std::filesystem::path root = pattern_path.root_path();
-  if (root.empty()) root = ".";
-
-  std::vector<std::filesystem::path> matches;
-  auto expanded = expand_m3u_glob_components(components, 0U, root, matches);
-  if (!expanded) return expanded.error();
-  std::sort(matches.begin(), matches.end(), [](const auto& left,
-                                               const auto& right) {
-    return left.generic_string() < right.generic_string();
-  });
-  matches.erase(std::unique(matches.begin(), matches.end()), matches.end());
-  if (matches.empty()) {
-    return fail<std::vector<std::filesystem::path>>(
-        ErrorCode::invalid_argument,
-        "M3U wildcard matched no playlist files: " + std::string{pattern});
-  }
-  if (matches.size() > maximum_m3u_playlists) {
-    return fail<std::vector<std::filesystem::path>>(
-        ErrorCode::resource_exhausted,
-        "M3U wildcard exceeds the 256-playlist ingest limit");
-  }
-  return matches;
-}
-
 inline Result<std::vector<std::string>> expand_m3u_ingest_arguments(
     std::span<const std::string_view> arguments) {
   if (arguments.size() < 4U || arguments[0] != "--archive" ||
@@ -505,41 +345,21 @@ inline Result<std::vector<std::string>> expand_m3u_ingest_arguments(
       arguments[3].empty()) {
     return fail<std::vector<std::string>>(
         ErrorCode::invalid_argument,
-        "M3U video ingest requires --archive FILE --m3u PLAYLIST_OR_PATTERN");
+        "M3U video ingest requires --archive FILE --m3u PLAYLIST");
   }
 
   auto options = parse_m3u_command_options(arguments.subspan(4U));
   if (!options) return options.error();
-  auto playlist_paths = expand_m3u_playlist_paths(arguments[3]);
-  if (!playlist_paths) return playlist_paths.error();
-
-  std::vector<M3uEntry> entries;
-  std::set<std::string> normalized_sources;
-  for (const auto& playlist_path : *playlist_paths) {
-    auto playlist_entries = read_m3u_entries(playlist_path);
-    if (!playlist_entries) return playlist_entries.error();
-    for (auto& entry : *playlist_entries) {
-      if (entries.size() >= maximum_m3u_entries) {
-        return fail<std::vector<std::string>>(
-            ErrorCode::resource_exhausted,
-            "M3U playlist expansion exceeds the 256-entry ingest limit");
-      }
-      if (!normalized_sources.insert(entry.source).second) {
-        return fail<std::vector<std::string>>(
-            ErrorCode::invalid_argument,
-            "M3U playlist expansion contains a duplicate media source: " +
-                entry.source);
-      }
-      entries.push_back(std::move(entry));
-    }
-  }
+  const std::filesystem::path playlist_path{std::string{arguments[3]}};
+  auto entries = read_m3u_entries(playlist_path);
+  if (!entries) return entries.error();
 
   std::vector<std::string> expanded;
-  expanded.reserve(2U + entries.size() *
+  expanded.reserve(2U + entries->size() *
                             (9U + options->common_video_options.size() * 2U));
   expanded.emplace_back("--archive");
   expanded.emplace_back(arguments[1]);
-  for (const auto& entry : entries) {
+  for (const auto& entry : *entries) {
     std::int64_t end_ns = 0;
     if (entry.duration_ns) {
       if (options->start_ns >

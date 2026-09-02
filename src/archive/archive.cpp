@@ -1,6 +1,7 @@
 #include <codec/archive.hpp>
 
 #include "../core/internal.hpp"
+#include "verified_snapshot_scope.hpp"
 
 #include <openssl/rand.h>
 
@@ -35,6 +36,14 @@ constexpr std::array<std::byte, 4> commit_magic{
 #ifdef CODEC_TESTING
 std::atomic<std::uint64_t> archive_scan_count{0U};
 #endif
+
+thread_local const CodaArchive* scoped_snapshot_archive = nullptr;
+thread_local const VerifiedArchiveSnapshot* scoped_snapshot = nullptr;
+
+const VerifiedArchiveSnapshot* scoped_snapshot_for(
+    const CodaArchive& archive) noexcept {
+  return scoped_snapshot_archive == &archive ? scoped_snapshot : nullptr;
+}
 
 template <typename Integer>
 void put_le(std::span<std::byte> output, std::size_t offset, Integer value) {
@@ -529,6 +538,58 @@ const std::vector<StreamProvenance>& VerifiedArchiveSnapshot::provenance() const
   return impl_->provenance;
 }
 
+Result<std::vector<RecordInfo>> VerifiedArchiveSnapshot::query_records(
+    const RecordQuery& query) const {
+  auto valid = validate_record_query(query);
+  if (!valid) return valid.error();
+  std::vector<RecordInfo> output;
+  output.reserve(impl_->records.size());
+  for (const auto& record : impl_->records) {
+    if (matches_record_query(record, query)) output.push_back(record);
+  }
+  return output;
+}
+
+Result<std::vector<StreamProvenance>>
+VerifiedArchiveSnapshot::query_provenance(const ProvenanceQuery& query) const {
+  return filter_archive_provenance(impl_->records, impl_->provenance, query);
+}
+
+const std::filesystem::path& VerifiedArchiveSnapshot::path() const noexcept {
+  return impl_->path;
+}
+
+namespace detail {
+
+VerifiedArchiveSnapshotScope::VerifiedArchiveSnapshotScope(
+    VerifiedArchiveSnapshotScope&& other) noexcept
+    : previous_archive_(other.previous_archive_),
+      previous_snapshot_(other.previous_snapshot_),
+      active_(other.active_) {
+  other.active_ = false;
+}
+
+VerifiedArchiveSnapshotScope::~VerifiedArchiveSnapshotScope() {
+  if (!active_) return;
+  scoped_snapshot_archive = previous_archive_;
+  scoped_snapshot = previous_snapshot_;
+}
+
+Result<VerifiedArchiveSnapshotScope> activate_verified_archive_snapshot(
+    const CodaArchive& archive, const VerifiedArchiveSnapshot& snapshot) {
+  if (snapshot.path() != archive.path()) {
+    return fail<VerifiedArchiveSnapshotScope>(
+        ErrorCode::invalid_argument,
+        "verified archive snapshot does not belong to this archive");
+  }
+  VerifiedArchiveSnapshotScope scope{scoped_snapshot_archive, scoped_snapshot};
+  scoped_snapshot_archive = &archive;
+  scoped_snapshot = &snapshot;
+  return scope;
+}
+
+}  // namespace detail
+
 struct CodaWriter::Impl {
   std::filesystem::path path;
   int output{-1};
@@ -789,7 +850,7 @@ Result<RecordInfo> CodaWriter::append_stream_provenance(
     if (committed_input == impl_->records.end()) {
       return fail<RecordInfo>(
           ErrorCode::invalid_argument,
-          "provenance input must match an exact committed record");
+          "provenance input must match an exact committed source record");
     }
     if (committed_input->sequence >= committed_subject_record.sequence) {
       return fail<RecordInfo>(ErrorCode::invalid_argument,
@@ -864,7 +925,9 @@ Result<CodaArchive> CodaArchive::open(const std::filesystem::path& path) {
 }
 
 VerificationReport CodaArchive::verify() const {
-  if (snapshot_) return snapshot_->verification;
+  if (const auto* snapshot = scoped_snapshot_for(*this)) {
+    return snapshot->verification();
+  }
   auto scanned = scan_archive(path_);
   if (!scanned) {
     VerificationReport report;
@@ -877,7 +940,9 @@ VerificationReport CodaArchive::verify() const {
 
 Result<std::vector<RecordInfo>> CodaArchive::records(
     ArchiveReadPolicy policy) const {
-  if (snapshot_) return snapshot_->records;
+  if (const auto* snapshot = scoped_snapshot_for(*this)) {
+    return snapshot->records();
+  }
   auto scanned = scan_archive(path_);
   if (!scanned) return scanned.error();
   if (!scanned->report.ok &&
@@ -938,7 +1003,9 @@ Result<std::vector<FeedInfo>> CodaArchive::feeds(
 
 Result<std::vector<StreamDescriptor>> CodaArchive::streams(
     ArchiveReadPolicy policy) const {
-  if (snapshot_) return snapshot_->streams;
+  if (const auto* snapshot = scoped_snapshot_for(*this)) {
+    return snapshot->streams();
+  }
   auto record_list = records(policy);
   if (!record_list) return record_list.error();
   return decode_archive_streams(*this, *record_list);
@@ -1004,7 +1071,9 @@ Result<std::vector<StreamContinuityEvent>> CodaArchive::continuity(
 
 Result<std::vector<StreamProvenance>> CodaArchive::provenance(
     ArchiveReadPolicy policy) const {
-  if (snapshot_) return snapshot_->provenance;
+  if (const auto* snapshot = scoped_snapshot_for(*this)) {
+    return snapshot->provenance();
+  }
   auto record_list = records(policy);
   if (!record_list) return record_list.error();
   return decode_archive_provenance(*this, *record_list);
@@ -1016,9 +1085,8 @@ Result<std::vector<StreamProvenance>> CodaArchive::query_provenance(
   const std::vector<StreamProvenance> no_provenance;
   auto valid = filter_archive_provenance(no_records, no_provenance, query);
   if (!valid) return valid.error();
-  if (snapshot_) {
-    return filter_archive_provenance(snapshot_->records, snapshot_->provenance,
-                                     query);
+  if (const auto* snapshot = scoped_snapshot_for(*this)) {
+    return snapshot->query_provenance(query);
   }
   auto record_list = records(policy);
   if (!record_list) return record_list.error();
@@ -1185,16 +1253,6 @@ Result<VerifiedArchiveSnapshot> CodaArchive::verified_snapshot() const {
   impl->streams = std::move(*stream_list);
   impl->provenance = std::move(*provenance_list);
   return VerifiedArchiveSnapshot{std::move(impl)};
-}
-
-Result<CodaArchive> CodaArchive::with_verified_snapshot(
-    const VerifiedArchiveSnapshot& snapshot) const {
-  if (!snapshot.impl_ || snapshot.impl_->path != path_) {
-    return fail<CodaArchive>(
-        ErrorCode::invalid_argument,
-        "verified archive snapshot does not belong to this archive");
-  }
-  return CodaArchive{path_, snapshot.impl_};
 }
 
 Result<RepairReport> CodaArchive::repair(

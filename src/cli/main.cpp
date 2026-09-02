@@ -5,6 +5,7 @@
 #include <codec/profiles/video_export.hpp>
 
 #include "../core/internal.hpp"
+#include "video_m3u_ingest.hpp"
 #include "video_multi_ingest.hpp"
 
 #include <algorithm>
@@ -39,6 +40,9 @@ void usage(std::ostream& output) {
       << "  codec video ingest --archive FILE\n"
       << "      --video --source URI --label LABEL --start-ns NS --end-ns NS [VIDEO OPTIONS]\n"
       << "      [--video --source URI --label LABEL --start-ns NS --end-ns NS [VIDEO OPTIONS] ...]\n"
+      << "\n"
+      << "  codec video ingest --archive FILE --m3u PLAYLIST\n"
+      << "      [--start-ns NS --end-ns NS] [VIDEO OPTIONS]\n"
       << "\n"
       << "  Legacy single-video form:\n"
       << "    codec video ingest --source URI --archive FILE --label LABEL\n"
@@ -461,6 +465,9 @@ int video_command(const Strings& arguments) {
     return 2;
   }
   const Strings tail(arguments.begin() + 1, arguments.end());
+  if (tail.size() >= 4U && tail[0] == "--archive" && tail[2] == "--m3u") {
+    return codec::cli::m3u_video_ingest_command(tail);
+  }
   if (tail.size() >= 3U && tail[0] == "--archive" && tail[2] == "--video") {
     return codec::cli::grouped_video_ingest_command(tail);
   }

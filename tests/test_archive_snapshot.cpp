@@ -2,6 +2,8 @@
 
 #include <codec/archive.hpp>
 
+#include "../src/archive/verified_snapshot_scope.hpp"
+
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -88,6 +90,21 @@ TEST(archive_verified_snapshot_reuses_one_complete_scan) {
   EXPECT_TRUE(payload);
   EXPECT_EQ(payload->size(), source.size());
   EXPECT_EQ(codec::detail::archive_scan_count_for_tests(), 1U);
+
+  {
+    auto scope = codec::detail::activate_verified_archive_snapshot(
+        archive, *snapshot);
+    EXPECT_TRUE(scope);
+    const auto verification = archive.verify();
+    EXPECT_TRUE(verification.ok);
+    auto records = archive.records();
+    EXPECT_TRUE(records);
+    auto streams = archive.streams();
+    EXPECT_TRUE(streams);
+    auto provenance = archive.query_provenance(codec::ProvenanceQuery{});
+    EXPECT_TRUE(provenance);
+    EXPECT_EQ(codec::detail::archive_scan_count_for_tests(), 1U);
+  }
 
   auto fresh_records = archive.records();
   EXPECT_TRUE(fresh_records);

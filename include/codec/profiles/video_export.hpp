@@ -29,4 +29,10 @@ Result<VerifiedVideoMp4Export> export_verified_video_mp4(
     const CodaArchive& archive, const VideoFrameQuery& query = {},
     VideoMp4ExportLimits limits = {});
 
+// Uses one command-scoped verified metadata snapshot while preserving the
+// existing payload re-read and record-hash checks performed by the exporter.
+Result<VerifiedVideoMp4Export> export_verified_video_mp4(
+    const CodaArchive& archive, const VerifiedArchiveSnapshot& snapshot,
+    const VideoFrameQuery& query = {}, VideoMp4ExportLimits limits = {});
+
 }  // namespace codec::profiles::video

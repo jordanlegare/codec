@@ -189,10 +189,12 @@ codec_enable_warnings(codec_cli)
 codec_enable_sanitizers(codec_cli)
 
 if(CODEC_BUILD_TESTS)
+  target_compile_definitions(codec_core PRIVATE CODEC_TESTING=1)
   enable_testing()
   add_executable(codec_tests
     tests/test_main.cpp
     tests/test_archive.cpp
+    tests/test_archive_snapshot.cpp
     tests/test_archive_follow.cpp
     tests/test_audio_model_bundle.cpp
     tests/test_audio_onnx_cpu_runtime.cpp

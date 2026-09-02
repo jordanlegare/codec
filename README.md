@@ -61,6 +61,7 @@ For the complete migration, compatibility, storage, and failure semantics, see [
 | Verify a CODA archive | `codec verify` |
 | Verify and inspect basic archive information | `codec inspect` |
 | List feed descriptors | `codec list feeds` |
+| List Video Profile stream descriptors | `codec list videos` |
 | Extract exact source bytes | `codec extract` |
 | Follow exact source bytes while an archive grows | `codec extract --follow` |
 | Rebuild the valid committed prefix into a new archive | `codec repair` |

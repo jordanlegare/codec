@@ -2,6 +2,10 @@
 
 All notable changes use semantic versioning.
 
+## Unreleased
+
+- Add `codec list videos ARCHIVE` as the Video Profile counterpart to `codec list feeds ARCHIVE`. The command emits archive-order JSON Lines for `StreamType::video` descriptors with stable stream ID, label, source ID, payload type, and S0 fidelity while ignoring non-video descriptors; no archive bytes, ingest/export behavior, C++ API, C ABI, or S0/S1/D semantics change.
+
 ## 0.4.0 — 2026-09-01
 
 - Release the Stage H.1 compressed-media preservation path. New compatible FFmpeg audiovisual ingest preserves the selected H.264 stream as bounded, versioned `EVP1` (`0x0104`) compressed packet state and compatible AAC as `EAP1` (`0x0103`) compressed packet state while keeping exact source/container or accepted HLS resources as S0. Video and audio are still decoded incrementally for fail-closed validation and resource checks, but decoded pixel/audio buffers are discarded: new compatible ingest writes no per-frame `VFR1` (`0x0101`) raw-pixel records and no new Video Profile PCM16 (`0x0102`) state. This removes the raw-frame/PCM duplication that dominated some archives; actual storage reduction remains workload-specific and no universal ratio, throughput, or latency claim is made.

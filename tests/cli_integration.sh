@@ -51,6 +51,11 @@ grep -q '"neural_separation":false' "$test_dir/capabilities.json"
 "$codec_bin" verify "$test_dir/session.coda" --level full
 "$codec_bin" list feeds "$test_dir/session.coda" > "$test_dir/feeds.jsonl"
 grep -q '"label":"news"' "$test_dir/feeds.jsonl"
+"$codec_bin" list videos "$test_dir/session.coda" > "$test_dir/videos.jsonl"
+if [ -s "$test_dir/videos.jsonl" ]; then
+  echo "feed-only archive unexpectedly listed a video descriptor" >&2
+  exit 1
+fi
 "$codec_bin" extract "$test_dir/session.coda" --feed news \
   --output "$test_dir/extracted.bin" > "$test_dir/extract.json"
 grep -q '"fidelity":"source_exact"' "$test_dir/extract.json"
@@ -63,7 +68,8 @@ cmp "$test_dir/input.bin" "$test_dir/explicit-extracted.bin"
 expect_status_2 "$test_dir/list-streams.stdout" \
   "$test_dir/list-streams.stderr" \
   "$codec_bin" list streams "$test_dir/session.coda"
-grep -q 'list supports: list feeds' "$test_dir/list-streams.stderr"
+grep -Fxq 'codec: list supports: list feeds ARCHIVE, list videos ARCHIVE' \
+  "$test_dir/list-streams.stderr"
 
 printf 'sentinel output\n' > "$test_dir/stream-output.bin"
 cp "$test_dir/stream-output.bin" "$test_dir/expected-sentinel.bin"

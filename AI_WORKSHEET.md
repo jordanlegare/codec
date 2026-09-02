@@ -6,76 +6,59 @@ Canonical work loop for ChatGPT, Codex, and other agentic contributors.
 
 > Read `README.md` first. Read deeper design docs only when the task touches their subject. Do not reread large historical plans unless they are directly relevant.
 
-## Active work record — CODEC v0.4.0 release preparation
+## Active work record — video descriptor listing CLI
 
 ```yaml
-task: Promote the merged Stage H.1 compressed-media implementation to CODEC v0.4.0 with synchronized CMake/package/CLI version reporting and release-grade user documentation.
+task: Add `codec list videos ARCHIVE` as the Video Profile counterpart to `codec list feeds ARCHIVE`.
 base_ref: main
-base_head_sha: 50bede31c21f5e1972d3e697ff2dd4580701f3c0
-work_branch: codex/release-0.4.0-prep
+base_head_sha: 15b869dff1ca161615baa478bf45134bc3540d95
+work_branch: codex/list-videos-archive
 current_version: 0.4.0
-target_version: 0.4.0
-active_roadmap_stage: H.1 is merged and release-ready; this bounded task packages that proven state as v0.4.0 without advancing to H.2 or Stage G.
+active_roadmap_stage: Stage H is active at H.1; this bounded CLI discoverability change exposes existing video descriptors without advancing H.2 or deferred Stage G.
 continuity_evidence:
-  - git_head: main is 50bede31c21f5e1972d3e697ff2dd4580701f3c0, the verified merge of PR 59 leading-trim MP4 passthrough
-  - release_pr: PR 60 tracks codex/release-0.4.0-prep against that main base
-  - verified_snapshot: release-prep head 116d1333d5b8af75c3a49fd8b337d7654d254ee3 passed CI run 33485588883 across GCC, Clang, sanitizers, FFmpeg-disabled, CLI integration, install, and installed-package consumers
-  - exact_head_ci: final exact-head CI remains mandatory after this worksheet evidence commit; PR checks are authoritative because recording the final SHA inside this file would itself move that SHA
-  - release_workflow: release/v* requires branch head to equal main, CMake/README/changelog version consistency, and publishes GitHub tag/release v<version>
-  - roadmap_issue: issue 10 is the unique exact-title CODEC v1.0 roadmap execution log; current code/tests/build/docs remain authoritative
+  - git_head: clean main at 15b869dff1ca161615baa478bf45134bc3540d95 before branch creation
+  - open_prs: none at task start
+  - exact_head_ci: all five GitHub check runs succeeded on the base head (GCC, Clang, sanitizers, FFmpeg-disabled, and publish)
+  - roadmap_issue: issue 10 is the unique exact-title CODEC v1.0 roadmap execution log; its initial body is historical, while current code/tests/build/docs remain authoritative
 roadmap_issue_title: CODEC v1.0 roadmap execution log
-scope: [docs, cli-version, package-version]
+scope: [other-profile, docs]
 touched_truth_classes: []
-current_behavior_verified_from: [main HEAD, CMakeLists.txt, src/cli/main.cpp, tests/cli_integration.sh, README.md, CHANGELOG.md, docs/releases/0.4.0.md, release workflow]
-new_capability_claim: none; v0.4.0 packages already-merged H.1 behavior and synchronizes release/version documentation.
-change_class: documentation_only
+current_behavior_verified_from: [main HEAD, include/codec/archive.hpp, include/codec/stream.hpp, src/cli/main.cpp, tests/cli_integration.sh, tests/video_cli_integration.sh, README.md, CHANGELOG.md]
+new_capability_claim: the CLI can list archive-order video stream descriptors as JSON Lines through `codec list videos ARCHIVE`.
+change_class: profile_specific_behavior
 verification:
-  release_configure: pass on verified snapshot 116d1333d5b8af75c3a49fd8b337d7654d254ee3; final-head rerun pending
-  release_build: pass on verified snapshot 116d1333d5b8af75c3a49fd8b337d7654d254ee3; final-head rerun pending
-  tests: pass on verified snapshot 116d1333d5b8af75c3a49fd8b337d7654d254ee3; final-head rerun pending
-  sanitizer_build: pass on verified snapshot 116d1333d5b8af75c3a49fd8b337d7654d254ee3; final-head rerun pending
-  sanitizer_tests: pass on verified snapshot 116d1333d5b8af75c3a49fd8b337d7654d254ee3; final-head rerun pending
-  ffmpeg_disabled: pass on verified snapshot 116d1333d5b8af75c3a49fd8b337d7654d254ee3; final-head rerun pending
-  install_and_package_consumer: pass on verified snapshot 116d1333d5b8af75c3a49fd8b337d7654d254ee3; final-head rerun pending
-  cli_version: pass; CLI integration verifies `codec --version` = `codec 0.4.0`
-  cli_help: pass; CLI integration verifies `CODEC 0.4.0` plus the release program description
-  cli_capabilities: pass; CLI integration verifies JSON `"version":"0.4.0"`
-  release_metadata: pass on verified snapshot; CMake project version, README machine-readable manifest, changelog 0.4.0 section, CLI expected version, and package version derive consistently
-  exact_head_ci: pending after this final worksheet evidence commit
+  base_release_configure: pass at 15b869dff1ca161615baa478bf45134bc3540d95
+  base_release_build: pass at 15b869dff1ca161615baa478bf45134bc3540d95
+  base_tests: pass; 4/4 CTest targets after regenerating one anomalous zero-byte build artifact
+  release_configure: pass with warnings-as-errors
+  release_build: pass
+  tests: pass; 4/4 CTest targets
+  sanitizer_build: pass with ASan/UBSan and warnings-as-errors
+  sanitizer_tests: the exact command is environment-blocked because LeakSanitizer cannot read `/proc/<pid>/task`; with only leak detection disabled, all 4/4 ASan/UBSan CTest targets pass
+  cli_capabilities: pass; existing 0.4.0 capability JSON is unchanged
+  targeted_proof: pass; old CLI failed at the missing list noun, the inverted-filter mutation failed on a feed-only archive, and the restored implementation passed the full CLI integration target
+  exact_head_ci: pending after branch publication
 review:
-  diff_scope: CMake version, one CLI help-description line, CLI version/description assertions, README, CHANGELOG, release guide, and worksheet only
-  compatibility: no archive/API/CLI command semantics change; versioned shared-library/package metadata remains SOVERSION 0 because it derives from CMake major version
-  description: README/release guide and CLI help describe CODEC as preservation-first multi-stream capture, CODA archival, and compressed-media preservation without claiming general transcoding, identity authentication, or remote-worker service behavior
-  performance_claim: no universal storage or throughput ratio; documentation describes structural removal of VFR1/PCM16 duplication and gives workload-specific examples only
+  diff_scope: CLI dispatch/output and help, two CLI integration scripts, README command table, changelog, and this worksheet
+  compatibility: `list feeds` remains unchanged; no archive bytes, C++ API, C ABI, truth semantics, ingest, or export behavior changes
+  description: `list videos` is a read-only projection of existing generic descriptors filtered by `StreamType::video`; it does not infer media state or expose captured source URIs
+  performance_claim: none
 ```
 
 ```text
-BEFORE: Merged main contains the H.1 EVP1/EAP1 compressed-media ingest/export implementation, but project/package/CLI metadata and release-facing documentation still identify the tree as 0.3.0 or unreleased H.1.
-AFTER: The same runtime behavior is packaged and documented consistently as CODEC 0.4.0; CMake/package metadata, `codec --help`, `codec --version`, `codec capabilities`, README, changelog, and release documentation agree on 0.4.0.
+BEFORE: `codec list feeds ARCHIVE` emits legacy feed descriptors, while the list command rejects `videos` and users must discover video stream IDs through other output or APIs.
+AFTER: `codec list videos ARCHIVE` emits one JSON object per `StreamType::video` descriptor in archive order, while `list feeds` retains its existing output and behavior.
 ```
 
 ```yaml
 proof:
-  regression_test: CLI integration verifies `--version`, help banner/description, and capabilities all use the CMake-provided 0.4.0 release identity
-  exactness_test: n/a; no S0/S1/D encoding change
-  compatibility_test: full unit/CLI/install/package-consumer matrix remains green, including legacy VFR1/PCM16 compatibility
-  failure_path_test: release workflow metadata validation remains able to reject inconsistent branch/version/changelog metadata
+  regression_test: video CLI integration ingests an audiovisual fixture, then verifies `list videos` emits exactly the primary video descriptor with hand-checked metadata and excludes the associated audio descriptor
+  exactness_test: n/a; no S0/S1/D encoding or extraction change
+  compatibility_test: existing `list feeds` assertions and the full Release/sanitizer suite remain green
+  failure_path_test: an unsupported list noun still exits 2 and reports both supported nouns
   security_test: n/a; no capture/network authorization change
   benchmark: n/a; no new performance claim
 ```
-
-Release documentation requirements:
-
-- [x] Present CODEC with a concise, accurate program description suitable for the README/release page.
-- [x] Explain preservation-first S0/S1/D semantics without implying inference or identity guarantees.
-- [x] Document the v0.4.0 H.1 storage model: exact source/container S0 plus compressed H.264 EVP1 (`0x0104`) and AAC EAP1 (`0x0103`).
-- [x] State that new H.1 ingest decodes video/audio only for validation and does not persist decoded VFR1 pixels or Video Profile PCM16.
-- [x] Document direct media and same-origin unencrypted HLS capture boundaries.
-- [x] Document MP4 packet remux, Annex-B `extract_extradata`, ADTS `aac_adtstoasc`, and representable AAC leading trim via MP4 edit lists.
-- [x] Document fail-closed cases and legacy VFR1 (`0x0101`) / Video PCM16 (`0x0102`) compatibility.
-- [x] Synchronize user-visible current-release 0.3.0 references to 0.4.0 while retaining historical 0.3.0 changelog/release references.
-- [x] Add durable `docs/releases/0.4.0.md` release notes/migration guidance.
-- [x] Verify the existing `release/v0.4.0` workflow contract before publication.
 
 ## 0. Work record
 

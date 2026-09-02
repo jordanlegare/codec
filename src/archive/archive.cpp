@@ -1012,6 +1012,10 @@ Result<std::vector<StreamProvenance>> CodaArchive::provenance(
 
 Result<std::vector<StreamProvenance>> CodaArchive::query_provenance(
     const ProvenanceQuery& query, ArchiveReadPolicy policy) const {
+  const std::vector<RecordInfo> no_records;
+  const std::vector<StreamProvenance> no_provenance;
+  auto valid = filter_archive_provenance(no_records, no_provenance, query);
+  if (!valid) return valid.error();
   if (snapshot_) {
     return filter_archive_provenance(snapshot_->records, snapshot_->provenance,
                                      query);

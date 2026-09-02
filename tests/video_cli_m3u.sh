@@ -106,6 +106,39 @@ grep -q '"ok":true' "$test_dir/plain-verify.json"
 "$codec_bin" list videos "$plain_archive" > "$test_dir/plain-videos.jsonl"
 grep -q '"label":"camera-a.mp4"' "$test_dir/plain-videos.jsonl"
 
+# A quoted wildcard is expanded by CODEC, not by the shell. Matching playlist
+# files are processed in lexical path order, and each playlist retains its own
+# relative-path base directory.
+mkdir -p "$playlist_dir/glob/a" "$playlist_dir/glob/b"
+cp "$fixture" "$playlist_dir/glob/a/wild-a.mp4"
+cp "$fixture" "$playlist_dir/glob/b/wild-b.mp4"
+printf '#EXTM3U\n#EXTINF:1,Wildcard Alpha\na/wild-a.mp4\n' \
+  > "$playlist_dir/glob/set-01.m3u"
+printf '#EXTM3U\n#EXTINF:1,Wildcard Beta\nb/wild-b.mp4\n' \
+  > "$playlist_dir/glob/set-02.m3u"
+glob_archive="$test_dir/glob.coda"
+"$codec_bin" video ingest \
+  --archive "$glob_archive" \
+  --m3u "$playlist_dir/glob/set-*.m3u" \
+  --start-ns 0 \
+  --maximum-frames 4 \
+  > "$test_dir/glob.jsonl" 2> "$test_dir/glob.stderr"
+"$codec_bin" verify "$glob_archive" --level full > "$test_dir/glob-verify.json"
+grep -q '"ok":true' "$test_dir/glob-verify.json"
+"$codec_bin" list videos "$glob_archive" > "$test_dir/glob-videos.jsonl"
+python3 - "$test_dir/glob.jsonl" "$test_dir/glob-videos.jsonl" <<'PY'
+import json
+import sys
+
+results = [json.loads(line) for line in open(sys.argv[1], encoding="utf-8") if line.strip()]
+if len(results) != 2 or [record["status"] for record in results] != ["ok", "ok"]:
+    raise SystemExit(f"unexpected wildcard M3U results: {results}")
+videos = [json.loads(line) for line in open(sys.argv[2], encoding="utf-8") if line.strip()]
+labels = [record["label"] for record in videos]
+if labels != ["Wildcard Alpha", "Wildcard Beta"]:
+    raise SystemExit(f"wildcard playlists were not processed lexically: {labels}")
+PY
+
 expect_status_2() {
   local stdout_path=$1
   local stderr_path=$2
@@ -119,6 +152,14 @@ expect_status_2() {
     return 1
   fi
 }
+
+# An unmatched wildcard is a CLI error and must not create an archive.
+unmatched_archive="$test_dir/unmatched.coda"
+expect_status_2 "$test_dir/unmatched.stdout" "$test_dir/unmatched.stderr" \
+  "$codec_bin" video ingest --archive "$unmatched_archive" \
+  --m3u "$playlist_dir/glob/missing-*.m3u"
+[ ! -e "$unmatched_archive" ]
+grep -qi 'matched no' "$test_dir/unmatched.stderr"
 
 # Duplicate normalized media entries are rejected before any archive is made,
 # even if EXTINF titles differ.

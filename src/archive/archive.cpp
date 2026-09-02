@@ -850,7 +850,7 @@ Result<RecordInfo> CodaWriter::append_stream_provenance(
     if (committed_input == impl_->records.end()) {
       return fail<RecordInfo>(
           ErrorCode::invalid_argument,
-          "provenance input must match an exact committed source record");
+          "provenance input must match an exact committed record");
     }
     if (committed_input->sequence >= committed_subject_record.sequence) {
       return fail<RecordInfo>(ErrorCode::invalid_argument,

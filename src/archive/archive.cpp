@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cerrno>
 #include <cstring>
@@ -30,6 +31,10 @@ constexpr std::array<std::byte, 4> record_magic{
     std::byte{'C'}, std::byte{'D'}, std::byte{'R'}, std::byte{'1'}};
 constexpr std::array<std::byte, 4> commit_magic{
     std::byte{'C'}, std::byte{'M'}, std::byte{'T'}, std::byte{'1'}};
+
+#ifdef CODEC_TESTING
+std::atomic<std::uint64_t> archive_scan_count{0U};
+#endif
 
 template <typename Integer>
 void put_le(std::span<std::byte> output, std::size_t offset, Integer value) {
@@ -148,6 +153,101 @@ Result<std::vector<StreamProvenance>> decode_archive_provenance(
   return output;
 }
 
+Result<std::vector<StreamDescriptor>> decode_archive_streams(
+    const CodaArchive& archive, const std::vector<RecordInfo>& record_list) {
+  std::vector<StreamDescriptor> output;
+  for (const auto& record : record_list) {
+    if (record.type == RecordType::stream_descriptor) {
+      auto payload = archive.read_payload(record);
+      if (!payload) return payload.error();
+      auto descriptor =
+          detail::decode_stream_descriptor(*payload, record.stream);
+      if (!descriptor) return descriptor.error();
+      output.push_back(std::move(*descriptor));
+      continue;
+    }
+    if (record.type == RecordType::feed_descriptor) {
+      auto payload = archive.read_payload(record);
+      if (!payload) return payload.error();
+      auto feed = detail::decode_feed_descriptor(*payload, record.stream);
+      if (!feed) return feed.error();
+      output.push_back(StreamDescriptor{
+          .id = feed->stream,
+          .type = StreamType::opaque,
+          .label = std::move(feed->label),
+          .source_id = std::move(feed->uri),
+          .payload_type = {},
+      });
+    }
+  }
+  return output;
+}
+
+Result<std::vector<StreamProvenance>> filter_archive_provenance(
+    const std::vector<RecordInfo>& record_list,
+    const std::vector<StreamProvenance>& semantic_records,
+    const ProvenanceQuery& query) {
+  if (query.subject_truth) {
+    switch (*query.subject_truth) {
+      case TruthClass::source_exact:
+      case TruthClass::state_exact:
+      case TruthClass::derived:
+        break;
+      default:
+        return fail<std::vector<StreamProvenance>>(
+            ErrorCode::invalid_argument,
+            "provenance query truth class is invalid");
+    }
+  }
+  if (query.subject) {
+    auto valid = validate_record_query(*query.subject);
+    if (!valid) return valid.error();
+  }
+  if (query.direct_input) {
+    auto valid = validate_record_query(*query.direct_input);
+    if (!valid) return valid.error();
+  }
+  const auto exact_record = [&record_list](const ProvenanceRecordLink& link) {
+    return std::find_if(
+        record_list.begin(), record_list.end(),
+        [&link](const RecordInfo& candidate) {
+          return candidate.sequence == link.sequence &&
+                 candidate.stream == link.stream &&
+                 candidate.type_code() == link.type &&
+                 candidate.hash == link.hash;
+        });
+  };
+  std::vector<StreamProvenance> output;
+  for (const auto& provenance_record : semantic_records) {
+    if (query.subject_truth &&
+        provenance_record.subject_truth != *query.subject_truth) {
+      continue;
+    }
+    const auto subject = exact_record(provenance_record.subject);
+    if (subject == record_list.end()) {
+      return fail<std::vector<StreamProvenance>>(
+          ErrorCode::archive_corrupt,
+          "provenance subject changed during query");
+    }
+    if (query.subject && !matches_record_query(*subject, *query.subject)) {
+      continue;
+    }
+    if (query.direct_input) {
+      const auto matches_input = std::any_of(
+          provenance_record.inputs.begin(), provenance_record.inputs.end(),
+          [&exact_record, &query, &record_list](
+              const ProvenanceRecordLink& link) {
+            const auto input = exact_record(link);
+            return input != record_list.end() &&
+                   matches_record_query(*input, *query.direct_input);
+          });
+      if (!matches_input) continue;
+    }
+    output.push_back(provenance_record);
+  }
+  return output;
+}
+
 Result<std::array<std::byte, coda_header_size>> make_header() {
   std::array<std::byte, coda_header_size> header{};
   std::copy(header_magic.begin(), header_magic.end(), header.begin());
@@ -220,6 +320,9 @@ struct ScanResult {
 };
 
 Result<ScanResult> scan_archive(const std::filesystem::path& path) {
+#ifdef CODEC_TESTING
+  archive_scan_count.fetch_add(1U, std::memory_order_relaxed);
+#endif
   std::error_code size_error;
   const auto file_size = std::filesystem::file_size(path, size_error);
   if (size_error) {
@@ -387,6 +490,44 @@ std::vector<std::byte> make_index_payload(
 }
 
 }  // namespace
+
+#ifdef CODEC_TESTING
+namespace detail {
+
+void reset_archive_scan_count_for_tests() noexcept {
+  archive_scan_count.store(0U, std::memory_order_relaxed);
+}
+
+std::uint64_t archive_scan_count_for_tests() noexcept {
+  return archive_scan_count.load(std::memory_order_relaxed);
+}
+
+}  // namespace detail
+#endif
+
+struct VerifiedArchiveSnapshot::Impl {
+  std::filesystem::path path;
+  VerificationReport verification;
+  std::vector<RecordInfo> records;
+  std::vector<StreamDescriptor> streams;
+  std::vector<StreamProvenance> provenance;
+};
+
+const VerificationReport& VerifiedArchiveSnapshot::verification() const noexcept {
+  return impl_->verification;
+}
+
+const std::vector<RecordInfo>& VerifiedArchiveSnapshot::records() const noexcept {
+  return impl_->records;
+}
+
+const std::vector<StreamDescriptor>& VerifiedArchiveSnapshot::streams() const noexcept {
+  return impl_->streams;
+}
+
+const std::vector<StreamProvenance>& VerifiedArchiveSnapshot::provenance() const noexcept {
+  return impl_->provenance;
+}
 
 struct CodaWriter::Impl {
   std::filesystem::path path;
@@ -723,6 +864,7 @@ Result<CodaArchive> CodaArchive::open(const std::filesystem::path& path) {
 }
 
 VerificationReport CodaArchive::verify() const {
+  if (snapshot_) return snapshot_->verification;
   auto scanned = scan_archive(path_);
   if (!scanned) {
     VerificationReport report;
@@ -735,6 +877,7 @@ VerificationReport CodaArchive::verify() const {
 
 Result<std::vector<RecordInfo>> CodaArchive::records(
     ArchiveReadPolicy policy) const {
+  if (snapshot_) return snapshot_->records;
   auto scanned = scan_archive(path_);
   if (!scanned) return scanned.error();
   if (!scanned->report.ok &&
@@ -795,34 +938,10 @@ Result<std::vector<FeedInfo>> CodaArchive::feeds(
 
 Result<std::vector<StreamDescriptor>> CodaArchive::streams(
     ArchiveReadPolicy policy) const {
+  if (snapshot_) return snapshot_->streams;
   auto record_list = records(policy);
   if (!record_list) return record_list.error();
-  std::vector<StreamDescriptor> output;
-  for (const auto& record : *record_list) {
-    if (record.type == RecordType::stream_descriptor) {
-      auto payload = read_payload(record);
-      if (!payload) return payload.error();
-      auto descriptor =
-          detail::decode_stream_descriptor(*payload, record.stream);
-      if (!descriptor) return descriptor.error();
-      output.push_back(std::move(*descriptor));
-      continue;
-    }
-    if (record.type == RecordType::feed_descriptor) {
-      auto payload = read_payload(record);
-      if (!payload) return payload.error();
-      auto feed = detail::decode_feed_descriptor(*payload, record.stream);
-      if (!feed) return feed.error();
-      output.push_back(StreamDescriptor{
-          .id = feed->stream,
-          .type = StreamType::opaque,
-          .label = std::move(feed->label),
-          .source_id = std::move(feed->uri),
-          .payload_type = {},
-      });
-    }
-  }
-  return output;
+  return decode_archive_streams(*this, *record_list);
 }
 
 Result<std::vector<StreamContinuityEvent>> CodaArchive::continuity(
@@ -885,6 +1004,7 @@ Result<std::vector<StreamContinuityEvent>> CodaArchive::continuity(
 
 Result<std::vector<StreamProvenance>> CodaArchive::provenance(
     ArchiveReadPolicy policy) const {
+  if (snapshot_) return snapshot_->provenance;
   auto record_list = records(policy);
   if (!record_list) return record_list.error();
   return decode_archive_provenance(*this, *record_list);
@@ -892,69 +1012,15 @@ Result<std::vector<StreamProvenance>> CodaArchive::provenance(
 
 Result<std::vector<StreamProvenance>> CodaArchive::query_provenance(
     const ProvenanceQuery& query, ArchiveReadPolicy policy) const {
-  if (query.subject_truth) {
-    switch (*query.subject_truth) {
-      case TruthClass::source_exact:
-      case TruthClass::state_exact:
-      case TruthClass::derived:
-        break;
-      default:
-        return fail<std::vector<StreamProvenance>>(
-            ErrorCode::invalid_argument,
-            "provenance query truth class is invalid");
-    }
-  }
-  if (query.subject) {
-    auto valid = validate_record_query(*query.subject);
-    if (!valid) return valid.error();
-  }
-  if (query.direct_input) {
-    auto valid = validate_record_query(*query.direct_input);
-    if (!valid) return valid.error();
+  if (snapshot_) {
+    return filter_archive_provenance(snapshot_->records, snapshot_->provenance,
+                                     query);
   }
   auto record_list = records(policy);
   if (!record_list) return record_list.error();
   auto semantic_records = decode_archive_provenance(*this, *record_list);
   if (!semantic_records) return semantic_records.error();
-  const auto exact_record = [&record_list](const ProvenanceRecordLink& link) {
-    return std::find_if(
-        record_list->begin(), record_list->end(),
-        [&link](const RecordInfo& candidate) {
-          return candidate.sequence == link.sequence &&
-                 candidate.stream == link.stream &&
-                 candidate.type_code() == link.type &&
-                 candidate.hash == link.hash;
-        });
-  };
-  std::vector<StreamProvenance> output;
-  for (const auto& provenance_record : *semantic_records) {
-    if (query.subject_truth &&
-        provenance_record.subject_truth != *query.subject_truth) {
-      continue;
-    }
-    const auto subject = exact_record(provenance_record.subject);
-    if (subject == record_list->end()) {
-      return fail<std::vector<StreamProvenance>>(
-          ErrorCode::archive_corrupt,
-          "provenance subject changed during query");
-    }
-    if (query.subject && !matches_record_query(*subject, *query.subject)) {
-      continue;
-    }
-    if (query.direct_input) {
-      const auto matches_input = std::any_of(
-          provenance_record.inputs.begin(), provenance_record.inputs.end(),
-          [&exact_record, &query, &record_list](
-              const ProvenanceRecordLink& link) {
-            const auto input = exact_record(link);
-            return input != record_list->end() &&
-                   matches_record_query(*input, *query.direct_input);
-          });
-      if (!matches_input) continue;
-    }
-    output.push_back(provenance_record);
-  }
-  return output;
+  return filter_archive_provenance(*record_list, *semantic_records, query);
 }
 
 Result<std::vector<std::byte>> CodaArchive::read_payload(
@@ -1088,6 +1154,43 @@ Result<std::vector<std::byte>> CodaArchive::extract_feed(
     output.insert(output.end(), payload->begin(), payload->end());
   }
   return output;
+}
+
+Result<VerifiedArchiveSnapshot> CodaArchive::verified_snapshot() const {
+  auto scanned = scan_archive(path_);
+  if (!scanned) return scanned.error();
+  if (!scanned->report.ok) {
+    return fail<VerifiedArchiveSnapshot>(scanned->report.error_code,
+                                         scanned->report.message);
+  }
+  if (!scanned->report.finalized) {
+    return fail<VerifiedArchiveSnapshot>(
+        ErrorCode::archive_corrupt,
+        "verified archive snapshot requires a finalized archive");
+  }
+
+  auto stream_list = decode_archive_streams(*this, scanned->records);
+  if (!stream_list) return stream_list.error();
+  auto provenance_list = decode_archive_provenance(*this, scanned->records);
+  if (!provenance_list) return provenance_list.error();
+
+  auto impl = std::make_shared<VerifiedArchiveSnapshot::Impl>();
+  impl->path = path_;
+  impl->verification = scanned->report;
+  impl->records = std::move(scanned->records);
+  impl->streams = std::move(*stream_list);
+  impl->provenance = std::move(*provenance_list);
+  return VerifiedArchiveSnapshot{std::move(impl)};
+}
+
+Result<CodaArchive> CodaArchive::with_verified_snapshot(
+    const VerifiedArchiveSnapshot& snapshot) const {
+  if (!snapshot.impl_ || snapshot.impl_->path != path_) {
+    return fail<CodaArchive>(
+        ErrorCode::invalid_argument,
+        "verified archive snapshot does not belong to this archive");
+  }
+  return CodaArchive{path_, snapshot.impl_};
 }
 
 Result<RepairReport> CodaArchive::repair(

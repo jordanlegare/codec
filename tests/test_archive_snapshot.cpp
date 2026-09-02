@@ -24,6 +24,9 @@ std::filesystem::path snapshot_test_path() {
 
 }  // namespace
 
+static_assert(sizeof(codec::CodaArchive) == sizeof(std::filesystem::path),
+              "verified snapshots must not add cache state to CodaArchive");
+
 TEST(archive_verified_snapshot_reuses_one_complete_scan) {
   const auto path = snapshot_test_path();
   std::error_code cleanup_error;
@@ -66,27 +69,24 @@ TEST(archive_verified_snapshot_reuses_one_complete_scan) {
   EXPECT_EQ(snapshot->streams().size(), 1U);
   EXPECT_EQ(snapshot->streams().front().id, stream);
 
-  auto view_result = archive.with_verified_snapshot(*snapshot);
-  EXPECT_TRUE(view_result);
-  auto view = std::move(*view_result);
-
-  const auto verification = view.verify();
-  EXPECT_TRUE(verification.ok);
-  auto records = view.records();
-  EXPECT_TRUE(records);
-  auto streams = view.streams();
-  EXPECT_TRUE(streams);
-  auto selected = view.query_records(codec::RecordQuery{
+  auto selected = snapshot->query_records(codec::RecordQuery{
       .stream = stream,
       .type = codec::record_type_code(codec::RecordType::source_bytes),
       .sequence = std::nullopt,
       .time = std::nullopt,
   });
   EXPECT_TRUE(selected);
-  auto provenance = view.provenance();
-  EXPECT_TRUE(provenance);
-  auto selected_provenance = view.query_provenance(codec::ProvenanceQuery{});
+  EXPECT_EQ(selected->size(), 1U);
+
+  auto selected_provenance =
+      snapshot->query_provenance(codec::ProvenanceQuery{});
   EXPECT_TRUE(selected_provenance);
+  EXPECT_TRUE(selected_provenance->empty());
+  EXPECT_EQ(codec::detail::archive_scan_count_for_tests(), 1U);
+
+  auto payload = archive.read_payload(selected->front());
+  EXPECT_TRUE(payload);
+  EXPECT_EQ(payload->size(), source.size());
   EXPECT_EQ(codec::detail::archive_scan_count_for_tests(), 1U);
 
   auto fresh_records = archive.records();

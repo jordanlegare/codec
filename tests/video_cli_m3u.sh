@@ -43,7 +43,7 @@ cp "$fixture" "$playlist_dir/sub/camera-b.mp4"
 
 # Extended M3U: BOM/CRLF, comments and blank lines are ignored; EXTINF titles
 # become labels; relative media paths resolve against the playlist directory;
-# command-level video options apply to every expanded ingest request.
+# command-level timing/options apply to entries that do not supply duration.
 printf '\357\273\277#EXTM3U\r\n# source set\r\n#EXTINF:1.0,Camera Alpha\r\ncamera-a.mp4\r\n\r\n# no EXTINF for this entry\r\nsub/camera-b.mp4\r\n' \
   > "$playlist_dir/cameras.m3u8"
 
@@ -51,6 +51,8 @@ archive="$test_dir/cameras.coda"
 "$codec_bin" video ingest \
   --archive "$archive" \
   --m3u "$playlist_dir/cameras.m3u8" \
+  --start-ns 0 \
+  --end-ns 1000000000 \
   --layout gray8 \
   --maximum-frames 4 \
   --maximum-source-bytes 1048576 \
@@ -87,13 +89,16 @@ if labels != ["Camera Alpha", "camera-b.mp4"]:
     raise SystemExit(f"unexpected M3U-derived labels: {labels}")
 PY
 
-# Plain M3U without an extended header or durations is also accepted. Relative
-# paths still resolve from the playlist location and the basename is the label.
+# Plain M3U without an extended header or durations is accepted when the
+# command supplies the existing video-ingest interval. Relative paths still
+# resolve from the playlist location and the basename is the label.
 printf '# plain playlist\ncamera-a.mp4\n' > "$playlist_dir/plain.m3u"
 plain_archive="$test_dir/plain.coda"
 "$codec_bin" video ingest \
   --archive "$plain_archive" \
   --m3u "$playlist_dir/plain.m3u" \
+  --start-ns 0 \
+  --end-ns 1000000000 \
   --maximum-frames 4 \
   > "$test_dir/plain.jsonl" 2> "$test_dir/plain.stderr"
 "$codec_bin" verify "$plain_archive" --level full > "$test_dir/plain-verify.json"

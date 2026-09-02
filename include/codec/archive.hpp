@@ -215,6 +215,25 @@ class CodaWriter {
   std::unique_ptr<Impl> impl_;
 };
 
+class CodaArchive;
+
+// Immutable command-scoped metadata produced by one complete archive scan.
+// Payload bytes remain on disk and are still individually verified when read.
+class VerifiedArchiveSnapshot {
+ public:
+  const VerificationReport& verification() const noexcept;
+  const std::vector<RecordInfo>& records() const noexcept;
+  const std::vector<StreamDescriptor>& streams() const noexcept;
+  const std::vector<StreamProvenance>& provenance() const noexcept;
+
+ private:
+  struct Impl;
+  explicit VerifiedArchiveSnapshot(std::shared_ptr<const Impl> impl)
+      : impl_(std::move(impl)) {}
+  std::shared_ptr<const Impl> impl_;
+  friend class CodaArchive;
+};
+
 class CodaArchive {
  public:
   static Result<CodaArchive> open(const std::filesystem::path& path);
@@ -255,13 +274,24 @@ class CodaArchive {
   Result<std::vector<std::byte>> extract_feed(
       std::string_view label,
       ArchiveReadPolicy policy = ArchiveReadPolicy::complete_archive) const;
+  // Builds one finalized, fully verified metadata snapshot without retaining
+  // media payload bytes.
+  Result<VerifiedArchiveSnapshot> verified_snapshot() const;
+  // Returns a read-only archive handle whose metadata queries reuse the
+  // supplied snapshot. The snapshot must originate from this archive path.
+  Result<CodaArchive> with_verified_snapshot(
+      const VerifiedArchiveSnapshot& snapshot) const;
   static Result<RepairReport> repair(const std::filesystem::path& source,
                                      const std::filesystem::path& destination);
   const std::filesystem::path& path() const noexcept { return path_; }
 
  private:
-  explicit CodaArchive(std::filesystem::path path) : path_(std::move(path)) {}
+  explicit CodaArchive(
+      std::filesystem::path path,
+      std::shared_ptr<const VerifiedArchiveSnapshot::Impl> snapshot = {})
+      : path_(std::move(path)), snapshot_(std::move(snapshot)) {}
   std::filesystem::path path_;
+  std::shared_ptr<const VerifiedArchiveSnapshot::Impl> snapshot_;
 };
 
 }  // namespace codec

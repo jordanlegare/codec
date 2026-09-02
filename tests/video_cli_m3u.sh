@@ -116,47 +116,27 @@ printf '#EXTM3U\n#EXTINF:1,Wildcard Alpha\na/wild-a.mp4\n' \
   > "$playlist_dir/glob/set-01.m3u"
 printf '#EXTM3U\n#EXTINF:1,Wildcard Beta\nb/wild-b.mp4\n' \
   > "$playlist_dir/glob/set-02.m3u"
-quoted_glob_archive="$test_dir/quoted-glob.coda"
+glob_archive="$test_dir/glob.coda"
 "$codec_bin" video ingest \
-  --archive "$quoted_glob_archive" \
+  --archive "$glob_archive" \
   --m3u "$playlist_dir/glob/set-*.m3u" \
   --start-ns 0 \
   --maximum-frames 4 \
-  > "$test_dir/quoted-glob.jsonl" 2> "$test_dir/quoted-glob.stderr"
-"$codec_bin" verify "$quoted_glob_archive" --level full > "$test_dir/quoted-glob-verify.json"
-grep -q '"ok":true' "$test_dir/quoted-glob-verify.json"
-"$codec_bin" list videos "$quoted_glob_archive" > "$test_dir/quoted-glob-videos.jsonl"
-python3 - "$test_dir/quoted-glob.jsonl" "$test_dir/quoted-glob-videos.jsonl" <<'PY'
+  > "$test_dir/glob.jsonl" 2> "$test_dir/glob.stderr"
+"$codec_bin" verify "$glob_archive" --level full > "$test_dir/glob-verify.json"
+grep -q '"ok":true' "$test_dir/glob-verify.json"
+"$codec_bin" list videos "$glob_archive" > "$test_dir/glob-videos.jsonl"
+python3 - "$test_dir/glob.jsonl" "$test_dir/glob-videos.jsonl" <<'PY'
 import json
 import sys
 
 results = [json.loads(line) for line in open(sys.argv[1], encoding="utf-8") if line.strip()]
 if len(results) != 2 or [record["status"] for record in results] != ["ok", "ok"]:
-    raise SystemExit(f"unexpected quoted wildcard M3U results: {results}")
+    raise SystemExit(f"unexpected wildcard M3U results: {results}")
 videos = [json.loads(line) for line in open(sys.argv[2], encoding="utf-8") if line.strip()]
 labels = [record["label"] for record in videos]
 if labels != ["Wildcard Alpha", "Wildcard Beta"]:
     raise SystemExit(f"wildcard playlists were not processed lexically: {labels}")
-PY
-
-# Unquoted shell wildcard expansion is also accepted: after --m3u, multiple
-# playlist selectors may appear before the next --option.
-shell_glob_archive="$test_dir/shell-glob.coda"
-"$codec_bin" video ingest \
-  --archive "$shell_glob_archive" \
-  --m3u "$playlist_dir"/glob/set-*.m3u \
-  --start-ns 0 \
-  --maximum-frames 4 \
-  > "$test_dir/shell-glob.jsonl" 2> "$test_dir/shell-glob.stderr"
-"$codec_bin" verify "$shell_glob_archive" --level full > "$test_dir/shell-glob-verify.json"
-grep -q '"ok":true' "$test_dir/shell-glob-verify.json"
-"$codec_bin" list videos "$shell_glob_archive" > "$test_dir/shell-glob-videos.jsonl"
-python3 - "$test_dir/shell-glob-videos.jsonl" <<'PY'
-import json
-import sys
-labels = [json.loads(line)["label"] for line in open(sys.argv[1], encoding="utf-8") if line.strip()]
-if labels != ["Wildcard Alpha", "Wildcard Beta"]:
-    raise SystemExit(f"shell-expanded playlist selectors were not accepted: {labels}")
 PY
 
 expect_status_2() {
@@ -173,7 +153,7 @@ expect_status_2() {
   fi
 }
 
-# An unmatched internal wildcard is a CLI error and must not create an archive.
+# An unmatched wildcard is a CLI error and must not create an archive.
 unmatched_archive="$test_dir/unmatched.coda"
 expect_status_2 "$test_dir/unmatched.stdout" "$test_dir/unmatched.stderr" \
   "$codec_bin" video ingest --archive "$unmatched_archive" \

@@ -1,6 +1,8 @@
 #include "ffmpeg_aac_trim_mux.hpp"
 #include "ffmpeg_packet_mux.hpp"
 
+#include "../archive/verified_snapshot_scope.hpp"
+
 #define export_verified_video_mp4 export_verified_video_mp4_video_only
 #include "ffmpeg_export.cpp"
 #undef export_verified_video_mp4
@@ -165,6 +167,15 @@ Result<VerifiedVideoMp4Export> export_verified_video_mp4(
                                      : pcm16_audio->front().provenance;
   video_only->audio_packet_passthrough = packet_passthrough;
   return video_only;
+}
+
+Result<VerifiedVideoMp4Export> export_verified_video_mp4(
+    const CodaArchive& archive, const VerifiedArchiveSnapshot& snapshot,
+    const VideoFrameQuery& query, VideoMp4ExportLimits limits) {
+  auto scope = codec::detail::activate_verified_archive_snapshot(archive,
+                                                                 snapshot);
+  if (!scope) return scope.error();
+  return export_verified_video_mp4(archive, query, limits);
 }
 
 }  // namespace codec::profiles::video

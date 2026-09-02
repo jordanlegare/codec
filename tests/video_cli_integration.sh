@@ -33,6 +33,7 @@ base64 --decode "$script_dir/fixtures/video_audio_mono.mp4.b64" > "$audio_fixtur
 "$codec_bin" --help > "$test_dir/help.txt"
 grep -Fq 'codec video ingest' "$test_dir/help.txt"
 grep -Fq 'codec video export' "$test_dir/help.txt"
+grep -Fq 'codec list videos ARCHIVE' "$test_dir/help.txt"
 grep -Fq -- 'codec video ingest --archive FILE' "$test_dir/help.txt"
 grep -Fq -- '--maximum-hls-resources' "$test_dir/help.txt"
 grep -Fq -- '--maximum-hls-resource-bytes' "$test_dir/help.txt"
@@ -189,6 +190,26 @@ grep -q '"audio_present":true' "$test_dir/audio-ingest.json"
 grep -q '"audio_state_exact":true' "$test_dir/audio-ingest.json"
 "$codec_bin" verify "$audio_archive" --level full > "$test_dir/audio-verify.json"
 grep -q '"ok":true' "$test_dir/audio-verify.json"
+"$codec_bin" list videos "$audio_archive" > "$test_dir/audio-videos.jsonl"
+python3 - "$test_dir/audio-videos.jsonl" "$test_dir/audio-ingest.json" <<'PY'
+import json
+import sys
+
+lines = [line for line in open(sys.argv[1], encoding="utf-8") if line.strip()]
+if len(lines) != 1:
+    raise SystemExit(f"expected one audiovisual video descriptor, got {len(lines)}")
+record = json.loads(lines[0])
+ingest = json.load(open(sys.argv[2], encoding="utf-8"))
+expected = {
+    "label": "camera-audio",
+    "stream_id": ingest["stream_id"],
+    "source_id": "codec.video.cli",
+    "payload_type": "application/octet-stream",
+    "fidelity": "S0",
+}
+if record != expected:
+    raise SystemExit(f"unexpected audiovisual video descriptor: {record!r}")
+PY
 
 audio_stream=$(python3 - "$test_dir/audio-ingest.json" <<'PY'
 import json
@@ -256,6 +277,26 @@ open(sys.argv[3], "w", encoding="utf-8").write("\n".join(streams) + "\n")
 PY
 "$codec_bin" verify "$multi_archive" --level full > "$test_dir/multi-verify.json"
 grep -q '"ok":true' "$test_dir/multi-verify.json"
+"$codec_bin" list videos "$multi_archive" > "$test_dir/multi-videos.jsonl"
+python3 - "$test_dir/multi-videos.jsonl" "$test_dir/multi.jsonl" <<'PY'
+import json
+import sys
+
+listed = [json.loads(line) for line in open(sys.argv[1], encoding="utf-8") if line.strip()]
+ingested = [json.loads(line) for line in open(sys.argv[2], encoding="utf-8") if line.strip()]
+expected = [
+    {
+        "label": label,
+        "stream_id": record["stream_id"],
+        "source_id": "codec.video.cli",
+        "payload_type": "application/octet-stream",
+        "fidelity": "S0",
+    }
+    for label, record in zip(("camera-a", "camera-b"), ingested, strict=True)
+]
+if listed != expected:
+    raise SystemExit(f"video descriptors are missing, reordered, or malformed: {listed!r}")
+PY
 mapfile -t multi_streams < "$test_dir/multi-streams.txt"
 for index in 0 1; do
   output="$test_dir/multi-$index.mp4"

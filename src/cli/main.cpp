@@ -50,6 +50,7 @@ void usage(std::ostream& output) {
       << "  codec inspect ARCHIVE\n"
       << "  codec verify ARCHIVE [--level full]\n"
       << "  codec list feeds ARCHIVE\n"
+      << "  codec list videos ARCHIVE\n"
       << "  codec extract ARCHIVE --feed LABEL [--fidelity source-exact] [--follow] --output FILE\n"
       << "  codec repair ARCHIVE --output FILE\n"
       << "\n"
@@ -644,18 +645,35 @@ int verify_command(const Strings& arguments, bool inspect) {
 }
 
 int list_command(const Strings& arguments) {
-  if (arguments.size() < 2 || arguments.front() != "feeds") {
-    std::cerr << "codec: list supports: list feeds ARCHIVE\n";
+  if (arguments.size() < 2 ||
+      (arguments.front() != "feeds" && arguments.front() != "videos")) {
+    std::cerr << "codec: list supports: list feeds ARCHIVE, list videos ARCHIVE\n";
     return 2;
   }
   auto archive = codec::CodaArchive::open(std::string{arguments[1]});
   if (!archive) return print_error(archive.error());
-  auto feeds = archive->feeds();
-  if (!feeds) return print_error(feeds.error());
-  for (const auto& feed : *feeds) {
-    std::cout << "{\"label\":\"" << codec::detail::json_escape(feed.label)
-              << "\",\"stream_id\":\"" << codec::to_string(feed.stream)
-              << "\",\"uri\":\"" << codec::detail::json_escape(feed.uri)
+  if (arguments.front() == "feeds") {
+    auto feeds = archive->feeds();
+    if (!feeds) return print_error(feeds.error());
+    for (const auto& feed : *feeds) {
+      std::cout << "{\"label\":\"" << codec::detail::json_escape(feed.label)
+                << "\",\"stream_id\":\"" << codec::to_string(feed.stream)
+                << "\",\"uri\":\"" << codec::detail::json_escape(feed.uri)
+                << "\",\"fidelity\":\"S0\"}\n";
+    }
+    return 0;
+  }
+
+  auto streams = archive->streams();
+  if (!streams) return print_error(streams.error());
+  for (const auto& stream : *streams) {
+    if (stream.type != codec::StreamType::video) continue;
+    std::cout << "{\"label\":\"" << codec::detail::json_escape(stream.label)
+              << "\",\"stream_id\":\"" << codec::to_string(stream.id)
+              << "\",\"source_id\":\""
+              << codec::detail::json_escape(stream.source_id)
+              << "\",\"payload_type\":\""
+              << codec::detail::json_escape(stream.payload_type)
               << "\",\"fidelity\":\"S0\"}\n";
   }
   return 0;

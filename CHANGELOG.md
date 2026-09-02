@@ -5,6 +5,7 @@ All notable changes use semantic versioning.
 ## Unreleased
 
 - Add `codec list videos ARCHIVE` as the Video Profile counterpart to `codec list feeds ARCHIVE`. The command emits archive-order JSON Lines for `StreamType::video` descriptors with stable stream ID, label, source ID, payload type, and S0 fidelity while ignoring non-video descriptors; no archive bytes, ingest/export behavior, C++ API, C ABI, or S0/S1/D semantics change.
+- Optimize `codec video export ARCHIVE --all --output-dir DIR` to build one command-scoped verified archive snapshot and reuse its record, descriptor, and provenance metadata across all video exports instead of repeatedly rescanning and re-verifying the complete CODA archive for each stream. Selected payloads are still re-read and SHA-256 checked from disk; `CodaArchive` remains path-only, single-stream export keeps fresh-verification behavior, and no universal wall-clock speedup is claimed.
 
 ## 0.4.0 — 2026-09-01
 

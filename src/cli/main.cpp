@@ -253,6 +253,7 @@ int video_export_all_command(
     std::string_view archive_path, const Strings& arguments,
     const VideoExportCliLimits& limits,
     const codec::CodaArchive& archive,
+    const codec::VerifiedArchiveSnapshot& snapshot,
     const std::vector<codec::StreamDescriptor>& descriptors) {
   namespace video = codec::profiles::video;
 
@@ -328,7 +329,7 @@ int video_export_all_command(
     const auto output_path = output_dir / basename;
 
     auto exported = video::export_verified_video_mp4(
-        archive,
+        archive, snapshot,
         video::VideoFrameQuery{
             .stream = descriptor.id,
             .time = std::nullopt,
@@ -383,13 +384,16 @@ int video_export_command(const Strings& arguments) {
 
   auto archive = codec::CodaArchive::open(std::string{archive_path});
   if (!archive) return print_error(archive.error());
-  auto descriptors = archive->streams();
-  if (!descriptors) return print_error(descriptors.error());
 
   if (flag(tail, "--all")) {
+    auto snapshot = archive->verified_snapshot();
+    if (!snapshot) return print_error(snapshot.error());
     return video_export_all_command(archive_path, tail, *limits, *archive,
-                                    *descriptors);
+                                    *snapshot, snapshot->streams());
   }
+
+  auto descriptors = archive->streams();
+  if (!descriptors) return print_error(descriptors.error());
 
   if (option(tail, "--output-dir")) {
     std::cerr << "codec: video export --output-dir requires --all\n";

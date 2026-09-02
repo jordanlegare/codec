@@ -215,8 +215,6 @@ class CodaWriter {
   std::unique_ptr<Impl> impl_;
 };
 
-class CodaArchive;
-
 // Immutable command-scoped metadata produced by one complete archive scan.
 // Payload bytes remain on disk and are still individually verified when read.
 class VerifiedArchiveSnapshot {
@@ -225,6 +223,10 @@ class VerifiedArchiveSnapshot {
   const std::vector<RecordInfo>& records() const noexcept;
   const std::vector<StreamDescriptor>& streams() const noexcept;
   const std::vector<StreamProvenance>& provenance() const noexcept;
+  Result<std::vector<RecordInfo>> query_records(const RecordQuery& query) const;
+  Result<std::vector<StreamProvenance>> query_provenance(
+      const ProvenanceQuery& query) const;
+  const std::filesystem::path& path() const noexcept;
 
  private:
   struct Impl;
@@ -277,21 +279,13 @@ class CodaArchive {
   // Builds one finalized, fully verified metadata snapshot without retaining
   // media payload bytes.
   Result<VerifiedArchiveSnapshot> verified_snapshot() const;
-  // Returns a read-only archive handle whose metadata queries reuse the
-  // supplied snapshot. The snapshot must originate from this archive path.
-  Result<CodaArchive> with_verified_snapshot(
-      const VerifiedArchiveSnapshot& snapshot) const;
   static Result<RepairReport> repair(const std::filesystem::path& source,
                                      const std::filesystem::path& destination);
   const std::filesystem::path& path() const noexcept { return path_; }
 
  private:
-  explicit CodaArchive(
-      std::filesystem::path path,
-      std::shared_ptr<const VerifiedArchiveSnapshot::Impl> snapshot = {})
-      : path_(std::move(path)), snapshot_(std::move(snapshot)) {}
+  explicit CodaArchive(std::filesystem::path path) : path_(std::move(path)) {}
   std::filesystem::path path_;
-  std::shared_ptr<const VerifiedArchiveSnapshot::Impl> snapshot_;
 };
 
 }  // namespace codec
